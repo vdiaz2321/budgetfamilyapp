@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { useMounted } from "@/lib/use-mounted";
-import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
+import { KINDS_WITH_DUE, canMoveBetweenKinds, type CategoryKind } from "@/lib/categories";
 import {
   coverOverspend,
   deleteSubcategory,
@@ -415,7 +415,7 @@ function ItemGroupSelect({
 }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const compatible = groupOptions.filter((group) => group.kind === kind);
+  const compatible = groupOptions.filter((group) => canMoveBetweenKinds(kind, group.kind));
   if (compatible.length < 2) return null;
 
   return (

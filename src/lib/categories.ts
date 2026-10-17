@@ -17,6 +17,19 @@ export type CategoryKind = (typeof CATEGORY_KINDS)[number]["kind"];
 // upcoming-due card on Budget.
 export const KINDS_WITH_DUE: CategoryKind[] = ["bills", "expenses", "debt"];
 
+/**
+ * Whether a budget item can move from a group of one type to another. Bills
+ * and Expenses are both plain spending, so an item crosses freely (Federal
+ * Taxes from Bills into a Taxes group set up as Expenses). Income, Savings
+ * and Debt items carry links — paychecks, funds, loans — so they stay in
+ * their own type.
+ */
+export function canMoveBetweenKinds(from: CategoryKind, to: CategoryKind): boolean {
+  if (from === to) return true;
+  const spending = (k: CategoryKind) => k === "bills" || k === "expenses";
+  return spending(from) && spending(to);
+}
+
 export type CategoryRow = {
   id: string;
   name: string;

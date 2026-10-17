@@ -17,8 +17,6 @@ import {
   high3Window,
   incomeForYear,
   inflateTo,
-  payStop,
-  withPayEnds,
   investShareOfNew,
   projectFi,
   rentalForYear,
@@ -62,6 +60,8 @@ export type FiPlan = {
   withdrawalRatePct: number;
   /** When withdrawals at that rate start; null = the military retirement year. */
   withdrawStartYear: number | null;
+  /** Spouse's expected retirement year; null = not set. */
+  spouseRetireYear: number | null;
   /** Pension + VA + Social Security per year. */
   guaranteedIncomeCents: number | null;
   /** First year that income arrives; null means it already does. */
@@ -207,12 +207,19 @@ export function FiSection({
   // table exactly.
   const startCents =
     projection.find((p) => p.year === thisYear)?.eoyCents || portfolioCents;
-  // The first FULL year of military retirement: a November retirement year
-  // holds ten months of active-duty pay and only two of retired pay.
-  const firstFullRetiredYear =
+  // The first FULL year with no work at all. A military retirement in
+  // November leaves ten months of active-duty pay in that year; a later
+  // "stop working" year (a GS or civilian job after the military, or no
+  // military at all) wins, since pay runs until then.
+  const militaryFullYear =
     plan.targetRetireYear == null
-      ? thisYear + 1
+      ? null
       : plan.targetRetireYear + ((plan.targetRetireMonth ?? 1) > 1 ? 1 : 0);
+  const stopWorkYear = plan.withdrawStartYear ?? plan.targetRetireYear;
+  const firstFullRetiredYear =
+    stopWorkYear == null
+      ? thisYear + 1
+      : Math.max(militaryFullYear ?? stopWorkYear, plan.withdrawStartYear ?? stopWorkYear);
 
   // Military retired pay from the DFAS High-3 formula; COLAs on top when on.
   const pension = estimatePension(
@@ -227,11 +234,9 @@ export function FiSection({
     },
   );
   const colaWhen = { thisYear, birthYear: plan.birthYear };
-  // The lines as the plan runs them: Pay with no end stops when you stop working.
-  const modelLines = withPayEnds(
-    plan.incomeLines,
-    payStop(plan.targetRetireYear, plan.targetRetireMonth, plan.withdrawStartYear),
-  );
+  // A blank end means the line never stops — no end is guessed from a
+  // retirement year (Victor, 2026-10-17).
+  const modelLines = plan.incomeLines;
   // Income is gross: taxes are budgeted as spending.
   const incomeIn = (year: number) =>
     incomeForYear(year, pension, plan.targetRetireYear, modelLines, 0, plan.cola, colaWhen);
@@ -315,7 +320,7 @@ export function FiSection({
   const [incomeYearPick, setIncomeYear] = useState<number | null>(null);
   const incomeYear = Math.max(firstFullRetiredYear, incomeYearPick ?? firstFullRetiredYear);
   const retireIncome = (() => {
-    if (!plan.targetRetireYear) return null;
+    if (stopWorkYear == null) return null;
     const base = incomeIn(incomeYear);
     const rent = rentIn(incomeYear);
     const parts = [
@@ -510,7 +515,7 @@ export function FiSection({
               investments have to do about the gap, and the family's income if
               Victor dies first. Each reads top to bottom as one sum. */}
           <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {retireIncome && plan.targetRetireYear ? (
+            {retireIncome ? (
               <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
                 {/* A year picker in the title, like the survivor card's. */}
                 <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-lg">
@@ -526,7 +531,7 @@ export function FiSection({
                     ))}
                   </select>
                   {plan.birthYear ? `· age ${incomeYear - plan.birthYear}` : ""}
-                  {incomeYear === firstFullRetiredYear && incomeYear !== plan.targetRetireYear ? (
+                  {incomeYear === firstFullRetiredYear ? (
                     <span className="block basis-full text-xs font-normal sm:text-sm">First full year retired</span>
                   ) : null}
                 </p>
@@ -545,7 +550,7 @@ export function FiSection({
                       <IncomeRow
                         key={i}
                         label={part.name}
-                        note={[partNote(part), retireIncome.taxMonthly > 0 ? "before tax" : ""].filter(Boolean).join(", ") || undefined}
+                        note={retireIncome.taxMonthly > 0 ? "before tax" : undefined}
                         monthly={part.monthlyBeforeTaxCents}
                         yearly={part.monthlyBeforeTaxCents * (part.months ?? 12)}
                         currency={currency}
@@ -562,7 +567,6 @@ export function FiSection({
                     ) : null}
                     <IncomeRow
                       label={retireIncome.taxMonthly > 0 ? "Income after tax" : "Total income"}
-                      note={retireIncome.parts.some((p) => (p.months ?? 12) < 12) ? "monthly = yearly ÷ 12" : undefined}
                       monthly={Math.round(retireIncome.afterTaxCents / 12)}
                       yearly={retireIncome.afterTaxCents}
                       currency={currency}
@@ -591,9 +595,6 @@ export function FiSection({
                       );
                     })()}
                   </ul>
-                )}
-                {pension ? null : (
-                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">Add service start and base pay in Edit Future Projections.</p>
                 )}
               </div>
             ) : null}
@@ -699,7 +700,7 @@ export function FiSection({
                   <IncomeRow
                     key={i}
                     label={part.name}
-                    note={[partNote(part), part.monthlyBeforeTaxCents !== part.monthlyAfterTaxCents ? "before tax" : ""].filter(Boolean).join(", ") || undefined}
+                    note={part.monthlyBeforeTaxCents !== part.monthlyAfterTaxCents ? "before tax" : undefined}
                     monthly={part.monthlyBeforeTaxCents}
                     yearly={part.monthlyBeforeTaxCents * (part.months ?? 12)}
                     currency={currency}
@@ -1601,7 +1602,7 @@ function PlanModal({
         taxable: true,
       });
     }
-    return byLineDates(saved, payStop(plan.targetRetireYear, plan.targetRetireMonth, plan.withdrawStartYear), thisYear);
+    return byLineDates(saved, thisYear);
   });
   const [rentalDrafts, setRentalDrafts] = useState<RentalDraft[]>(() =>
     plan.rentalRows.map((r) => ({
@@ -1713,8 +1714,8 @@ function PlanModal({
   };
 
   // The first January each income actually rises, from its own start:
-  // retired pay after the retirement month, VA from its start, Social
-  // Security from age 62. Only what this plan has, so a household without
+  // retired pay after the retirement month, VA and Social Security the
+  // January after they start. Only what this plan has, so a household without
   // military service sees no retired-pay switch.
   const colaWhen = { thisYear, birthYear: toYear(birthYear) };
   const colaAll = { pct: 0, byYear: {}, military: true, va: true, socialSecurity: true };
@@ -1752,13 +1753,6 @@ function PlanModal({
             : `Retired pay: 0% in ${estimate.retireYear + 1} (${mon} retirement), full from ${estimate.retireYear + 2}.`;
         })()
       : null,
-    ssLineDraft && colaStarts.socialSecurity != null && toYear(ssLineDraft.startYear)! > colaStarts.socialSecurity
-      ? `Social Security: COLAs from ${
-          toYear(birthYear) != null && toYear(birthYear)! + 63 === colaStarts.socialSecurity
-            ? `age 62 (${colaStarts.socialSecurity})`
-            : colaStarts.socialSecurity
-        }, paid from ${toYear(ssLineDraft.startYear)}.`
-      : null,
   ].filter((n): n is string => n != null);
 
   // A box per year from the first COLA through next year's, the newest one
@@ -1771,10 +1765,7 @@ function PlanModal({
 
   const updateLine = (key: string, patch: Partial<LineDraft>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-  // When a Pay line with a blank end stops, from the dates as typed right now:
-  // the month before military retired pay, else when withdrawals start.
   const [withdrawStartDraft, setWithdrawStartDraft] = useState(plan.withdrawStartYear?.toString() ?? "");
-  const stopNow = payStop(toYear(retireYear), retireMonth ? Number(retireMonth) : null, toYear(withdrawStartDraft));
   const addLine = (kind: IncomeLineKind) =>
     setLines((prev) => [
       ...prev,
@@ -1785,7 +1776,7 @@ function PlanModal({
         name: "",
         kind,
         monthly: "",
-        // Pay runs from now and, left blank, stops when you stop working.
+        // Pay runs from now; a blank end never stops.
         ...(kind === "pay"
           ? { startYear: "", startMonth: "", endYear: "", endMonth: "" }
           : // Retired pay's own start month, so VA lines up with it by default.
@@ -1929,13 +1920,34 @@ function PlanModal({
       >
         {/* Also up here, so a rejected save from the top Save is seen. */}
         {error ? <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p> : null}
-        <SectionHead title="Info Data About You" open={isOpen("info")} onToggle={() => toggleSection("info")} />
+        <SectionHead title="General Data About You" open={isOpen("info")} onToggle={() => toggleSection("info")} />
         <div className={isOpen("info") ? "contents" : "hidden"}>
         <Field label="Birth year" hint="Used to show your age on the chart.">
           <input name="birthYear" inputMode="numeric" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} className={inputClass} />
         </Field>
-        <Field label="Plan until age" hint="How far the plan runs, and the last age shown under What is expected.">
+        <Field label="Plan until age" hint="Last age the plan covers.">
           <input name="longevityAge" inputMode="numeric" defaultValue={plan.longevityAge} className={inputClass} />
+        </Field>
+        {/* The year all work stops — military, GS or civilian. Up here, not
+            under the rates or the military section: it is the plan's own
+            retirement, and a military retirement can be followed by a second
+            career (Victor, 2026-10-17). */}
+        <Field label="Expected Retirement Year">
+          <input
+            name="withdrawStartYear"
+            inputMode="numeric"
+            value={withdrawStartDraft}
+            onChange={(e) => setWithdrawStartDraft(e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Spouse Expected Retirement Year">
+          <input
+            name="spouseRetireYear"
+            inputMode="numeric"
+            defaultValue={plan.spouseRetireYear ?? ""}
+            className={inputClass}
+          />
         </Field>
         </div>
 
@@ -1961,7 +1973,7 @@ function PlanModal({
               // Re-sorted once you leave the row, not while typing a year.
               onBlur={(e) => {
                 if (!e.currentTarget.contains(e.relatedTarget as Node | null))
-                  setLines((prev) => byLineDates(prev, stopNow, thisYear));
+                  setLines((prev) => byLineDates(prev, thisYear));
               }}
               className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(7rem,1fr)_10rem_11rem_8rem_8.5rem_8.5rem_auto]">
               {/* Your own name ("Mil Pay"); the type decides how it is
@@ -2049,7 +2061,7 @@ function PlanModal({
                   onMonth={(v) => updateLine(l.key, { endMonth: v })}
                   year={l.endYear}
                   onYear={(v) => updateLine(l.key, { endYear: v })}
-                  yearPlaceholder={l.kind === "pay" && stopNow ? String(stopNow.endYear) : "Never"}
+                  yearPlaceholder="Never"
                 />
               </LineField>
               <button
@@ -2059,21 +2071,13 @@ function PlanModal({
               >
                 Remove
               </button>
-              {/* A year's worth, and when a blank Pay end stops it — in words
-                  that fit anyone, served or not. */}
-              {money(l.monthly) > 0 || (l.kind === "pay" && !l.endYear.trim()) ? (
+              {/* A year's worth. */}
+              {money(l.monthly) > 0 ? (
                 <p className="col-span-2 text-center text-xs sm:col-span-7 sm:text-sm text-foreground">
                   {/* The same amount the other way round. */}
-                  {money(l.monthly) > 0
-                    ? l.per === "yr"
-                      ? `Estimated Monthly Income: ${formatMoneyWhole(money(l.monthly) / 12, currency)} `
-                      : `Estimated Yearly Income: ${formatMoneyWhole(money(l.monthly) * 12, currency)} `
-                    : ""}
-                  {l.kind === "pay" && !l.endYear.trim()
-                    ? stopNow
-                      ? `Blank end: stops ${MONTHS[stopNow.endMonth - 1]} ${stopNow.endYear}, when you retire.`
-                      : "Blank end: never stops. Set your retirement year under Return, Withdrawal, & Inflation Rates."
-                    : null}
+                  {l.per === "yr"
+                    ? `Estimated Monthly Income: ${formatMoneyWhole(money(l.monthly) / 12, currency)}`
+                    : `Estimated Yearly Income: ${formatMoneyWhole(money(l.monthly) * 12, currency)}`}
                 </p>
               ) : null}
             </div>
@@ -2114,16 +2118,6 @@ function PlanModal({
         </Field>
         <Field label="Withdrawal rate (%)" hint="The most you plan to take from investments each year once you stop working. Needed = the yearly gap ÷ this rate.">
           <input name="withdrawalRatePct" inputMode="decimal" defaultValue={plan.withdrawalRatePct} className={inputClass} />
-        </Field>
-        <Field label="Retirement year (stop working)" hint="Pay and contributions stop; withdrawals can start.">
-          <input
-            name="withdrawStartYear"
-            inputMode="numeric"
-            value={withdrawStartDraft}
-            onChange={(e) => setWithdrawStartDraft(e.target.value)}
-            placeholder={plan.targetRetireYear ? String(plan.targetRetireYear) : ""}
-            className={inputClass}
-          />
         </Field>
 
         </div>
@@ -2306,7 +2300,7 @@ function PlanModal({
         </div>
         </div>
 
-        <SectionHead title="Military retirement" open={isOpen("military")} onToggle={() => toggleSection("military")} />
+        <SectionHead title="Military retirement" note="Optional. Leave blank if none." open={isOpen("military")} onToggle={() => toggleSection("military")} />
         <div className={isOpen("military") ? "contents" : "hidden"}>
         <Field label="Month & Year expected to retire" hint="Active-duty pay stops and retired pay starts that month.">
           <MonthYear
@@ -2761,7 +2755,7 @@ function PlanModal({
           onClose={() => setInfo(null)}
           items={[
             ["Only income", "Future years use only these lines and retired pay. No lines: $0."],
-            ["Pay (work)", "Your pay from work. Blank end: stops when you retire."],
+            ["Pay (work)", "Your pay from work. Blank end: never stops."],
             ["Pay Increase %/yr", "Added every January after the start year, on top of last year. VA and Social Security use the COLA."],
             ["Rises with COLA", "VA and Social Security. Other lines stay the same."],
             ["Amount changes", "End the old line, then + Add income with the new amount from the month after."],
@@ -2788,7 +2782,6 @@ function PlanModal({
               ? {
                   colaFrom: colaStarts.socialSecurity,
                   paidFrom: toYear(ssLineDraft.startYear)!,
-                  age62Year: toYear(birthYear) != null ? toYear(birthYear)! + 62 : null,
                 }
               : null
           }
@@ -2875,10 +2868,9 @@ type GroupDraft = {
 };
 
 /** Income lines in date order: start, then end. A blank start is now, a
- *  blank Pay end is when work stops, any other blank end is never. */
+ *  blank end is never. */
 function byLineDates(
   lines: LineDraft[],
-  stop: { endYear: number; endMonth: number } | null,
   thisYear: number,
 ): LineDraft[] {
   const yr = (v: string) => (/^\d{4}$/.test(v.trim()) ? Number(v) : null);
@@ -2889,7 +2881,6 @@ function byLineDates(
   const end = (l: LineDraft) => {
     const y = yr(l.endYear);
     if (y != null) return y * 12 + (Number(l.endMonth) || 12);
-    if (l.kind === "pay" && stop) return stop.endYear * 12 + stop.endMonth;
     return Number.MAX_SAFE_INTEGER;
   };
   return [...lines].sort((a, b) => start(a) - start(b) || end(a) - end(b));
@@ -2910,9 +2901,6 @@ function LineField({ label, className, children }: { label: string; className?: 
 // Sized to the longest value (80000.00), not the column — full-width boxes
 // holding "5" or "1981" were mostly empty space.
 /** "from Mar" on a line paid only part of the year (its first year). */
-const partNote = (p: { months?: number; firstMonth?: number }) =>
-  p.months != null && p.months < 12 && p.firstMonth ? `from ${MONTHS[p.firstMonth - 1]}` : "";
-
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** Medicare Part A starts at 65, and TRICARE For Life with it. */
@@ -2929,9 +2917,8 @@ function ColaWhy({
   onClose,
 }: {
   retire: { year: number; month: number } | null;
-  /** Social Security's first raise, first payment, and the year its earner
-   *  turns 62 (null without a birth year). */
-  ss: { colaFrom: number; paidFrom: number; age62Year: number | null } | null;
+  /** Social Security's first raise and first payment. */
+  ss: { colaFrom: number; paidFrom: number } | null;
   onClose: () => void;
 }) {
   const share = retire ? firstColaShare(retire.month) : 0;
@@ -2966,24 +2953,10 @@ function ColaWhy({
           </p>
         ) : null}
         {ss ? (
-          ss.paidFrom > ss.colaFrom ? (
-            <p>
-              <span className="font-semibold">
-                Why Social Security says {ss.colaFrom} but starts in {ss.paidFrom}:
-              </span>{" "}
-              both are right. SSA starts adding COLAs at age 62
-              {ss.age62Year != null && ss.age62Year + 1 === ss.colaFrom
-                ? ` (yours is ${ss.age62Year}, so the first raise lands in ${ss.colaFrom})`
-                : ""}, even
-              though your payments start in {ss.paidFrom}.
-            </p>
-          ) : (
-            <p>
-              <span className="font-semibold">Social Security from {ss.colaFrom}:</span> SSA adds COLAs from age 62
-              {ss.age62Year != null && ss.age62Year + 1 === ss.colaFrom ? ` (${ss.age62Year} for you)` : ""}, so your
-              first raise is January {ss.colaFrom}.
-            </p>
-          )
+          <p>
+            <span className="font-semibold">Social Security from {ss.colaFrom}:</span> payments start in {ss.paidFrom},
+            so the first raise is January {ss.colaFrom}.
+          </p>
         ) : null}
       </div>
     </ModalShell>

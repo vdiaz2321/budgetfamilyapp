@@ -152,7 +152,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, spouse_retire_year, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -948,6 +948,7 @@ export default async function NetworthPage() {
         annualContributionCents: planRow?.annual_contribution_cents ?? null,
         investmentReturnPct: planRow?.investment_return_pct == null ? 7.5 : Number(planRow.investment_return_pct),
         withdrawStartYear: planRow?.withdraw_start_year ?? null,
+        spouseRetireYear: planRow?.spouse_retire_year ?? null,
         withdrawalRatePct:
           planRow?.withdrawal_rate_pct == null ? 4 : Number(planRow.withdrawal_rate_pct),
         // A pension, VA, Social Security — income the portfolio never has to

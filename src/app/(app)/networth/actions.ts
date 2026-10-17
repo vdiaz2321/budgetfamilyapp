@@ -16,8 +16,6 @@ import {
   incomeForYear,
   inflatedSpending,
   ageInYear,
-  payStop,
-  withPayEnds,
   retiredShareOfYear,
   type HealthcarePlan,
   type CostDates,
@@ -381,6 +379,7 @@ export async function saveRetirementPlan(formData: FormData) {
   const serviceStartMonth = month("serviceStartMonth");
   const investReturn = num("investmentReturnPct");
   const withdrawStart = num("withdrawStartYear");
+  const spouseRetire = num("spouseRetireYear");
   const withdrawal = num("withdrawalRatePct");
   const inflation = num("inflationPct");
   const cashReturn = num("cashReturnPct");
@@ -482,6 +481,7 @@ export async function saveRetirementPlan(formData: FormData) {
     return { error: "A rate of return outside -20%…30% isn't a plan, it's a bet." };
   }
   if (!year(withdrawStart)) return { error: "Enter a four-digit year for when withdrawals start." };
+  if (!year(spouseRetire)) return { error: "Enter a four-digit year for the spouse's retirement." };
   if (withdrawal != null && (withdrawal <= 0 || withdrawal > 20)) {
     return { error: "Withdrawal rate has to be between 0% and 20%." };
   }
@@ -757,6 +757,7 @@ export async function saveRetirementPlan(formData: FormData) {
       base_pay_by_year: basePayByYear,
       investment_return_pct: investReturn ?? 7.5,
       withdraw_start_year: withdrawStart,
+      spouse_retire_year: spouseRetire,
       withdrawal_rate_pct: withdrawal ?? 4,
       inflation_pct: inflation ?? 2.5,
       cash_return_pct: cashReturn ?? 3,
@@ -962,11 +963,8 @@ async function recomputeRetirementIncome(
 
   const retireYear: number | null = plan.target_retire_year;
   const retireMonth: number | null = plan.target_retire_month ?? null;
-  // A Pay line left without an end stops when you stop working — the month
-  // before military retired pay, else when withdrawals start — so changing
-  // the retirement date moves both.
-  const lines: IncomeLine[] = withPayEnds(
-    (linesRes.data ?? []).map((l) => ({
+  // A blank end means the line never stops (Victor, 2026-10-17).
+  const lines: IncomeLine[] = (linesRes.data ?? []).map((l) => ({
       id: l.id,
       name: l.name,
       kind: l.kind,
@@ -979,9 +977,7 @@ async function recomputeRetirementIncome(
       endMonth: l.end_month ?? null,
       raisePct: l.raise_pct == null ? null : Number(l.raise_pct),
       taxable: l.taxable,
-    })),
-    payStop(retireYear, retireMonth, plan.withdraw_start_year ?? null),
-  );
+    }));
   const pension = estimatePension(
     {
       retireYear,

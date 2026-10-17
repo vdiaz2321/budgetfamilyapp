@@ -329,7 +329,7 @@ export function ageInYear(birthYear: number | null, year: number): number | null
 // Military retired pay, VA disability and Social Security get the same
 // yearly COLA (CPI-W, Q3 over Q3), each behind its own switch and each from
 // its own start: retired pay the January after retiring (the first one cut by
-// the retirement quarter), VA from its start, Social Security from age 62.
+// the retirement quarter), VA and Social Security the January after they start.
 // The other lines stay at the amount entered. Victor took a flat 2.5% COLA out on 2026-10-15
 // and asked for it back on 2026-10-16 as switches plus the actual COLA per
 // year, typed from MOAA's newsletter as each one is announced.
@@ -408,34 +408,6 @@ export type IncomeLine = {
   annualCents?: number | null;
   taxable: boolean;
 };
-
-/**
- * When pay with no end of its own stops — the month you stop working: the
- * month before military retired pay starts, else the December before
- * withdrawals start. Null when neither is set: it doesn't stop.
- */
-export function payStop(
-  retireYear: number | null,
-  retireMonth: number | null | undefined,
-  withdrawStartYear: number | null,
-): { endYear: number; endMonth: number; why: "military" | "withdrawals" } | null {
-  if (retireYear != null) {
-    const m = retireMonth ?? 1;
-    return m > 1
-      ? { endYear: retireYear, endMonth: m - 1, why: "military" }
-      : { endYear: retireYear - 1, endMonth: 12, why: "military" };
-  }
-  if (withdrawStartYear != null) return { endYear: withdrawStartYear - 1, endMonth: 12, why: "withdrawals" };
-  return null;
-}
-
-/** The lines as the plan runs them: a Pay line with no end stops at `stop`. */
-export function withPayEnds(lines: IncomeLine[], stop: { endYear: number; endMonth: number } | null): IncomeLine[] {
-  if (!stop) return lines;
-  return lines.map((l) =>
-    l.kind === "pay" && l.endYear == null ? { ...l, endYear: stop.endYear, endMonth: stop.endMonth } : l,
-  );
-}
 
 /** Income that arrives whether or not anyone works: it lowers the FI goal.
  *  A second job or a spouse's pay can stop, so it only helps cash flow. */
@@ -643,16 +615,14 @@ export type ColaWhen = { thisYear: number; birthYear: number | null };
  * before this year counts.
  * - VA disability: from the year it starts — a future VA line is typed at the
  *   rate it starts on.
- * - Social Security: from the year its earner turns 62, claimed or not
- *   (SSA adds COLAs from age 62; a statement estimate is in today's dollars
- *   and isn't raised before then). No birth year: from its start.
+ * - Social Security: from the year it starts, so the first raise is the
+ *   January after — the amount is typed as the start-year payment. Victor
+ *   dropped the age-62 rule on 2026-10-17: no COLA in the start year.
  */
 export function lineColaBase(line: IncomeLine, cola: ColaPlan, when: ColaWhen): number | null {
   const start = line.startYear ?? when.thisYear;
   if (line.kind === "va") return cola.va ? Math.max(when.thisYear, start) : null;
-  if (line.kind === "social_security" && cola.socialSecurity) {
-    return Math.max(when.thisYear, when.birthYear != null ? when.birthYear + 62 : start);
-  }
+  if (line.kind === "social_security" && cola.socialSecurity) return Math.max(when.thisYear, start);
   return null;
 }
 

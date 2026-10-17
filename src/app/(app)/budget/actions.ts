@@ -11,6 +11,7 @@ import { adjustAccountLedger, categoryKindOf, ledgerDelta } from "@/lib/account-
 import { unwrap } from "@/lib/supabase-result";
 import { previousMonthPlanRows } from "@/lib/plan-roll-in";
 import { getSessionContext } from "@/lib/auth-context";
+import { canMoveBetweenKinds, type CategoryKind } from "@/lib/categories";
 
 // travel_trip_expenses.category keys — the rows on a trip's Spending table.
 import { bookingColumns, bookingRefOf, resolveBookingRef, syncBookingPayment, type BookingRef, type PassengerPoints } from "@/app/(app)/travel/booking-payments";
@@ -386,26 +387,33 @@ export async function moveCategoryGroup(formData: FormData) {
   const categories = unwrap(
     await supabase
       .from("categories")
-      .select("id")
+      .select("id, sort_order")
       .eq("household_id", householdId)
       .order("sort_order")
       .order("name"),
     "categories",
   );
   const orderedIds = (categories ?? []).map((category) => category.id);
+  const sortById = new Map((categories ?? []).map((category) => [category.id, category.sort_order]));
   const index = orderedIds.indexOf(id);
   const nextIndex = direction === "up" ? index - 1 : index + 1;
   if (index < 0 || nextIndex < 0 || nextIndex >= orderedIds.length) return;
   [orderedIds[index], orderedIds[nextIndex]] = [orderedIds[nextIndex], orderedIds[index]];
 
+  // Renumber 0..n but write only the rows whose number changed — usually just
+  // the two that swapped. Rewriting every group was one request per group and
+  // made Move up visibly slow.
   await Promise.all(
-    orderedIds.map((categoryId, sortOrder) =>
-      supabase
-        .from("categories")
-        .update({ sort_order: sortOrder })
-        .eq("id", categoryId)
-        .eq("household_id", householdId),
-    ),
+    orderedIds
+      .map((categoryId, sortOrder) => ({ categoryId, sortOrder }))
+      .filter(({ categoryId, sortOrder }) => sortById.get(categoryId) !== sortOrder)
+      .map(({ categoryId, sortOrder }) =>
+        supabase
+          .from("categories")
+          .update({ sort_order: sortOrder })
+          .eq("id", categoryId)
+          .eq("household_id", householdId),
+      ),
   );
   revalidatePath("/budget");
   revalidatePath("/annual");
@@ -911,7 +919,9 @@ export async function moveSubcategoryToGroup(formData: FormData): Promise<{ erro
     "categories",
   );
   const kindById = new Map((categories ?? []).map((category) => [category.id, category.kind]));
-  if (!kindById.has(targetCategoryId) || kindById.get(subcategory.category_id) !== kindById.get(targetCategoryId)) {
+  const fromKind = kindById.get(subcategory.category_id) as CategoryKind | undefined;
+  const toKind = kindById.get(targetCategoryId) as CategoryKind | undefined;
+  if (!toKind || !fromKind || !canMoveBetweenKinds(fromKind, toKind)) {
     return { error: "Items can move only between groups of the same type." };
   }
 
@@ -929,7 +939,12 @@ export async function moveSubcategoryToGroup(formData: FormData): Promise<{ erro
 
   const { error } = await supabase
     .from("subcategories")
-    .update({ category_id: targetCategoryId, sort_order: (last?.sort_order ?? -1) + 1 })
+    .update({
+      category_id: targetCategoryId,
+      sort_order: (last?.sort_order ?? -1) + 1,
+      // Expenses are never recurring (no prefill there), so the flag goes.
+      ...(toKind === "expenses" ? { is_recurring: false } : {}),
+    })
     .eq("id", subcategoryId)
     .eq("household_id", householdId);
   if (error?.code === "23505") return { error: "That group already has an item with this name." };
