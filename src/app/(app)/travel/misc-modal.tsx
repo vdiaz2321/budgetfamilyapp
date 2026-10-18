@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { CurrencyConverter, loadFxRates, type ConvertedFrom } from "@/components/currency-converter";
+import { loadFxRates } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, foreignSymbol, formatForeignWhole, formatMoneyWhole } from "@/lib/money";
 import { saveTripExpenses } from "./expense-actions";
 import { CurrencySelect, Field, inputClass } from "./travel-form";
@@ -192,14 +192,6 @@ export function MiscModal({
     });
   }
 
-  function applyConverted(cents: number, from: ConvertedFrom) {
-    const target = focused.current ?? { category: rows[0].category, slot: "actual" as Slot };
-    update(target.category, {
-      [target.slot]: centsToDisplay(cents),
-      ...(from.currency === foreignCurrency ? { [`${target.slot}Eur`]: centsToDisplay(from.amountCents) } : {}),
-    });
-  }
-
   const sum = (key: "planned" | "plannedEur" | "actual" | "actualEur") =>
     rows.reduce((total, r) => total + (r[key] ? Math.max(0, displayToCents(r[key])) : 0), 0);
   // A row's actual, in cents: the tagged purchases when there are any, else
@@ -368,9 +360,6 @@ export function MiscModal({
         <section className={embed || lockedToTrip ? "" : "border-t border-line pt-3"}>
           <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
             <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
-            <div className="has-[.rounded-xl]:basis-full sm:ml-auto">
-              <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} />
-            </div>
           </div>
 
           <div className="relative">

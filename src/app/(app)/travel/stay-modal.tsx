@@ -7,10 +7,9 @@ import { centsToDisplay, currencySymbol, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./actions";
 import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
-import { CurrencyConverter } from "@/components/currency-converter";
 import {
-  CurrencySelect, MoreDetailsToggle, PlanSpentFields, PlannedPointsNote, isPlannedOnly, outsideTripNote,
-  type PlanSpent, type PlanSpentSlot,
+  CurrencySelect, MoreDetailsToggle, PlanSpentFields, PlannedPointsNote, isPlannedOnly, outsideTripNote, spentMissingError,
+  type PlanSpent,
 } from "./travel-form";
 import type { Embed, SectionHandle } from "./embedded-section";
 import { addDays } from "./trip-summary";
@@ -93,6 +92,7 @@ export function StayModal({
       },
       save: async () => {
         if (!formRef.current) return { error: null };
+        if (spentError) return { error: spentError };
         const result = await saveTravelStay(new FormData(formRef.current));
         return { error: result?.error ?? null };
       },
@@ -143,8 +143,7 @@ export function StayModal({
   // Paid with the card's free-night certificate instead. The two are
   // exclusive: ticking one unticks the other.
   const [freeNightUsed, setFreeNightUsed] = useState(stay?.freeNightUsed ?? false);
-  // The short form: points, credits, the second currency, card owner and
-  // remarks fold away. A saved stay that already uses any of them opens with
+  // The short form: points, credits, card owner and remarks fold away. A saved stay that already uses any of them opens with
   // them showing, so editing never hides a figure that's there.
   const [showMore, setShowMore] = useState(
     () =>
@@ -207,11 +206,17 @@ export function StayModal({
   // The hotel takes the card at check-in, and the last day to cancel free.
   const [payAtProperty, setPayAtProperty] = useState(stay?.payAtProperty ?? false);
   const [freeCancelUntil, setFreeCancelUntil] = useState(stay?.freeCancelUntil ?? "");
-  const lastSlot = useRef<PlanSpentSlot | null>(null);
   // Booked once a Spent figure or the booking date is in; a plan until then.
   const isEstimate = isPlannedOnly(Boolean(fig.spent.trim() || fig.spentForeign.trim()), reservedOn);
   const pocketCost = isEstimate ? fig.planned : fig.spent;
   const tripNote = outsideTripNote(trips, trip.tripId, [checkIn]);
+  const spentError = spentMissingError({
+    reservedOn,
+    spentTyped: Boolean(fig.spent.trim() || fig.spentForeign.trim()),
+    exempt: pointsUsed || freeNightUsed || payAtProperty || stay?.paidCents != null,
+    dateLabel: "Reservation Made",
+    alsoTry: "or tick Pay at check-in under More details",
+  });
 
   const card = cards.find((c) => c.id === accountId) ?? null;
 
@@ -376,6 +381,7 @@ export function StayModal({
         onSubmit={(e) => {
           e.preventDefault();
           if (embed) return;
+          if (spentError) return setError(spentError);
           const formData = new FormData(e.currentTarget);
           start(async () => {
             setError(null);
@@ -563,38 +569,18 @@ export function StayModal({
         {/* Planned beside Spent, each in dollars and the stay's other
             currency. Spent is what left the wallet. */}
         <div className="space-y-2 sm:col-span-2">
-          <div className={showMore ? "flex flex-wrap items-center gap-x-3 gap-y-2" : "hidden"}>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
-            <div className="has-[.rounded-xl]:basis-full">
-              <CurrencyConverter
-                blue
-                defaultFrom={foreignCurrency}
-                // Once bought, at the booking date's rate — what the card charged.
-                date={isEstimate ? undefined : reservedOn}
-                // Fills Planned or Spent — whichever was clicked last, else
-                // Planned while it is still a plan.
-                onUse={(cents, from) => {
-                  const planned = lastSlot.current ? lastSlot.current.startsWith("planned") : isEstimate;
-                  setFig((f) => ({
-                    ...f,
-                    [planned ? "planned" : "spent"]: centsToDisplay(cents),
-                    ...(from.currency === foreignCurrency
-                      ? { [planned ? "plannedForeign" : "spentForeign"]: centsToDisplay(from.amountCents) }
-                      : {}),
-                  }));
-                }}
-              />
-            </div>
           </div>
           <PlanSpentFields
             value={fig}
             onChange={setFig}
             currency={currency}
             foreignCurrency={foreignCurrency}
-            onFocusSlot={(slot) => (lastSlot.current = slot)}
+            spentRateDate={isEstimate ? undefined : reservedOn}
             spentLocked={stay?.paidCents != null}
             onOpenSpent={linked.canOpen ? linked.open : undefined}
-            showForeign={showMore && Boolean(foreignCurrency)}
+            showForeign={Boolean(foreignCurrency)}
           />
           {linked.error ? <p className="text-[11px] text-negative">{linked.error}</p> : null}
           {linked.overlay}
@@ -823,11 +809,6 @@ export function StayModal({
         {/* Above the buttons, not below them. Rendered after the footer row
             it sat ~4px under the fold on a 375x812 phone, so a blocked save
             looked like a dead button. */}
-        {error && !embed ? (
-          <p className="sm:col-span-2 rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">
-            {error}
-          </p>
-        ) : null}
 
         {draw && (draw.points !== 0 || draw.credit !== 0) ? (
           <p className="sm:col-span-2 text-xs font-medium text-foreground">
@@ -932,6 +913,7 @@ export function StayModal({
       // Wider than the default, so the date boxes show their full dates.
       className="sm:max-w-4xl"
       headerEnd={headerButtons}
+      headerNotice={error && !embed ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
       headerActions={stay && trips ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
     >
       {body}

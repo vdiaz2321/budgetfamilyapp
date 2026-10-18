@@ -177,12 +177,13 @@ export function TripDetailModal({
 
   // A hotel booked as several reservations (two rooms, night by night) is
   // listed once, its reservations under it.
-  // "Flights" or "Stays" clicked in the Planned / Spent cards narrows the
-  // bookings table to that kind; null shows everything. Stays covers rentals
-  // too, the same as the cards' "Stays" figure.
-  const [kindFilter, setKindFilter] = useState<"flights" | "stays" | null>(null);
-  const toggleKind = (kind: "flights" | "stays") => setKindFilter((k) => (k === kind ? null : kind));
-  const kindShown = (kind: Booking["kind"]) => kindFilter == null || (kindFilter === "flights") === (kind === "flight");
+  // "Flights", "Stays" or "Rentals" clicked in the Planned / Spent cards
+  // narrows the bookings table to that kind; null shows everything.
+  type KindFilter = "flights" | "stays" | "rentals";
+  const KIND_OF: Record<KindFilter, Booking["kind"]> = { flights: "flight", stays: "stay", rentals: "car" };
+  const [kindFilter, setKindFilter] = useState<KindFilter | null>(null);
+  const toggleKind = (kind: KindFilter) => setKindFilter((k) => (k === kind ? null : kind));
+  const kindShown = (kind: Booking["kind"]) => kindFilter == null || KIND_OF[kindFilter] === kind;
   const shownBookings = t.bookings.filter((b) => kindShown(b.kind));
   // A hotel split into rooms is one line of stays.
   const lines = bookingLines(t.bookings).filter((line) => kindShown(line.type === "rooms" ? "stay" : line.booking.kind));
@@ -199,9 +200,10 @@ export function TripDetailModal({
           actual: sum.actual + (actual ?? 0),
           // The flights' share, for the Flights box beside Stays/Rentals.
           flightPlanned: sum.flightPlanned + (b.kind === "flight" ? planned ?? 0 : 0),
+          rentalPlanned: sum.rentalPlanned + (b.kind === "car" ? planned ?? 0 : 0),
         };
       },
-      { rows: 0, planned: 0, actual: 0, flightPlanned: 0 },
+      { rows: 0, planned: 0, actual: 0, flightPlanned: 0, rentalPlanned: 0 },
     );
   // The cards always add up every booking; the table's Total only the rows shown.
   const allBookingTotals = totalsOf(t.bookings);
@@ -266,10 +268,12 @@ export function TripDetailModal({
   // which repeated Planned twice and called points value "Saved" —
   // Victor, 2026-10-08.)
   const spentFlights = t.flights - t.planOnly.flights;
-  const spentStays = t.hotels + t.rentals - t.planOnly.hotels - t.planOnly.rentals;
+  const spentStays = t.hotels - t.planOnly.hotels;
+  const spentRentals = t.rentals - t.planOnly.rentals;
   const spentSpending = t.miscTotal - t.planOnly.miscTotal;
   const plannedBookings = allBookingTotals.planned;
   const plannedFlights = allBookingTotals.flightPlanned;
+  const plannedRentals = allBookingTotals.rentalPlanned;
   const plannedTotal = t.plannedTotal;
   // What the Difference compares, and its planned and spent totals — shown
   // under it as "Planned $1,660 / Spent $830". Same rule as the Spending
@@ -281,20 +285,25 @@ export function TripDetailModal({
   const { planned: comparedPlanned, spent: comparedSpent, diff: differenceCents } = tripDifference(t);
   // "Flights: $0 / Spending: $320" under a card's figure — "Spending" on the
   // Planned card (money set aside), "Spent" on the Spent card. Flights and
-  // the third part always show, $0 included; Stays only on a trip that has a stay
-  // or rental, so most trips aren't padded with "Stays: $0".
-  const hasStays = t.bookings.some((b) => !b.cancelled && b.kind !== "flight");
-  const parts = (flights: number, stays: number, spending: number, spendingLabel: string) => {
-    const list: [string, number][] = [["Flights", flights], ...(hasStays || stays ? [["Stays", stays] as [string, number]] : []), [spendingLabel, spending]];
+  // the last part always show, $0 included; Stays and Rentals each only on a
+  // trip that has one, so most trips aren't padded with "Rentals: $0".
+  const hasKind = (kind: Booking["kind"]) => t.bookings.some((b) => !b.cancelled && b.kind === kind);
+  const parts = (flights: number, stays: number, rentals: number, spending: number, spendingLabel: string) => {
+    const list: [string, number, KindFilter | null][] = [
+      ["Flights", flights, "flights"],
+      ...(hasKind("stay") || stays ? [["Stays", stays, "stays"] as [string, number, KindFilter]] : []),
+      ...(hasKind("car") || rentals ? [["Rentals", rentals, "rentals"] as [string, number, KindFilter]] : []),
+      [spendingLabel, spending, null],
+    ];
     // One part per line on a phone (no slashes); "Flights / Stays" from sm
     // up with Spending/Spent always on its own second line, so every card
     // breaks in the same place instead of wherever its width runs out.
-    return list.map(([label, cents], i) => {
+    return list.map(([label, cents, want], i) => {
       const last = i === list.length - 1;
-      // Flights and Stays filter the table below; the spending part doesn't.
-      // Only when the trip has that kind — "Flights: $0" on a stays-only trip stays plain.
-      const want = label === "Flights" ? "flights" : label === "Stays" ? "stays" : null;
-      const kind = want && t.bookings.some((b) => (want === "flights") === (b.kind === "flight")) ? want : null;
+      // Flights, Stays and Rentals filter the table below; the spending part
+      // doesn't. Only when the trip has that kind — "Flights: $0" on a
+      // stays-only trip stays plain.
+      const kind = want && t.bookings.some((b) => b.kind === KIND_OF[want]) ? want : null;
       const text = `${label}: ${formatMoneyWhole(cents, currency)}`;
       return (
         <span key={label} className={`block whitespace-nowrap ${last ? "" : "sm:inline-block"}`}>
@@ -512,7 +521,7 @@ export function TripDetailModal({
             label="Total Planned"
             value={plannedTotal > 0 ? formatMoneyWhole(plannedTotal, currency) : "—"}
             className={plannedTotal > 0 ? PLAN_BLUE : undefined}
-            note={parts(plannedFlights, plannedBookings - plannedFlights, t.plannedMisc, "Spending")}
+            note={parts(plannedFlights, plannedBookings - plannedFlights - plannedRentals, plannedRentals, t.plannedMisc, "Spending")}
           />
           <Stat
             label="Total Spent"
@@ -520,7 +529,7 @@ export function TripDetailModal({
             className={t.spent > 0 ? "text-negative" : undefined}
             note={
               <>
-                {parts(spentFlights, spentStays, spentSpending, "Spent")}
+                {parts(spentFlights, spentStays, spentRentals, spentSpending, "Spent")}
                 {t.points > 0 ? <span className="block">+ {t.points.toLocaleString()} pts</span> : null}
               </>
             }
@@ -550,7 +559,7 @@ export function TripDetailModal({
           {/* Phones only: the desktop table's own header names the section. */}
           <div className="mb-1.5 sm:hidden">
             <h3 className="text-xs font-bold uppercase tracking-wide">
-              {kindFilter === "flights" ? "Flights only" : kindFilter === "stays" ? "Stays only" : "Flights/Stays/Rentals"}
+              {kindFilter === "flights" ? "Flights only" : kindFilter === "stays" ? "Stays only" : kindFilter === "rentals" ? "Rentals only" : "Flights/Stays/Rentals"}
               {kindFilter ? <ShowAllButton onClick={() => setKindFilter(null)} /> : null}
             </h3>
           </div>
@@ -573,8 +582,8 @@ export function TripDetailModal({
                 const fx = bookingForeign(b);
                 const diff = planDiff(planned, actual);
                 return (
-                  <li key={`${b.kind}-${b.id}`} className={b.cancelled ? "opacity-60" : ""}>
-                    <button type="button" onClick={() => onEditBooking(b)} className="w-full px-3 py-2 text-left transition active:bg-sky-50 dark:active:bg-sky-950/40">
+                  <li key={`${b.kind}-${b.id}`}>
+                    <button type="button" onClick={() => onEditBooking(b)} className={`w-full px-3 py-2 text-left transition active:bg-sky-50 dark:active:bg-sky-950/40 ${b.cancelled ? CANCELLED_ROW : ""}`}>
                       <span className="flex min-w-0 items-start gap-2">
                         <KindDay booking={b} className="mt-0.5" />
                         <span className="flex min-w-0 flex-col">
@@ -582,7 +591,7 @@ export function TripDetailModal({
                             {b.title}
                             <BookingDate booking={b} tripYear={t.start?.slice(0, 4)} />
                             <BookingPax booking={b} />
-                            {b.cancelled ? <span className="ml-1.5 text-[11px] font-semibold text-foreground">Cancelled</span> : null}
+                            {b.cancelled ? <span className="ml-1.5 inline-block text-[11px] font-bold text-negative no-underline sm:text-xs">Cancelled</span> : null}
                           </span>
                           <span className="text-xs text-foreground">
                             <BookingWhen booking={b} tripYear={t.start?.slice(0, 4)} />
@@ -721,7 +730,7 @@ export function TripDetailModal({
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-foreground">
                     <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">
-                      {kindFilter === "flights" ? "Flights only" : kindFilter === "stays" ? "Stays only" : "Flight/Stay/Rental"}
+                      {kindFilter === "flights" ? "Flights only" : kindFilter === "stays" ? "Stays only" : kindFilter === "rentals" ? "Rentals only" : "Flight/Stay/Rental"}
                       {kindFilter ? <ShowAllButton onClick={() => setKindFilter(null)} /> : null}
                     </th>
                     <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Planned</th>
@@ -753,7 +762,7 @@ export function TripDetailModal({
                       <tbody
                         key={`${b.kind}-${b.id}`}
                         onClick={() => onEditBooking(b)}
-                        className={`cursor-pointer border-b border-line/60 transition hover:bg-sky-50 dark:hover:bg-sky-900/20 ${b.cancelled ? "opacity-60" : ""}`}
+                        className={`cursor-pointer border-b border-line/60 transition hover:bg-sky-50 dark:hover:bg-sky-900/20 ${b.cancelled ? CANCELLED_ROW : ""}`}
                       >
                       <tr className={remarks || seats.length || paymentsOpen ? "[&>td]:pb-0" : ""}>
                         <td className="px-3 py-2 text-left">
@@ -764,7 +773,7 @@ export function TripDetailModal({
                                 {b.title}
                                 <BookingDate booking={b} tripYear={t.start?.slice(0, 4)} />
                                 <BookingPax booking={b} />
-                                {b.cancelled ? <span className="ml-1.5 text-[11px] font-semibold text-foreground">Cancelled</span> : null}
+                                {b.cancelled ? <span className="ml-1.5 inline-block text-[11px] font-bold text-negative no-underline sm:text-xs">Cancelled</span> : null}
                               </span>
                               <span className="text-xs text-foreground">
                                 <BookingWhen booking={b} tripYear={t.start?.slice(0, 4)} />
@@ -1195,8 +1204,11 @@ function BookingDate({ booking, tripYear }: { booking: Booking; tripYear: string
   const { date, legs } = bookingWhen(booking, tripYear);
   if (legs.some((l) => l.day)) return null;
   // Spaced off the name and as bold as it from sm up — small and close in,
-  // it ran into the name.
-  return <span className="ml-3 whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">{date}</span>;
+  // it ran into the name. inline-block so a long name on a phone drops the
+  // date to the next line rather than running it off the card; that also
+  // keeps the cancelled row's strike off it, so it draws its own.
+  const strike = booking.cancelled ? " line-through decoration-negative/70" : "";
+  return <span className={`ml-3 inline-block whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm${strike}`}>{date}</span>;
 }
 
 // Who is on a flight, right after its route (and date). One seat names its
@@ -1206,9 +1218,11 @@ function BookingDate({ booking, tripYear }: { booking: Booking; tripYear: string
 // inline-block so a full phone row drops it to the next line instead of
 // running it off the card (the date beside it gives no break point).
 function BookingPax({ booking }: { booking: Booking }) {
+  // Inline-block escapes the cancelled row's strike, so it draws its own.
+  const strike = booking.cancelled ? " line-through decoration-negative/70" : "";
   if (booking.kind === "stay") {
     return booking.stay.pax ? (
-      <span className="ml-3 inline-block whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+      <span className={`ml-3 inline-block whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm${strike}`}>
         {booking.stay.pax} pax
       </span>
     ) : null;
@@ -1217,13 +1231,13 @@ function BookingPax({ booking }: { booking: Booking }) {
   const { passengers } = booking.flight;
   if (passengers.length > 1) {
     return (
-      <span className="ml-3 inline-block whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+      <span className={`ml-3 inline-block whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm${strike}`}>
         {passengers.length} pax
       </span>
     );
   }
   return (
-    <span className="ml-3 inline-flex items-baseline gap-1 whitespace-nowrap text-xs font-semibold text-foreground sm:text-sm">
+    <span className={`ml-3 inline-flex items-baseline gap-1 whitespace-nowrap text-xs font-semibold text-foreground sm:text-sm${strike}`}>
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 self-center text-sky-700 dark:text-sky-300">
         <circle cx="12" cy="8" r="4" />
         <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
@@ -1232,6 +1246,10 @@ function BookingPax({ booking }: { booking: Booking }) {
     </span>
   );
 }
+
+// A cancelled booking: struck through, so it reads as gone at a glance. Its
+// red "Cancelled" tag is inline-block, which keeps the strike off it.
+const CANCELLED_ROW = "line-through decoration-negative/70";
 
 // Under the title: a flight's legs in columns — day, Depart, Arrive — so a
 // round trip's two times line up, then the detail (airline · pax) on its own
@@ -1249,12 +1267,19 @@ function BookingWhen({ booking, tripYear }: { booking: Booking; tripYear: string
         {legs.map((leg, i) => (
           <Fragment key={i}>
             {withDay ? <span className="whitespace-nowrap">{leg.day}</span> : null}
-            <span className="whitespace-nowrap">{leg.depart ? `Depart: ${leg.depart}` : ""}</span>
-            {/* The arrow is dropped on a phone, where the three columns only just fit. */}
+            {/* On a phone the words drop — "18-Dec 12:15 → 15:05" — since
+                "Depart: … Arrive: …" ran past the card's edge there. */}
+            <span className="whitespace-nowrap">
+              {leg.depart ? (
+                <>
+                  <span className="hidden sm:inline">Depart: </span>{leg.depart}
+                </>
+              ) : null}
+            </span>
             <span className="whitespace-nowrap">
               {leg.arrive ? (
                 <>
-                  <span className="hidden sm:inline">→ </span>Arrive: {leg.arrive}
+                  →<span className="hidden sm:inline"> Arrive:</span> {leg.arrive}
                 </>
               ) : null}
             </span>

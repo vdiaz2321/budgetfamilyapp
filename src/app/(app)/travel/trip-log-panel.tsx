@@ -6,7 +6,7 @@ import { SearchBox } from "./search-box";
 import { YearPicker, inYears, thisAndFutureYears, useSessionYears } from "./year-picker";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoneyWhole } from "@/lib/money";
-import { sheetDateRange, tripDifference, type TripSummary } from "./trip-summary";
+import { bookingPlanActual, bookingPlannedOnly, sheetDateRange, tripDifference, type Booking, type TripSummary } from "./trip-summary";
 import type { ExpenseCategory } from "./types";
 
 
@@ -37,9 +37,17 @@ function searchText(t: TripSummary): string {
 // The whole-trip columns: flights and hotels, the day-to-day spending, then
 // the rental last. `plan` is the part of the figure that is only a plan so
 // far — a cell that is all plan renders grey, and none of it counts as Spent.
+// A booking that is booked (it has a booking date) but not paid yet carries
+// its plan in neither the paid nor the plan-only figure, so its column read
+// "—" while Planned counted it. Its plan joins the cell as plan here.
+const bookedUnpaid = (t: TripSummary, kind: Booking["kind"]) =>
+  t.bookings
+    .filter((b) => b.kind === kind && !b.cancelled && !bookingPlannedOnly(b) && b.pocket <= 0 && b.points <= 0)
+    .reduce((sum, b) => sum + (bookingPlanActual(b).planned ?? 0), 0);
+
 const MONEY_COLUMNS: { label: string; read: (t: TripSummary) => number; plan: (t: TripSummary) => number }[] = [
-  { label: "Flights", read: (t) => t.flights, plan: (t) => t.planOnly.flights },
-  { label: "Hotels", read: (t) => t.hotels, plan: (t) => t.planOnly.hotels },
+  { label: "Flights", read: (t) => t.flights + bookedUnpaid(t, "flight"), plan: (t) => t.planOnly.flights + bookedUnpaid(t, "flight") },
+  { label: "Hotels", read: (t) => t.hotels + bookedUnpaid(t, "stay"), plan: (t) => t.planOnly.hotels + bookedUnpaid(t, "stay") },
   ...(
     [
       ["restaurants", "Restaurants"],
@@ -52,7 +60,7 @@ const MONEY_COLUMNS: { label: string; read: (t: TripSummary) => number; plan: (t
       ["other", "Other"],
     ] as [ExpenseCategory, string][]
   ).map(([key, label]) => ({ label, read: (t: TripSummary) => t.misc[key], plan: (t: TripSummary) => t.planOnly.misc[key] })),
-  { label: "Rental", read: (t) => t.rentals, plan: (t) => t.planOnly.rentals },
+  { label: "Rental", read: (t) => t.rentals + bookedUnpaid(t, "car"), plan: (t) => t.planOnly.rentals + bookedUnpaid(t, "car") },
 ];
 
 /**
@@ -64,19 +72,17 @@ export function TripLogPanel({
   summaries,
   currency,
   onOpenTrip,
-  savedByYear,
-  alignYears,
+  yearRollup,
 }: {
   summaries: TripSummary[];
   currency: string;
   onOpenTrip: (tripId: string) => void;
   /** The hotel year rollup, shown beside "By year" in the full-width popup —
       the popup has the width for both, and the two answer the same question
-      from the trip side and the stay side. */
-  savedByYear?: React.ReactNode;
-  /** The shared year axis for the two rollups — every year either one covers,
-      newest first, so their rows sit on the same lines. */
-  alignYears?: string[];
+      from the trip side and the stay side. Given the search and the trips it
+      matches, it returns its table and the shared year axis (every year
+      either rollup covers, newest first) so the two rows line up. */
+  yearRollup?: (q: string, tripIds: Set<string>) => { years: string[]; table: React.ReactNode };
 }) {
   const [expanded, setExpanded] = useState(false);
   const years = useMemo(
@@ -116,10 +122,17 @@ export function TripLogPanel({
       <span className={d >= 0 ? "text-positive" : "text-negative"}>{`${d >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(d), currency)}`}</span>
     );
 
+  // The year rollups follow the search but not the year picker — they are
+  // the year-over-year picture, so every year a matching trip touches shows.
+  const searched = useMemo(() => summaries.filter((t) => !q || searchText(t).includes(q)), [summaries, q]);
+  const rollup = yearRollup?.(q, new Set(searched.map((t) => t.trip.id)));
+  const savedByYear = rollup?.table;
+  const alignYears = rollup?.years;
+
   // The sheet's year block: what each year's trips came to.
   const byYear = useMemo(() => {
     const map = new Map<string, { trips: number; total: number; planned: number; saved: number; points: number }>();
-    for (const t of summaries) {
+    for (const t of searched) {
       const y = t.start?.slice(0, 4);
       if (!y) continue;
       const row = map.get(y) ?? { trips: 0, total: 0, planned: 0, saved: 0, points: 0 };
@@ -131,7 +144,7 @@ export function TripLogPanel({
       map.set(y, row);
     }
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [summaries]);
+  }, [searched]);
 
   // The rows the popup draws: the shared year axis when there is one (a year
   // only the hotel rollup knows about becomes a dashed line), otherwise just

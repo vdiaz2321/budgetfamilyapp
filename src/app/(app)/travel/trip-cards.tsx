@@ -45,7 +45,7 @@ function DaysPill({ days, className }: { days: number; className: string }) {
 /** A booking count. */
 function Chip({ icon, children }: { icon: keyof typeof CHIP_ICONS; children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-foreground dark:bg-sky-900/50">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-foreground dark:bg-sky-900/50">
       <svg viewBox="0 0 24 24" className={`h-3 w-3 ${TEAL_TEXT}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         {CHIP_ICONS[icon]}
       </svg>
@@ -175,17 +175,19 @@ export function TripCards({
             // paid yet; "Pts" when it went on points with no cash.
             const paidFor = (kind: Booking["kind"], total: number, planOnly: number) => {
               const cash = total - planOnly;
-              if (cash > 0) return ` · ${formatMoneyWhole(cash, currency)} paid`;
+              if (cash > 0) return <span className="font-bold text-negative"> · {formatMoneyWhole(cash, currency)} paid</span>;
               const onPoints = t.bookings.some((b) => b.kind === kind && !b.cancelled && b.points > 0);
               return onPoints ? " · Pts" : "";
             };
-            // " · Not Booked Yet" in red when every booking of that kind is
-            // still only planned; " · 1 Not Booked Yet" when only some are.
-            const notBooked = (kind: Booking["kind"]) => {
+            // Bookings of that kind still only planned: " · $640 planned"
+            // when they carry a planned amount; otherwise " · Not Booked Yet"
+            // in red (" · 1 Not Booked Yet" when only some are).
+            const notBooked = (kind: Booking["kind"], planOnly: number) => {
               const live = t.bookings.filter((b) => b.kind === kind && !b.cancelled);
               const n = live.filter(bookingPlannedOnly).length;
               if (!n) return null;
-              return <span className="text-negative"> · {n < live.length ? `${n} ` : ""}Not Booked Yet</span>;
+              if (planOnly > 0) return <span className="font-bold"> · {formatMoneyWhole(planOnly, currency)} planned</span>;
+              return <span className="font-bold text-negative"> · {n < live.length ? `${n} ` : ""}Not Booked Yet</span>;
             };
             return (
               <li key={t.trip.id}>
@@ -213,9 +215,9 @@ export function TripCards({
                       get the full width. */}
                   {booked ? (
                     <span className="flex flex-wrap items-center gap-1.5">
-                      {t.counts.flight ? <Chip icon="flight">{plural(t.counts.flight, "flight")}{paidFor("flight", t.flights, t.planOnly.flights)}{notBooked("flight")}</Chip> : null}
-                      {t.counts.stay ? <Chip icon="hotel">{plural(t.counts.stay, "hotel")}{paidFor("stay", t.hotels, t.planOnly.hotels)}{notBooked("stay")}</Chip> : null}
-                      {t.counts.car ? <Chip icon="car">{plural(t.counts.car, "rental")}{paidFor("car", t.rentals, t.planOnly.rentals)}{notBooked("car")}</Chip> : null}
+                      {t.counts.flight ? <Chip icon="flight">{plural(t.counts.flight, "flight")}{paidFor("flight", t.flights, t.planOnly.flights)}{notBooked("flight", t.planOnly.flights)}</Chip> : null}
+                      {t.counts.stay ? <Chip icon="hotel">{plural(t.counts.stay, "hotel")}{paidFor("stay", t.hotels, t.planOnly.hotels)}{notBooked("stay", t.planOnly.hotels)}</Chip> : null}
+                      {t.counts.car ? <Chip icon="car">{plural(t.counts.car, "rental")}{paidFor("car", t.rentals, t.planOnly.rentals)}{notBooked("car", t.planOnly.rentals)}</Chip> : null}
                       <DaysPill days={days} className="ml-auto sm:hidden" />
                     </span>
                   ) : (

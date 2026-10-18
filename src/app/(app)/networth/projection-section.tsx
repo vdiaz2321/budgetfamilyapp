@@ -415,7 +415,15 @@ export function ProjectionSection({
           {/* Year by year's title row carries its buttons — Edit Future
               Projections and the money toggles — on the left beside the
               title, folded or open (Victor, 2026-10-18). */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line px-4 py-3">
+          {/* The whole row folds the table, like the other section rows — only
+              its own buttons (Edit, the money toggles) do something else. */}
+          <div
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest("button, select, a, input")) return;
+              setCollapse((s) => ({ ...s, table: s.table !== true }));
+            }}
+            className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 border-t border-line px-4 py-3"
+          >
             <button
               type="button"
               onClick={() => setCollapse((s) => ({ ...s, table: s.table !== true }))}

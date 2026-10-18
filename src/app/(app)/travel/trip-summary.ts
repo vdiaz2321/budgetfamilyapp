@@ -199,7 +199,9 @@ export function bookingLines(bookings: Booking[]): BookingLine[] {
       members,
     });
   }
-  return lines;
+  // Cancelled bookings sink below the live ones, keeping their order.
+  const cancelled = (l: BookingLine) => l.type === "single" && l.booking.cancelled;
+  return [...lines.filter((l) => !cancelled(l)), ...lines.filter(cancelled)];
 }
 
 /**

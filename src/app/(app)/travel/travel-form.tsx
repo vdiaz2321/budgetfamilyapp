@@ -1,7 +1,8 @@
 // Field pieces shared by the Travel Log's flight, stay and car forms.
 
-import { FX_CURRENCIES } from "@/components/currency-converter";
-import { currencySymbol, foreignSymbol } from "@/lib/money";
+import { useEffect, useState } from "react";
+import { FX_CURRENCIES, loadFxRates } from "@/components/currency-converter";
+import { centsToDisplay, currencySymbol, foreignSymbol } from "@/lib/money";
 import type { TravelTrip } from "./types";
 
 /**
@@ -29,6 +30,23 @@ export function isPlannedOnly(spentTyped: boolean, reservedOn: string): boolean 
 }
 
 /**
+ * A booking date with nothing in Spent: booked but nothing paid, so it counted
+ * in neither Spent nor the plan still to go (the Budget and the trip log both
+ * missed it). Refused with what to do instead. A booking on points, a free
+ * night, pay-at-check-in or linked payments has a reason to be empty.
+ */
+export function spentMissingError(opts: {
+  reservedOn: string;
+  spentTyped: boolean;
+  exempt: boolean;
+  dateLabel: string;
+  alsoTry?: string;
+}): string | null {
+  if (!opts.reservedOn.trim() || opts.spentTyped || opts.exempt) return null;
+  return `Enter "${opts.dateLabel}" when Spent is made, or clear it for Planned${opts.alsoTry ? `, ${opts.alsoTry}` : ""}.`;
+}
+
+/**
  * Shown while a booking is still only planned and its points are ticked as
  * used: nothing leaves the card until it is bought.
  */
@@ -51,12 +69,19 @@ export function CurrencySelect({ value, onChange }: { value: string; onChange: (
     // A stronger outline and a readable label — the faint ring-line and muted
     // grey label read as disabled (Victor, 2026-09-30). Same look as the
     // form's "Paid with points" picker beside it.
-    <label className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg bg-background px-2 text-xs font-semibold sm:text-sm ${PILL_CONTROL}`}>
+    // The real <select> is stretched invisibly over the whole pill, so a click
+    // on the words opens the list too — not just a click on the code.
+    <label className={`relative inline-flex h-7 cursor-pointer select-none items-center gap-1.5 rounded-lg bg-background px-2 text-xs font-semibold focus-within:ring-2! focus-within:ring-sky-500! sm:text-sm ${PILL_CONTROL}`}>
       <span className="text-foreground">Select if using other currency:</span>
+      <span>{value || "None"}</span>
+      <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M5 7.5 10 12.5 15 7.5" />
+      </svg>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="cursor-pointer bg-transparent font-semibold focus:outline-none"
+        aria-label="Other currency"
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
       >
         {/* None — dollars only — hides the second-currency columns. */}
         <option value="">None</option>
@@ -88,6 +113,7 @@ export function PlanSpentFields({
   onOpenSpent,
   spentOnPoints = false,
   showForeign = true,
+  spentRateDate,
 }: {
   value: PlanSpent;
   onChange: (next: PlanSpent) => void;
@@ -107,8 +133,38 @@ export function PlanSpentFields({
   /** False hides the second-currency boxes (kept in state, still saved) —
    *  the short form shows only the home-currency figures. */
   showForeign?: boolean;
+  /** The booking date: Spent converts at that day's rate (what the card
+   *  charged); Planned at today's. Blank → today's for both. */
+  spentRateDate?: string;
 }) {
   const usd = currencySymbol(currency);
+  // Typing in a foreign box fills the dollar box beside it, the way the
+  // flight form does. Rates load as soon as a currency is picked.
+  const [rates, setRates] = useState<{ key: string; planned: Record<string, number> | null; spent: Record<string, number> | null } | null>(null);
+  const ratesKey = `${foreignCurrency}|${spentRateDate ?? ""}`;
+  useEffect(() => {
+    if (!foreignCurrency) return;
+    let live = true;
+    Promise.all([loadFxRates(), loadFxRates(spentRateDate || undefined)]).then(([planned, spent]) => {
+      if (live) setRates({ key: ratesKey, planned, spent });
+    });
+    return () => { live = false; };
+  }, [foreignCurrency, spentRateDate, ratesKey]);
+  const toUsd = (raw: string, spent: boolean): string | null => {
+    const rate = rates?.key === ratesKey ? (spent ? rates.spent : rates.planned)?.[foreignCurrency] : undefined;
+    if (!rate) return null;
+    if (!raw.trim()) return "";
+    const n = Number(raw.replace(/,/g, ""));
+    return Number.isFinite(n) ? centsToDisplay(Math.round((n / rate) * 100)) : null;
+  };
+  const type = (slot: PlanSpentSlot, raw: string) => {
+    const next = { ...value, [slot]: raw };
+    if (slot === "plannedForeign" || (slot === "spentForeign" && !spentLocked)) {
+      const dollars = toUsd(raw, slot === "spentForeign");
+      if (dollars != null) next[slot === "plannedForeign" ? "planned" : "spent"] = dollars;
+    }
+    onChange(next);
+  };
   const fx = foreignSymbol(foreignCurrency);
   const allBoxes: { slot: PlanSpentSlot; label: string }[] = [
     { slot: "planned", label: `Planned ${what} (${usd})` },
@@ -123,7 +179,7 @@ export function PlanSpentFields({
       <Field key={b.slot} label={b.label} action={locked && onOpenSpent ? <OpenLinkedButton onOpen={onOpenSpent} /> : undefined}>
         <input
           value={value[b.slot]}
-          onChange={(e) => onChange({ ...value, [b.slot]: e.target.value })}
+          onChange={(e) => type(b.slot, e.target.value)}
           onFocus={() => onFocusSlot?.(b.slot)}
           onClick={locked ? onOpenSpent : undefined}
           readOnly={locked}
@@ -244,7 +300,7 @@ export function MoreDetailsToggle({ open, onToggle, className }: { open: boolean
       >
         <path d="M5 7.5 10 12.5 15 7.5" />
       </svg>
-      {open ? "Fewer details" : "More details: points, credits, other currency, card owner, remarks"}
+      {open ? "Fewer details" : "More details: points, credits, card owner, remarks"}
     </button>
   );
 }

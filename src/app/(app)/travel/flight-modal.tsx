@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { CurrencyConverter, loadFxRates, type ConvertedFrom } from "@/components/currency-converter";
+import { loadFxRates } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, foreignSymbol, formatMoney, formatMoneyWhole } from "@/lib/money";
 import {
   addTraveller,
@@ -13,7 +13,7 @@ import {
   saveTravelFlight,
   setTravelFlightCancelled,
 } from "./flight-actions";
-import { CurrencySelect, Field, MoreDetailsToggle, OpenLinkedButton, PILL_CONTROL, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, openableClass, outsideTripNote } from "./travel-form";
+import { CurrencySelect, Field, MoreDetailsToggle, OpenLinkedButton, PILL_CONTROL, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, openableClass, outsideTripNote, spentMissingError } from "./travel-form";
 import { useLinkedPayments } from "./linked-payments";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { AirlinePicker } from "./airline-picker";
@@ -308,24 +308,6 @@ export function FlightModal({
     );
   }
 
-  // A receipt in the booking's other currency keeps that figure beside the
-  // dollars it converted to, under Planned or Spent — whichever was clicked.
-  function applyConverted(cents: number, from: ConvertedFrom) {
-    const last = lastFare.current;
-    const planned = last ? last.slot.startsWith("planned") : isEstimate;
-    const usdSlot = planned ? "planned" : "fare";
-    const target =
-      passengers.find((p) => p.key === last?.key) ?? passengers.find((p) => !p[usdSlot].trim()) ?? passengers[0];
-    if (target) {
-      updatePassenger(target.key, {
-        [usdSlot]: centsToDisplay(cents),
-        ...(from.currency === foreignCurrency
-          ? { [planned ? "plannedForeign" : "fareEur"]: centsToDisplay(from.amountCents) }
-          : {}),
-      });
-    }
-  }
-
   // A name already given to another passenger isn't offered twice. A saved
   // passenger whose name has since left the list keeps it as an option.
   function nameOptions(current: PassengerDraft) {
@@ -374,8 +356,18 @@ export function FlightModal({
   // failed. It is not saved a second time on the retry.
   const ownSaved = useRef(false);
 
+  // Booked with nobody's fare typed: refused unless points or linked
+  // payments explain the empty Spent.
+  const spentError = spentMissingError({
+    reservedOn,
+    spentTyped: passengers.some((p) => p.fare.trim() || p.fareEur.trim()),
+    exempt: passengers.some((p) => p.pointsUsed) || spentLinked,
+    dateLabel: "Booking Made",
+  });
+
   async function saveAll(): Promise<string | null> {
     if (!ownSaved.current && !(embed && ownEmpty())) {
+      if (spentError) return spentError;
       const result = await saveTravelFlight(payload());
       if (result?.error) return result.error;
       if (!flight) ownSaved.current = true;
@@ -706,9 +698,6 @@ export function FlightModal({
                 onToggle: () => updatePassenger(p.key, { pointsUsed: !p.pointsUsed }),
               }))}
             /> : null}
-            <div className="has-[.rounded-xl]:order-last has-[.rounded-xl]:basis-full">
-              <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} date={isEstimate ? undefined : reservedOn} />
-            </div>
           </div>
 
           {editingNames ? <TravellerEditor travellers={travellers} /> : null}
@@ -921,9 +910,6 @@ export function FlightModal({
         </div>
         </Section>
 
-        {error && !embed ? (
-          <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p>
-        ) : null}
 
         <PlannedPointsNote show={isEstimate && pointsUsed} />
         {draw !== 0 ? (
@@ -1000,6 +986,7 @@ export function FlightModal({
       title={flight ? "Edit flight" : "Add flight"}
       onClose={onClose}
       headerEnd={headerButtons}
+      headerNotice={error && !embed ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
       className="sm:max-w-5xl"
       headerActions={flight ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
     >

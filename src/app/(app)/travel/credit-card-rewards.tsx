@@ -2088,7 +2088,7 @@ function RewardActivityRowActions({ entry, compact = false }: { entry: RewardAct
 /** Desktop (xl+) card table: one grid template shared by the column header
  *  and every card row so the columns line up. Phones keep the stacked row. */
 const CARD_TABLE_COLS =
-  "xl:grid xl:grid-cols-[minmax(15.5rem,2.4fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_minmax(0,0.9fr)_7rem] xl:items-center xl:gap-x-3";
+  "xl:grid xl:grid-cols-[minmax(17.5rem,2.4fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_minmax(0,0.9fr)_7rem] xl:items-center xl:gap-x-3";
 
 function CardTableHeader() {
   return (
@@ -2537,7 +2537,7 @@ function CreditCardPanel({
           </span>
           <span className="min-w-0">
             <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <button type="button" aria-expanded={expanded} className="text-left text-sm font-semibold leading-tight">
+              <button type="button" aria-expanded={expanded} className="whitespace-nowrap text-left text-sm font-semibold leading-tight">
                 {card.name}
               </button>
               {carryingDebt ? (

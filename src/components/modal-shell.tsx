@@ -56,6 +56,7 @@ export function ModalShell({
   headerActions,
   headerActionsBelow = false,
   headerEnd,
+  headerNotice,
 }: {
   // Usually text; a control (a picker) can stand in for it.
   title: React.ReactNode;
@@ -73,6 +74,10 @@ export function ModalShell({
   // The popup's own buttons (Save, Delete, Close…) pinned at the header's right
   // edge in place of the X, so they're reachable without scrolling to the end.
   headerEnd?: React.ReactNode;
+  // A warning on its own line under the header's buttons (a save that was
+  // refused) — in the non-scrolling header, so it shows right under Save
+  // however far down the form is scrolled.
+  headerNotice?: React.ReactNode;
   // Where the panel sits on phones. "bottom" (default) is right for long,
   // scroll-heavy forms the thumb works through. "top" suits short forms, which
   // otherwise end up with their action buttons pinned in the very corner of the
@@ -134,6 +139,7 @@ export function ModalShell({
             </button>
           </div>
           )}
+          {headerNotice ? <div className="order-last basis-full">{headerNotice}</div> : null}
         </div>
         {/* Scopes column-wise Tab (Accounts balance grids) to this popup, so it
             never jumps to an input on the page behind. */}

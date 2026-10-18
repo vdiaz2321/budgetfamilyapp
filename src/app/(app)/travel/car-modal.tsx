@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
 import {
-  CurrencySelect, Field, MoreDetailsToggle, OpenLinkedButton, PaidNote, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, openableClass, outsideTripNote,
-  type PlanSpent, type PlanSpentSlot,
+  CurrencySelect, Field, MoreDetailsToggle, OpenLinkedButton, PaidNote, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, openableClass, outsideTripNote, spentMissingError,
+  type PlanSpent,
 } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import type { Embed } from "./embedded-section";
@@ -75,7 +74,6 @@ export function CarModal({
   });
   // Blank is None: dollars only.
   const [foreignCurrency, setForeignCurrency] = useState(car?.foreignCurrency ?? "");
-  const lastSlot = useRef<PlanSpentSlot | null>(null);
   const [pointsUsed, setPointsUsed] = useState(car?.pointsUsed ?? false);
   const [points, setPoints] = useState(car?.pointsCost ? String(car.pointsCost) : "");
   const [pointsValue, setPointsValue] = useState(() => {
@@ -92,6 +90,12 @@ export function CarModal({
   // it is the Planned figure — Spent is then the cash paid on top.
   const cost = isEstimate || onPoints ? fig.planned : fig.spent;
   const tripNote = outsideTripNote(trips, trip.tripId, [pickupOn, returnOn]);
+  const spentError = spentMissingError({
+    reservedOn,
+    spentTyped: Boolean(fig.spent.trim() || fig.spentForeign.trim()),
+    exempt: onPoints || car?.paidCents != null,
+    dateLabel: "Booking Made",
+  });
 
   const card = cards.find((c) => c.id === accountId) ?? null;
   const costCents = Math.max(0, displayToCents(cost));
@@ -109,8 +113,8 @@ export function CarModal({
     if (next && !holder.trim() && next.holder) setHolder(next.holder);
   }
 
-  // The short form: points, the second currency, card owner and remarks fold
-  // away; a saved rental already using any of them opens with them showing.
+  // The short form: points, card owner and remarks fold away; a saved rental
+  // already using any of them opens with them showing.
   const [showMore, setShowMore] = useState(
     () =>
       !!car &&
@@ -133,6 +137,7 @@ export function CarModal({
       isEmpty: () =>
         ![company, bookingCode, reservedOn, pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace, accountId, cardLabel, holder, fig.planned, fig.plannedForeign, fig.spent, fig.spentForeign, points, remarks].some((v) => v.trim()),
       save: async () => {
+        if (spentError) return { error: spentError };
         const result = await saveTravelCar(payload());
         return { error: result?.error ?? null };
       },
@@ -203,6 +208,7 @@ export function CarModal({
         onSubmit={(e) => {
           e.preventDefault();
           if (embed) return;
+          if (spentError) return setError(spentError);
           start(async () => {
             setError(null);
             finish(await saveTravelCar(payload()));
@@ -269,29 +275,11 @@ export function CarModal({
 
         <Section
           title="Payment"
-          action={
-            showMore ? <CurrencyConverter
-              blue
-              defaultFrom={foreignCurrency}
-              // Once bought, at the booking date's rate — what the card charged.
-              date={isEstimate ? undefined : reservedOn}
-              // Fills Planned or Spent — whichever was clicked last, else
-              // Planned while it is still a plan.
-              onUse={(cents, from) => {
-                const planned = lastSlot.current ? lastSlot.current.startsWith("planned") : isEstimate;
-                setFig((f) => ({
-                  ...f,
-                  [planned ? "planned" : "spent"]: centsToDisplay(cents),
-                  ...(from.currency === foreignCurrency
-                    ? { [planned ? "plannedForeign" : "spentForeign"]: centsToDisplay(from.amountCents) }
-                    : {}),
-                }));
-              }}
-            /> : null
-          }
+          action={null}
         >
-          {/* The currency the second Planned / Spent box is in. */}
-          <div className={showMore ? "mb-3" : "hidden"}>
+          {/* The currency the second Planned / Spent box is in — always
+              showing, like the flight form's. */}
+          <div className="mb-3">
             <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
           </div>
           <PlanSpentFields
@@ -299,9 +287,9 @@ export function CarModal({
             onChange={setFig}
             currency={currency}
             foreignCurrency={foreignCurrency}
-            onFocusSlot={(slot) => (lastSlot.current = slot)}
+            spentRateDate={isEstimate ? undefined : reservedOn}
             spentOnPoints={onPoints}
-            showForeign={showMore && Boolean(foreignCurrency)}
+            showForeign={Boolean(foreignCurrency)}
           />
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Card used">
@@ -386,7 +374,6 @@ export function CarModal({
         </Section>
 
         <PlannedPointsNote show={isEstimate && onPoints} />
-        {error && !embed ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
 
         {embed ? null : (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
@@ -408,6 +395,7 @@ export function CarModal({
       title={car ? "Edit rental" : "Add rental"}
       onClose={onClose}
       headerEnd={headerButtons}
+      headerNotice={error && !embed ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
       className="sm:max-w-3xl"
       headerActions={car ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
     >

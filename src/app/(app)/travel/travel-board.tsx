@@ -1201,13 +1201,6 @@ export function TravelBoard({
     </div>
   );
 
-  // The Travel Combined Log popup shows both rollups side by side, so they
-  // share one year axis — every year either one knows about, newest first.
-  const combinedYears = useMemo(() => {
-    const ys = new Set<string>(tripSummaries.map((t) => t.start?.slice(0, 4)).filter(Boolean) as string[]);
-    for (const [y] of byYear) ys.add(y);
-    return [...ys].sort().reverse();
-  }, [tripSummaries, byYear]);
   // The two "who did we stay with" tallies: the same money cut by hotel brand
   // and by the card that paid. They sit under the points ledger in a third of
   // a row, so — like it — they only open full width.
@@ -1284,10 +1277,32 @@ export function TravelBoard({
     </div>
   );
 
-  const combinedYearTable = renderYearTable(
-    combinedYears.map((y) => [y, byYear.find(([key]) => key === y)?.[1] ?? null]),
-    true,
-  );
+  // The Travel Combined Log popup shows both rollups side by side, so they
+  // share one year axis — every year either one knows about, newest first.
+  // Both follow the popup's search: a stay counts when its trip matched, or
+  // when its own hotel, city or brand does (stays logged without a trip).
+  const combinedYearRollup = (q: string, tripIds: Set<string>) => {
+    const matches = (s: TravelStay) =>
+      !q || (s.tripId != null && tripIds.has(s.tripId)) ||
+      [s.propertyName, s.city, s.brand].some((v) => v?.toLowerCase().includes(q));
+    const map = new Map<string, { hotel: number; pocket: number; stays: number; points: number }>();
+    for (const s of bought) {
+      if (!matches(s)) continue;
+      const key = stayYear(s);
+      const row = map.get(key) ?? { hotel: 0, pocket: 0, stays: 0, points: 0 };
+      row.hotel += s.hotelCostCents;
+      row.pocket += s.pocketCostCents;
+      row.points += spentPoints(s);
+      row.stays += 1;
+      map.set(key, row);
+    }
+    const ys = new Set<string>(
+      tripSummaries.filter((t) => tripIds.has(t.trip.id)).map((t) => t.start?.slice(0, 4)).filter(Boolean) as string[],
+    );
+    for (const y of map.keys()) ys.add(y);
+    const years = [...ys].sort().reverse();
+    return { years, table: renderYearTable(years.map((y) => [y, map.get(y) ?? null]), true) };
+  };
 
   return (
     <div className="ink-strong space-y-3">
@@ -1377,8 +1392,7 @@ export function TravelBoard({
               summaries={tripSummaries}
               currency={currency}
               onOpenTrip={setOpenTripId}
-              savedByYear={combinedYearTable}
-              alignYears={combinedYears}
+              yearRollup={combinedYearRollup}
             />
           ) : null}
 

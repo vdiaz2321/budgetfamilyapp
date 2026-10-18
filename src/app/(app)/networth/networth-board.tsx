@@ -11,6 +11,7 @@ import {
   formatMoneyWhole,
 } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { ModalShell } from "@/components/modal-shell";
 import {
   setAccountSnapshot,
   setBucketSnapshot,
@@ -44,11 +45,11 @@ const NW_TABLE_COL_WIDTHS = [
   "6.5rem", "6rem", // NW w/out Invest: Value, Diff
   "6.5rem", "6rem", // Stocks
   "6.5rem", "6rem", // Total NW w/out Debt
-  "6rem",    // Debt Incurred
+  "7.5rem",  // Debt Incurred — "DEBT INCURRED" overran 6rem into Actual NW
   "7rem",    // Actual NW
   "6rem",    // Debt Ratio / Y2Y Diff
 ] as const;
-const NW_TABLE_MIN_WIDTH = "62rem";
+const NW_TABLE_MIN_WIDTH = "63.5rem";
 
 const MONTHS_SHORT = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -1969,31 +1970,6 @@ function monthlyRows(points: MonthPoint[], year: string): MonthlyRow[] {
   return rowsAll.filter((r) => year === "all" || r.month.slice(0, 4) === year).reverse();
 }
 
-// The small stat card used across this page's section headers.
-function StatCard({
-  label,
-  value,
-  valueClass = "",
-  sub,
-  subClass = "text-muted",
-  className = "",
-}: {
-  label: string;
-  value: string;
-  valueClass?: string;
-  sub?: string;
-  subClass?: string;
-  className?: string;
-}) {
-  return (
-    <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className}`}>
-      <p className="max-sm:text-[11px] sm:text-sm font-semibold uppercase leading-tight tracking-wide text-muted">{label}</p>
-      <p className={`mt-0.5 truncate text-base font-bold tabular-nums sm:text-2xl ${valueClass}`}>{value}</p>
-      {sub ? <p className={`max-sm:text-[11px] sm:text-sm leading-tight ${subClass}`}>{sub}</p> : null}
-    </div>
-  );
-}
-
 function CardToggle({ title, collapsed, onToggle }: { title: string; collapsed: boolean; onToggle: () => void }) {
   return (
     <button type="button" onClick={onToggle} className="flex items-center gap-2 text-left">
@@ -2211,7 +2187,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
   };
   // Signed as well as coloured — see the M2M Diff column above.
   const diff = (v: number | null) => {
-    if (v == null) return <span className="text-muted">—</span>;
+    if (v == null) return <span className="text-foreground">—</span>;
     const cls = v >= 0 ? "text-positive" : "text-negative";
     return (
       <span className={cls}>
@@ -2224,23 +2200,6 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
     const prev = rowByYear.get(r.year - 1);
     return prev ? get(r.p) - get(prev.p) : null;
   };
-
-  // Header cards, from the same year rows the table shows: where net worth
-  // stands, how far it has come since the first year, the usual year and the
-  // best one.
-  const latestRow = rowsDesc[0] ?? null;
-  const firstRow = rows[0] ?? null;
-  const netDiffs = rows
-    .map((r) => ({ r, d: y2y(r, (p) => p.net) }))
-    .filter((x): x is { r: Row; d: number } => x.d != null);
-  const bestYear = netDiffs.reduce<{ r: Row; d: number } | null>((b, x) => (b == null || x.d > b.d ? x : b), null);
-  const spanYears = latestRow && firstRow ? latestRow.year - firstRow.year : 0;
-  const sinceFirst = latestRow && firstRow && spanYears > 0 ? latestRow.p.net - firstRow.p.net : null;
-  const perYear = sinceFirst != null ? Math.round(sinceFirst / spanYears) : null;
-  const latestDiff = latestRow ? y2y(latestRow, (p) => p.net) : null;
-  const prevRow = latestRow ? rowByYear.get(latestRow.year - 1) : undefined;
-  const signed = (v: number) => `${v < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(v), currency)}`;
-  const tone = (v: number | null) => (v == null || v === 0 ? "" : v > 0 ? "text-positive" : "text-negative");
 
   // Column groups: label | value | y2y  (Actual NW group has an extra Debt column)
   return (
@@ -2260,37 +2219,8 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
           <h2 className="text-sm font-semibold sm:text-lg">Total Net Worth by Year</h2>
         </button>
       </div>
-      {latestRow ? (
-        <div className="grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-4">
-          <StatCard
-            label={`Net worth: ${monthLabel(latestRow.p.month)}`}
-            value={formatMoneyWhole(latestRow.p.net, currency)}
-            sub={latestDiff != null && prevRow ? `${signed(latestDiff)} vs ${prevRow.label}` : monthLabel(latestRow.p.month)}
-            subClass={latestDiff == null ? "text-muted" : `font-semibold ${tone(latestDiff)}`}
-          />
-          <StatCard
-            label={firstRow ? `Growth since ${firstRow.year}` : "Growth"}
-            value={sinceFirst == null ? "—" : signed(sinceFirst)}
-            valueClass={tone(sinceFirst)}
-            sub={firstRow ? `from ${formatMoneyWhole(firstRow.p.net, currency)}` : undefined}
-          />
-          <StatCard
-            label="Average year"
-            value={perYear == null ? "—" : signed(perYear)}
-            valueClass={tone(perYear)}
-            sub={spanYears > 0 ? `over ${spanYears} ${spanYears === 1 ? "year" : "years"}` : undefined}
-          />
-          <StatCard
-            label="Best year"
-            value={bestYear == null ? "—" : signed(bestYear.d)}
-            valueClass={tone(bestYear?.d ?? null)}
-            sub={bestYear ? String(bestYear.r.year) : undefined}
-          />
-        </div>
-      ) : null}
-      {/* Opens here, above the table, rather than as a popup: a popup sat on
-          top of the very rows you are comparing against while editing. */}
-      {!collapsed && editingMonth ? (
+      {/* A popup, so the table no longer jumps down when a year is opened. */}
+      {editingMonth ? (
         <HistoryMonthEditor
           key={editingMonth.month}
           point={editingMonth}
@@ -2310,7 +2240,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
               ))}
             </colgroup>
             <thead>
-              <tr className="border-b border-line bg-brand-soft/25 max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-muted">
+              <tr className="border-b border-line bg-brand-soft/25 max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">
                 <th rowSpan={2} className="sticky left-0 z-20 border-r border-line bg-brand-soft px-2 py-1 text-center align-middle">
                   Date
                 </th>
@@ -2321,7 +2251,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
                 <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">Total NW w/out Debt</th>
                 <th colSpan={3} className="px-1.5 py-1 text-center">Actual NW</th>
               </tr>
-              <tr className="border-b border-line max-sm:text-[11px] sm:text-xs font-medium uppercase tracking-wide text-muted">
+              <tr className="border-b border-line max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">
                 <th className="px-1.5 py-1 text-center">Value</th>
                 <th className="border-r border-line px-1.5 py-1 text-center">Y2Y Diff</th>
                 <th className="px-1.5 py-1 text-center">Value</th>
@@ -2342,7 +2272,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
                 const actual = r.p.net;
                 return (
                   <tr key={r.year} className="border-b border-line last:border-0">
-                    <td className="sticky left-0 z-20 border-b border-r border-line bg-brand-soft px-2 py-1 text-center text-xs font-semibold">
+                    <td className="sticky left-0 z-20 border-b border-r border-line bg-brand-soft px-2 py-1 text-center font-bold">
                       {/* A year that came from the imported history is the one
                           kind of row nothing on this page could correct: the
                           balances grid only covers months with per-account
@@ -2362,15 +2292,15 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
                         r.label
                       )}
                     </td>
-                    <td className="px-1.5 py-1 text-center tabular-nums">{fmt(nwOut)}</td>
-                    <td className="border-r border-line px-1.5 py-1 text-center tabular-nums">{diff(y2y(r, (p) => p.nwWithoutInvest))}</td>
-                    <td className="px-1.5 py-1 text-center tabular-nums">{fmt(stocks)}</td>
-                    <td className="border-r border-line px-1.5 py-1 text-center tabular-nums">{diff(y2y(r, (p) => p.stocks))}</td>
-                    <td className="px-1.5 py-1 text-center tabular-nums">{fmt(gross)}</td>
-                    <td className="border-r border-line px-1.5 py-1 text-center tabular-nums">{diff(y2y(r, (p) => p.assets))}</td>
-                    <td className="px-1.5 py-1 text-center tabular-nums text-negative">{debt === 0 ? <span className="text-muted">—</span> : fmt(debt)}</td>
-                    <td className="px-1.5 py-1 text-center text-xs font-bold tabular-nums">{fmt(actual)}</td>
-                    <td className="px-1.5 py-1 text-center tabular-nums">{diff(y2y(r, (p) => p.net))}</td>
+                    <td className="px-1.5 py-1 text-center font-bold tabular-nums">{fmt(nwOut)}</td>
+                    <td className="border-r border-line px-1.5 py-1 text-center font-bold tabular-nums">{diff(y2y(r, (p) => p.nwWithoutInvest))}</td>
+                    <td className="px-1.5 py-1 text-center font-bold tabular-nums">{fmt(stocks)}</td>
+                    <td className="border-r border-line px-1.5 py-1 text-center font-bold tabular-nums">{diff(y2y(r, (p) => p.stocks))}</td>
+                    <td className="px-1.5 py-1 text-center font-bold tabular-nums">{fmt(gross)}</td>
+                    <td className="border-r border-line px-1.5 py-1 text-center font-bold tabular-nums">{diff(y2y(r, (p) => p.assets))}</td>
+                    <td className="px-1.5 py-1 text-center font-bold tabular-nums text-negative">{debt === 0 ? <span className="text-foreground">—</span> : fmt(debt)}</td>
+                    <td className="px-1.5 py-1 text-center font-bold tabular-nums">{fmt(actual)}</td>
+                    <td className="px-1.5 py-1 text-center font-bold tabular-nums">{diff(y2y(r, (p) => p.net))}</td>
                   </tr>
                 );
               })}
@@ -2408,19 +2338,6 @@ function HistoryMonthEditor({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  // Brought to the top of the screen, so the table's rows sit right under it
-  // — pressing a year low in the table would otherwise open it off-screen.
-  useEffect(() => {
-    panelRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
   // Whole-dollar amounts drop their ".00" like the table; real cents stay, so
   // saving an untouched field never rounds a balance.
   const show = (cents: number) => centsToDisplay(cents).replace(/\.00$/, "");
@@ -2437,14 +2354,22 @@ function HistoryMonthEditor({
   const bankCents = displayToCents(nwWithoutInvest) - point.savings;
 
   const field =
-    "w-full rounded-md bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
-  const label = "mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted";
+    "w-full rounded-md bg-background px-2 py-1.5 text-center text-sm font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  const label = "mb-0.5 block text-center text-[10px] font-semibold uppercase tracking-wide text-foreground";
 
   return (
-    <div ref={panelRef} className="mx-4 mb-3 scroll-mt-4 rounded-lg bg-background ring-1 ring-line">
-      <h3 className="truncate px-4 pt-3 text-sm font-bold sm:px-5">{monthLabel(point.month)} — recorded totals</h3>
+    <ModalShell
+      title={`${monthLabel(point.month)} — recorded totals`}
+      onClose={onClose}
+      className="sm:max-w-2xl"
+      mobileAlign="top"
+    >
+      {/* onSubmit, not <form action>: a rejected save keeps what was typed. */}
       <form
-        action={(fd) =>
+        onSubmit={(e) => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          setError(null);
           start(async () => {
             const res = await setNetworthHistory(fd);
             if (res?.error) setError(res.error);
@@ -2452,9 +2377,9 @@ function HistoryMonthEditor({
               router.refresh();
               onClose();
             }
-          })
-        }
-        className="px-4 pb-4 pt-2 sm:px-5 sm:max-w-2xl"
+          });
+        }}
+        className="px-5 pb-5 pt-3"
       >
         <input type="hidden" name="month" value={point.month} />
         <input type="hidden" name="savings" value={centsToDisplay(point.savings)} />
@@ -2474,7 +2399,7 @@ function HistoryMonthEditor({
           </label>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+        <div className="mt-3 grid grid-cols-2 gap-3 text-center text-sm">
           <p>
             <span className={label}>Total NW w/out Debt</span>
             <span className={`font-semibold tabular-nums ${negCls(assetsCents)}`}>{formatMoneyWhole(assetsCents, currency)}</span>
@@ -2484,10 +2409,6 @@ function HistoryMonthEditor({
             <span className={`font-bold tabular-nums ${negCls(netCents)}`}>{formatMoneyWhole(netCents, currency)}</span>
           </p>
         </div>
-        <p className="mt-1 text-[11px] text-muted">
-          These are the totals the importer recorded, for months that predate
-          per-account tracking.
-        </p>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
           <button
@@ -2507,8 +2428,7 @@ function HistoryMonthEditor({
         </div>
         {error ? <p className="mt-2 text-sm font-medium text-negative">{error}</p> : null}
       </form>
-
-    </div>
+    </ModalShell>
   );
 }
 
