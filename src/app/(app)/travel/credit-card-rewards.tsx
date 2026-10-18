@@ -3106,7 +3106,7 @@ function EditCreditCardForm({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [migrationWarning, setMigrationWarning] = useState(false);
-  const [activeTab, setActiveTab] = useState<"key" | "basics" | "debt">("key");
+  const [activeTab, setActiveTab] = useState<"key" | "basics" | "debt">("basics");
   const d = card.cardDetails;
   // Every bank already spelled out on another card, offered as a dropdown on
   // the Bank field. A list, not a <select>: a new issuer still gets typed in,
@@ -3179,12 +3179,12 @@ function EditCreditCardForm({
 
         {/* No close button of its own any more — the modal header carries one. */}
         <div className="grid grid-cols-3 items-center border-b border-line">
-          {tabBtn("key", "Points & Dates", "Points")}
           {tabBtn("basics", "Basics & Rewards", "Basics")}
+          {tabBtn("key", "Points & Dates", "Points")}
           {tabBtn("debt", "Debt tracking", "Debt")}
         </div>
 
-        {/* Tab 1: Key fields (default) */}
+        {/* Tab 2: Key fields */}
         <div className={activeTab === "key" ? "" : "hidden"}>
           <div className="rounded-lg border border-line bg-background/60 p-3">
             {/* Three to a row from md up, grouped by row: the card (points,
@@ -3241,15 +3241,20 @@ function EditCreditCardForm({
           </div>
         </div>
 
-        {/* Tab 2: Basics & Rewards */}
+        {/* Tab 1: Basics & Rewards (default) */}
         <div className={activeTab === "basics" ? "" : "hidden"}>
-          {/* Three to a row from md up: who (name, holder, auth user), the
-              account (bank, opened, closed), its fee and rewards, the sign-up
-              bonus, then Remarks across the width. The two checkboxes and the
-              TPG link share a line of their own at the bottom: squeezed into
-              the grid they sat oddly beside the boxes. */}
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
+          {/* Four to a row from lg up (three at md): who (name, due day,
+              holder, auth user), the account (bank, opened, closed, fee), the
+              rewards, then the sign-up bonus with Remarks filling the last
+              slot. The two checkboxes and the TPG link share a line of their
+              own at the bottom: squeezed into the grid they sat oddly beside
+              the boxes. */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             <LabeledInput label="Card name" name="name" defaultValue={card.name} required />
+            {/* Feeds the Accounts tiles' "Payment due" strip, and a payoff
+                debt's due day — one box for both. Beside the name, where
+                the tiles' Edit lands. */}
+            <LabeledInput label="Payment due day" name="paymentDueDay" type="number" min="1" max="31" step="1" defaultValue={card.paymentDueDay ?? d?.payoffDueDay ?? ""} placeholder="1–31" />
             <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
             <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
             <div>
@@ -3267,9 +3272,6 @@ function EditCreditCardForm({
             <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
             <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
             <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
-            {/* Feeds the Accounts tiles' "Payment due" strip, and a payoff
-                debt's due day — one box for both. */}
-            <LabeledInput label="Payment due day" name="paymentDueDay" type="number" min="1" max="31" step="1" defaultValue={card.paymentDueDay ?? d?.payoffDueDay ?? ""} placeholder="1–31" />
             <label className="block">
               <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Rewards category</span>
               <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500">
@@ -3282,7 +3284,7 @@ function EditCreditCardForm({
             <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
             <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
             <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
-            <div className="col-span-full">
+            <div className="col-span-full lg:col-span-1">
               <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Remarks</label>
               <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
             </div>

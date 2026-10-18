@@ -258,11 +258,13 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
  * Typed spending, grown by inflation. An amount typed for a year is that
  * year's spending exactly; each year after it holding the same typed amount
  * grows by inflation from there, until a year with a new typed amount starts
- * over. Returns year → spending before healthcare. Years before `thisYear`
- * are left as typed.
+ * over. `restart` marks a year where spending was typed even though the
+ * amount matches the year before (typing $90,000 again in 2033 restarts the
+ * growth there). Returns year → spending before healthcare. Years before
+ * `thisYear` are left as typed.
  */
 export function inflatedSpending(
-  rows: { year: number; baseSpendingCents: number }[],
+  rows: { year: number; baseSpendingCents: number; restart?: boolean }[],
   thisYear: number,
   inflationPct: number,
 ): Map<number, number> {
@@ -274,7 +276,7 @@ export function inflatedSpending(
       out.set(r.year, r.baseSpendingCents);
       continue;
     }
-    if (anchorYear == null || r.baseSpendingCents !== prevBase) anchorYear = r.year;
+    if (anchorYear == null || r.restart || r.baseSpendingCents !== prevBase) anchorYear = r.year;
     prevBase = r.baseSpendingCents;
     out.set(r.year, Math.round(r.baseSpendingCents * inflateTo(r.year, anchorYear, inflationPct)));
   }

@@ -303,12 +303,12 @@ export function NetworthBoard({
           selectedKeys={selectedRows.map(gridRowKey).filter(Boolean)}
           onSelectAccount={handleSelectAccount}
           pointNets={Object.fromEntries(points.map((p) => [p.month, p.net]))}
+          graphToggle={<GraphToggle open={chartOpen} onToggle={setChartOpen} />}
           chart={
             <ChartSection
               points={points}
               currency={currency}
               open={chartOpen}
-              onToggle={setChartOpen}
               selectedRows={selectedRows}
               gridMonths={gridMonths}
               onClearFilter={() => setSelectedRows([])}
@@ -355,11 +355,32 @@ const CHART_COLORS = [
   "var(--viz-savings)",  // blue
 ];
 
+// The Show / Hide Graph button, in Net Worth Monthly Balances' header row.
+function GraphToggle({ open, onToggle }: { open: boolean; onToggle: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(!open)}
+      aria-expanded={open}
+      className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 max-sm:text-[12px] sm:text-sm font-semibold transition ${
+        open
+          ? "bg-brand text-white"
+          : "bg-sky-100 text-foreground hover:bg-sky-200 dark:bg-sky-900/50"
+      }`}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
+        <path d="M3 3v18h18" />
+        <path d="M7 15l4-4 3 3 5-6" />
+      </svg>
+      {open ? "Hide Graph" : "Show Graph"}
+    </button>
+  );
+}
+
 function ChartSection({
   points,
   currency,
   open,
-  onToggle,
   selectedRows,
   gridMonths,
   onClearFilter,
@@ -371,7 +392,6 @@ function ChartSection({
   points: MonthPoint[];
   currency: string;
   open: boolean;
-  onToggle: (v: boolean) => void;
   selectedRows: GridRow[];
   gridMonths: string[];
   onClearFilter: () => void;
@@ -388,28 +408,15 @@ function ChartSection({
   // section, so it lets go once Net Worth Monthly Balances has scrolled past
   // rather than floating over the sections below. Desktop only: on a phone
   // the graph is a third of the screen and would leave no room for the table.
+  // Its Show/Hide button sits in the section's header (GraphToggle), so a
+  // closed graph takes no room at all.
+  if (!open) return null;
   return (
     <div
       data-nw-pinned-chart
       className={`px-4 pb-3 ${open ? "md:sticky md:top-0 md:z-30 md:bg-surface md:pt-2" : ""}`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onToggle(!open)}
-          aria-expanded={open}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 max-sm:text-[12px] sm:text-sm font-semibold transition ${
-            open
-              ? "bg-brand text-white"
-              : "bg-sky-100 text-foreground hover:bg-sky-200 dark:bg-sky-900/50"
-          }`}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
-            <path d="M3 3v18h18" />
-            <path d="M7 15l4-4 3 3 5-6" />
-          </svg>
-          {open ? "Hide Graph" : "Show Graph"}
-        </button>
         {open ? <>
         {plan.length > 0 ? (
           <button
@@ -1090,6 +1097,7 @@ function BalanceGrid({
   onSelectAccount,
   pointNets = {},
   chart,
+  graphToggle,
 }: {
   months: string[];
   rows: GridRow[];
@@ -1100,8 +1108,10 @@ function BalanceGrid({
   /** Net worth for every month on record, imported history included — so
    *  January can be measured against the December before the grid starts. */
   pointNets?: Record<string, number>;
-  /** The net worth graph, shown between the cards and the table. */
+  /** The net worth graph, shown above the table. */
   chart?: ReactNode;
+  /** The Show / Hide Graph button, centred in the header row. */
+  graphToggle?: ReactNode;
 }) {
   // Reorder optimistically — a drag updates this local copy immediately;
   // `rows` (from the server) wins once it's revalidated. The hand-off is done
@@ -1349,59 +1359,21 @@ function BalanceGrid({
     return { amount: now - before, pct: before ? (now - before) / Math.abs(before) : null };
   };
 
-  // Header cards: each section's total for the newest FINISHED month on
-  // screen, and how it moved from the month before (Sep vs Aug while October
-  // is still in progress). The current month is skipped because its balances
-  // are mid-month and the comparison reads as a loss until month-end. Kids
-  // Funding stays out, as it does from every total.
+  // The newest FINISHED month on screen (Sep while October is still in
+  // progress) — the Growth column ends there, since mid-month balances read
+  // as a loss until month-end.
   const shortMonth = (m: string) => monthLabel(m).split(" ")[0];
   const closedIdx = months.findIndex((m) => m < lockedFromMonth);
   const cardIdx = closedIdx === -1 ? 0 : closedIdx;
-  const hasBefore = months.length > cardIdx + 1;
-  const headerCards =
-    months.length === 0
-      ? []
-      : [
-          ...sections
-            .filter((g) => g.section !== "Kids Funding")
-            .map((g) => ({
-              label: g.section,
-              now: sectionTotal(g, cardIdx),
-              before: hasBefore ? sectionTotal(g, cardIdx + 1) : null,
-              liability: g.rows[0]?.liability ?? false,
-            })),
-          {
-            label: "Total net worth",
-            now: netAt(cardIdx),
-            before: hasBefore ? netAt(cardIdx + 1) : null,
-            liability: false,
-          },
-        ];
-
-  // The year at a glance, from finished months only so it agrees with the
-  // cards beside it: growth since the year's first month, its average month,
-  // and its best month. (Was the separate Net Worth Over Time card, which
-  // counted the in-progress month and so disagreed with Total net worth.)
+  // The oldest finished month on screen with a net worth — where Growth starts.
   const closedIdxs = closedIdx === -1 ? [] : months.map((_, i) => i).slice(closedIdx);
-  const withNet = closedIdxs.filter((i) => netAt(i) != null);
-  const firstIdx = withNet.at(-1);
-  // Growth runs from the year's first month on screen to its newest finished
-  // one (Jan → Sep), the same span as the Growth column — Victor wants the
-  // year to stay inside the year, not start from the December before it.
-  const growth =
-    withNet.length > 1 && firstIdx != null ? netAt(withNet[0])! - netAt(firstIdx)! : null;
-  const spanMonths = withNet.length > 1 && firstIdx != null ? firstIdx - withNet[0] : 0;
-  const avg = growth != null && spanMonths > 0 ? Math.round(growth / spanMonths) : null;
-  const best = closedIdxs.reduce<{ i: number; amount: number } | null>((b, i) => {
-    const c = changeAt(i);
-    return c && (b == null || c.amount > b.amount) ? { i, amount: c.amount } : b;
-  }, null);
+  const firstIdx = closedIdxs.filter((i) => netAt(i) != null).at(-1);
+
   const signed = (v: number) => `${v < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(v), currency)}`;
   const tone = (v: number | null) => (v == null || v === 0 ? "" : v > 0 ? "text-positive" : "text-negative");
-  const cardCount = headerCards.length + (headerCards.length > 0 ? 2 : 0);
 
   // Growth column: the newest finished month minus the oldest month on
-  // screen that has a value — Jan → Sep for 2026, same span as the Growth card.
+  // screen that has a value — Jan → Sep for 2026.
   const growthOf = (get: (i: number) => number | null): number | null => {
     const last = get(cardIdx);
     if (last == null) return null;
@@ -1527,10 +1499,9 @@ function BalanceGrid({
 
   return (
     <section style={{ overflow: "clip" }} className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      {/* Three columns on desktop so the month label sits dead centre between
-          the title and the year picker; on the phone it drops to its own
-          centred line under them. */}
-      <div className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1.5 px-4 py-2.5 sm:grid-cols-[1fr_auto_1fr]">
+      {/* Title, then the year picker and graph button right beside it —
+          Victor keeps a section's controls on the left, next to its name. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
         <button
           type="button"
           onClick={toggleGrid}
@@ -1547,71 +1518,11 @@ function BalanceGrid({
           </svg>
           <h2 className="text-sm font-semibold sm:text-lg">Net Worth Monthly Balances</h2>
         </button>
-        {/* Names the month the header cards show, once, instead of on every
-            card. Boxed with a calendar so it reads as a label, not part of the
-            title; square corners keep it apart from the round chips. */}
-        {headerCards.length > 0 ? (
-          <span className="col-span-2 row-start-2 inline-flex items-center gap-1.5 justify-self-center whitespace-nowrap rounded-md bg-sky-50 px-2 py-0.5 max-sm:text-[11px] font-semibold text-foreground ring-1 ring-sky-200 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:text-sm dark:bg-sky-950/40 dark:ring-sky-800">
-            <svg
-              width="13" height="13" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-              className="shrink-0" style={{ color: "var(--viz-savings)" }}
-              aria-hidden
-            >
-              <rect x="3" y="5" width="18" height="16" rx="2" />
-              <path d="M16 3v4M8 3v4M3 10h18" />
-            </svg>
-            Cards Show {new Date(`${months[cardIdx]}T00:00:00`).toLocaleString("en-US", { month: "long" })} Figures
-          </span>
-        ) : null}
         {gridYears.length > 0 ? (
-          <div className="col-start-2 row-start-1 justify-self-end sm:col-start-3">
-            <YearPicker years={gridYears} year={gridYear} onYearChange={setGridYear} />
-          </div>
+          <YearPicker years={gridYears} year={gridYear} onYearChange={setGridYear} />
         ) : null}
+        {graphToggle && gridOpen ? graphToggle : null}
       </div>
-      {headerCards.length > 0 ? (
-        <div className={`grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-3 ${cardCount >= 7 ? "lg:grid-cols-7" : "lg:grid-cols-6"}`}>
-          {headerCards.map((c) => {
-            const delta = c.now != null && c.before != null ? c.now - c.before : null;
-            // Coloured by sign, like the grid's Growth column: minus is red,
-            // Debt included.
-            const good = delta == null || delta === 0 ? null : delta > 0;
-            return (
-              <StatCard
-                key={c.label}
-                label={c.label}
-                value={c.now == null ? "—" : formatMoneyWhole(c.now, currency)}
-                valueClass={c.liability ? "text-negative" : ""}
-                sub={
-                  delta != null && months[cardIdx + 1]
-                    ? `${delta < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(delta), currency)} vs ${shortMonth(months[cardIdx + 1])}`
-                    : undefined
-                }
-                subClass={good == null ? "text-muted" : good ? "font-semibold text-positive" : "font-semibold text-negative"}
-              />
-            );
-          })}
-          <StatCard
-            label={gridYear === "all" ? "Growth, all years" : `Growth in ${gridYear}`}
-            value={growth == null ? "—" : signed(growth)}
-            valueClass={tone(growth)}
-            sub={
-              firstIdx == null || growth == null
-                ? undefined
-                : avg != null
-                  ? `avg ${signed(avg)}/mo`
-                  : `since ${shortMonth(months[firstIdx])}`
-            }
-          />
-          <StatCard
-            label="Best month"
-            value={best == null ? "—" : signed(best.amount)}
-            valueClass={tone(best?.amount ?? null)}
-            sub={best ? monthLabel(months[best.i]) : undefined}
-          />
-        </div>
-      ) : null}
       {gridOpen ? <>
       {chart}
       {reorderError ? (
@@ -2123,7 +2034,7 @@ function MonthlyTraction({
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Wraps on mobile: the year picker + Show Details would otherwise
           squeeze the title into three lines. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
         <CardToggle title="Net Worth Monthly Traction" collapsed={collapsed} onToggle={() => setState((s) => ({ v: !s.v }))} />
         <div className="flex items-center gap-2">
           <YearPicker years={years} year={year} onYearChange={onYearChange} />

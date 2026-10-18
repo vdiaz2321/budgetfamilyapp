@@ -464,12 +464,15 @@ export function FiSection({
   }));
 
   // The button that opens the rates that rebuild the table, above it.
-  // Same pill as Today's Money, set apart by a pencil and a sky-400 ring.
+  // Same pill as Today's Money, set apart by a pencil and a light orange
+  // fill — Victor asked for orange (2026-10-18) so it doesn't read as one of
+  // the blue Today's / Not Today's Money toggles beside it. An action button,
+  // not data, so the no-orange-in-charts rule doesn't apply.
   const assumptions = (
     <button
       type="button"
       onClick={() => setEditing(true)}
-      className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-foreground ring-1 ring-sky-400 whitespace-nowrap transition hover:bg-sky-100 sm:text-sm dark:bg-sky-950/40 dark:hover:bg-sky-900/50"
+      className="inline-flex items-center gap-1.5 rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold text-foreground ring-1 ring-orange-300 whitespace-nowrap transition hover:bg-orange-100 sm:text-sm dark:bg-orange-900/40 dark:ring-orange-500/70 dark:hover:bg-orange-800/50"
     >
       <svg
         aria-hidden

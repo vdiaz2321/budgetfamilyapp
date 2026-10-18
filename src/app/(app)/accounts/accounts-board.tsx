@@ -1182,9 +1182,15 @@ function CardTile({
       <span className="min-w-0 flex-1">
         {/* Label and figure one size, on one line. */}
         <span className="block whitespace-nowrap text-lg font-bold leading-tight">
-          Card owed:{" "}
-          <span className={`tabular-nums ${owed > 0 && !closed ? "text-negative" : "text-foreground"}`}>
-            {formatMoney(Math.max(0, owed), currency)}
+          {/* A refund larger than the balance leaves a credit; show it, so
+              the tiles add up to the header's total. */}
+          {owed < 0 && !closed ? "Card credit:" : "Card owed:"}{" "}
+          <span
+            className={`tabular-nums ${
+              closed ? "text-foreground" : owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-foreground"
+            }`}
+          >
+            {formatMoney(closed ? Math.max(0, owed) : owed, currency)}
           </span>
         </span>
         <span className={`mt-1 block truncate text-sm font-semibold ${closed ? "text-foreground" : "text-sky-800 dark:text-sky-200"}`}>
@@ -1433,6 +1439,10 @@ function CreditCardListSection({
                         {/* "Card" drops on a phone, where it cut the card's name. */}
                         <span className="max-sm:hidden">Card </span>Owed: <span className="tabular-nums text-negative">{formatMoney(a.owedCents ?? 0, currency)}</span>
                       </span>
+                    ) : (a.owedCents ?? 0) < 0 ? (
+                      <span className="shrink-0 whitespace-nowrap text-sm font-semibold">
+                        Credit: <span className="tabular-nums text-positive">{formatMoney(a.owedCents ?? 0, currency)}</span>
+                      </span>
                     ) : null}
                     {/* The chevron says "opens something", the same cue the
                         account-group rows use — it replaces the old "Click on
@@ -1545,6 +1555,10 @@ function PickCardModal({
                 {(a.owedCents ?? 0) > 0 ? (
                   <span className="shrink-0 text-sm font-semibold tabular-nums text-negative">
                     {formatMoney(a.owedCents ?? 0, currency)}
+                  </span>
+                ) : (a.owedCents ?? 0) < 0 ? (
+                  <span className="shrink-0 text-sm font-semibold">
+                    Credit: <span className="tabular-nums text-positive">{formatMoney(a.owedCents ?? 0, currency)}</span>
                   </span>
                 ) : null}
               </button>

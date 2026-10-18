@@ -42,6 +42,7 @@ import {
   clampReturnPct,
   clampWithdrawPct,
   parseTypedGroups,
+  parseSpendRestart,
   parseTypedWithdraw,
   pctWithdrawCarrier,
   resolveOverrides,
@@ -1063,7 +1064,11 @@ async function recomputeRetirementIncome(
 
   // Typed spending rises with inflation from the year it was typed.
   const grownSpend = inflatedSpending(
-    rows.map((r) => ({ year: r.year, baseSpendingCents: r.base_spending_cents ?? r.spending_cents })),
+    rows.map((r) => ({
+      year: r.year,
+      baseSpendingCents: r.base_spending_cents ?? r.spending_cents,
+      restart: parseSpendRestart(r.group_overrides),
+    })),
     thisYear,
     inflationPct,
   );
@@ -1561,8 +1566,12 @@ export async function saveProjectionYear(formData: FormData) {
       }
     }
   }
+  // A spending typed here restarts its inflation growth in this year, even
+  // when the amount matches the base the years before it already held.
+  const spendFrom = spendingTyped || parseSpendRestart(prev?.group_overrides);
   const overridesOut = {
     ...typedGroups,
+    ...(spendFrom ? { spendFrom: true } : {}),
     ...(typedWithdraw == null ? {} : "pct" in typedWithdraw ? { withdrawPct: typedWithdraw.pct } : { withdraw: typedWithdraw.cents }),
   };
 
@@ -1638,6 +1647,28 @@ export async function saveProjectionYear(formData: FormData) {
     if (carryError) {
       console.error("[saveProjectionYear:carry]", carryError);
       return { error: `Saved ${year}, but couldn't carry it forward — ${carryError.message}` };
+    }
+    // The carried spending replaces what later years had typed, so their
+    // restart markers go too — growth now runs from this year.
+    if (carry.base_spending_cents != null) {
+      const later = unwrap(
+        await supabase
+          .from("networth_projection")
+          .select("year, group_overrides")
+          .eq("household_id", householdId)
+          .gt("year", year),
+        "networth_projection",
+      );
+      for (const r of later ?? []) {
+        if (!parseSpendRestart(r.group_overrides)) continue;
+        const rest = { ...(r.group_overrides as Record<string, unknown>) };
+        delete rest.spendFrom;
+        await supabase
+          .from("networth_projection")
+          .update({ group_overrides: Object.keys(rest).length > 0 ? rest : null })
+          .eq("household_id", householdId)
+          .eq("year", r.year);
+      }
     }
   }
 

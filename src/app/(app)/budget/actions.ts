@@ -2384,8 +2384,8 @@ export async function updateTransaction(formData: FormData) {
 export async function updateTransactionAmount(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "");
-  const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
-  if (!id || amountCents <= 0) return;
+  const enteredCents = displayToCents(String(formData.get("amount") ?? "0"));
+  if (!id || enteredCents <= 0) return;
 
   const tx = unwrap(
     await supabase
@@ -2396,7 +2396,11 @@ export async function updateTransactionAmount(formData: FormData) {
       .maybeSingle(),
     "transactions",
   );
-  if (!tx || tx.amount_cents === amountCents) return;
+  if (!tx) return;
+  // The box edits the plain amount; a refund (stored negative) stays a refund.
+  const isRefund = tx.amount_cents < 0;
+  const amountCents = isRefund ? -enteredCents : enteredCents;
+  if (tx.amount_cents === amountCents) return;
 
   if (tx.movement_type === "account_transfer") {
     const { error } = await supabase.rpc("mutate_account_transfer", {
@@ -2428,7 +2432,8 @@ export async function updateTransactionAmount(formData: FormData) {
 
   const signedDelta = tx.is_withdrawal ? -deltaCents : deltaCents;
   let touchedSnapshot = false;
-  if (tx.subcategory_id) {
+  // Refunds never moved buckets or debts when logged, so a new amount doesn't either.
+  if (tx.subcategory_id && !isRefund) {
     const linkedBucketId = await getLinkedBucketId(supabase, householdId, tx.subcategory_id);
     if (linkedBucketId) {
       await adjustBucketBalance(supabase, householdId, linkedBucketId, signedDelta);

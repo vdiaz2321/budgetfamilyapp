@@ -15,6 +15,7 @@ import {
   emptyBalances,
   parseStoredGroups,
   parseTypedGroups,
+  parseSpendRestart,
   parseTypedWithdraw,
   resolveGroupSettings,
   resolveOverrides,
@@ -882,7 +883,11 @@ export default async function NetworthPage() {
   // The typed spending each year, grown by inflation from the year it was typed —
   // what the table shows and the year popup edits.
   const grownSpend = inflatedSpending(
-    (projectionRows ?? []).map((r) => ({ year: r.year, baseSpendingCents: r.base_spending_cents ?? r.spending_cents ?? 0 })),
+    (projectionRows ?? []).map((r) => ({
+      year: r.year,
+      baseSpendingCents: r.base_spending_cents ?? r.spending_cents ?? 0,
+      restart: parseSpendRestart(r.group_overrides),
+    })),
     thisYearNum,
     planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
   );
@@ -999,6 +1004,8 @@ export default async function NetworthPage() {
       return {
         kind,
         start: start[kind],
+        // The year's return %, for the popup's Proj End (typed, else settings).
+        rate: typed[kind]?.ret ?? st.returnPct,
         // Cash moves with every paycheck and bill, so its change isn't a gain.
         gain: isCash ? 0 : end - start[kind] - (addIn[kind] - takeOut[kind] - janIn[kind]),
         add,

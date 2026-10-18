@@ -248,7 +248,11 @@ export function PayCardModal({
             ✕
           </button>
         </div>
-        {owedCents !== 0 && debtBalanceCents === 0 ? (
+        {owedCents < 0 && debtBalanceCents === 0 ? (
+          <p className="text-xs text-muted sm:text-sm">
+            Credit on card: <span className="font-semibold text-positive">{formatMoney(owedCents, currency)}</span>
+          </p>
+        ) : owedCents !== 0 && debtBalanceCents === 0 ? (
           <p className="text-xs text-muted">
             Currently owed: <span className="font-semibold text-negative">{formatMoney(owedCents, currency)}</span>
           </p>

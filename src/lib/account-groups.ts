@@ -268,6 +268,13 @@ export function parseTypedWithdraw(raw: unknown): TypedWithdraw | null {
   return r.withdraw != null && Number.isFinite(n) && n >= 0 ? { cents: Math.round(n) } : null;
 }
 
+/** Whether spending was typed in this year (stored beside the groups in
+ *  group_overrides as { spendFrom: true }), so its inflation growth restarts
+ *  there even when the amount matches the year before. */
+export function parseSpendRestart(raw: unknown): boolean {
+  return !!raw && typeof raw === "object" && (raw as { spendFrom?: unknown }).spendFrom === true;
+}
+
 /** What the investments hold: every group but Cash. A withdrawal % is of this. */
 export function investmentsCents(balances: Record<GroupKind, number>): number {
   return GROUP_KINDS.reduce((t, k) => (k === "cash" ? t : t + Math.max(0, balances[k])), 0);

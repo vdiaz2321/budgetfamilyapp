@@ -369,7 +369,7 @@ export function TransactionsTable({
   const tableScrollRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="mx-auto w-full max-w-[120rem] space-y-2 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:overflow-hidden md:px-1 md:pb-1">
+    <div className="mx-auto w-full max-w-[120rem] space-y-2 md:-mb-6 md:flex md:h-[calc(100dvh-2.5rem)] md:flex-col md:space-y-0 md:overflow-hidden md:px-1 md:pb-1">
       {/* Frozen on every width. This used to slide away on phones when you
           scrolled down; Victor reads the month, the filters, the range and
           the totals line while scrolling the register, so the header stays
@@ -917,7 +917,10 @@ function TxLine({
   const [clearPending, startClear] = useTransition();
   const [delPending, startDel] = useTransition();
   const [amountEditing, setAmountEditing] = useState(false);
-  const [amountValue, setAmountValue] = useState((tx.amountCents / 100).toFixed(2));
+  // The plain amount: a refund is stored negative, but the box shows 45.53
+  // and the save keeps it a refund.
+  const shownAmount = (Math.abs(tx.amountCents) / 100).toFixed(2);
+  const [amountValue, setAmountValue] = useState(shownAmount);
   const [amountPending, startAmountSave] = useTransition();
   const isIncome = tx.kind === "income";
   const canEdit = !tx.isCardPayment;
@@ -925,12 +928,12 @@ function TxLine({
   const saveAmount = () => {
     const normalized = Number(amountValue.replace(",", "."));
     if (!Number.isFinite(normalized) || normalized <= 0) {
-      setAmountValue((tx.amountCents / 100).toFixed(2));
+      setAmountValue(shownAmount);
       setAmountEditing(false);
       return;
     }
     const nextValue = normalized.toFixed(2);
-    if (nextValue === (tx.amountCents / 100).toFixed(2)) {
+    if (nextValue === shownAmount) {
       setAmountEditing(false);
       return;
     }
@@ -1002,7 +1005,7 @@ function TxLine({
           onKeyDown={(e) => {
             if (e.key === "Enter") e.currentTarget.blur();
             if (e.key === "Escape") {
-              setAmountValue((tx.amountCents / 100).toFixed(2));
+              setAmountValue(shownAmount);
               setAmountEditing(false);
             }
           }}
