@@ -3,9 +3,10 @@
 import { Fragment, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
+import { PctBox } from "@/components/pct-box";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, displayToCents, formatMoneyWhole } from "@/lib/money";
-import { GROUP_LABEL, groupAccountNames, type GroupKind, type StoredGroupYear, type YearOverrides } from "@/lib/account-groups";
+import { DEFAULT_TAX_PCT, GROUP_LABEL, groupAccountNames, type GroupKind, type StoredGroupYear, type YearOverrides } from "@/lib/account-groups";
 import type { GroupSlot } from "@/lib/account-groups-load";
 import {
   appendProjectionYears,
@@ -819,6 +820,7 @@ function GroupBreakdown({
   const [addEdit, setAddEdit] = useState<Partial<Record<GroupKind, string>>>({});
   const [pctEdit, setPctEdit] = useState<Partial<Record<GroupKind, string>>>({});
   const [retEdit, setRetEdit] = useState<Partial<Record<GroupKind, string>>>({});
+  const [taxEdit, setTaxEdit] = useState<Partial<Record<GroupKind, string>>>({});
   // The figures each row's boxes start from — the same ones the rows show.
   const shownFor = (g: StoredGroupYear) => {
     const o = overrides[g.kind];
@@ -828,6 +830,7 @@ function GroupBreakdown({
         o?.takePct ?? (g.start > 0 && g.take - g.rmd > 0 ? Math.round(((g.take - g.rmd) / g.start) * 10000) / 100 : 0),
       // Rows saved before the rate was stored: read it back off the gain.
       rateShown: g.rate ?? o?.ret ?? (g.start > 0 ? Math.round((g.gain / g.start) * 10000) / 100 : null),
+      taxShown: o?.tax ?? g.taxRate ?? DEFAULT_TAX_PCT[g.kind],
     };
   };
   // What's in each box right now: typed, else what it opened with.
@@ -871,12 +874,15 @@ function GroupBreakdown({
   const takeOf = (g: StoredGroupYear) => liveFor(g).take;
   const sum = (pick: (g: StoredGroupYear) => number) => groups.reduce((t, g) => t + pick(g), 0);
   const anyActual = groups.some((g) => g.actualAdd != null || g.actualTake != null);
-  const cell = "px-2 py-1 text-center tabular-nums";
+  const cell = "px-1.25 py-1 text-center tabular-nums";
   // Pinned so the row's name stays in view while the table scrolls sideways
   // on a phone. Solid backgrounds, or the scrolled cells show through.
   const pin = "sticky left-0 z-10 text-left";
   const box =
-    "mx-auto block w-24 rounded-md bg-background px-1.5 py-1 text-center text-xs sm:text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+    "mx-auto block w-20 rounded-md bg-background px-1.5 py-1 text-center text-xs sm:text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  // A percent box: narrower, with its "%" shown inside (see PctBox).
+  const pctWrap = "mx-auto block w-16";
+  const pctText = "text-xs sm:text-sm";
   // Where the box's figure came from: typed here, or carried from earlier.
   const source = (from: number | undefined) =>
     from == null ? null : (
@@ -888,9 +894,9 @@ function GroupBreakdown({
         By account group: {year}
       </p>
       <div className="mt-1 overflow-x-auto rounded-md ring-1 ring-line">
-        <table className={`w-full text-xs sm:text-sm min-w-[880px]`}>
+        <table className={`w-full text-xs sm:text-sm min-w-[980px]`}>
           <thead className="bg-sky-100 dark:bg-sky-900">
-            <tr className="uppercase tracking-wide text-foreground">
+            <tr className="uppercase tracking-normal text-foreground">
               <th className={`${cell} ${pin} bg-sky-100 font-semibold dark:bg-sky-900`}>Account Type</th>
               <th className={`${cell} font-semibold`}>Start</th>
               {/* What actually went in, then what the plan puts in (Victor, 2026-10-18). */}
@@ -902,7 +908,10 @@ function GroupBreakdown({
                   a future year ends after its withdrawals. */}
               {/* A future year's gain is Start × the return; this year's is
                   measured from the balances, so it has no rate to type. */}
-              {isCurrent ? null : <th className={`${cell} font-semibold`}>Proj<br />Return %</th>}
+              {isCurrent ? null : <th className={`${cell} font-semibold`}>Proj<br /><span className="whitespace-nowrap">Return %</span></th>}
+              {/* Tax on what each group pays out, typed per year like the
+                  return (Victor, 2026-10-19). */}
+              {isCurrent ? null : <th className={`${cell} font-semibold`}>Proj<br />Tax %</th>}
               <th className={`${cell} font-semibold`}>{isCurrent ? <>Actual<br />Gains</> : "Gains"}</th>
               {isCurrent ? <th className={`${cell} font-semibold`}>Current</th> : null}
               {isCurrent ? <th className={`${cell} font-semibold`}>Proj<br />End</th> : null}
@@ -916,7 +925,7 @@ function GroupBreakdown({
               const isCash = g.kind === "cash";
               // The withdrawal as a percent of the group's start: typed, else
               // what the group's own settings come to.
-              const { addShown, takePctShown, rateShown: rate } = shownFor(g);
+              const { addShown, takePctShown, rateShown: rate, taxShown } = shownFor(g);
               const pe = projEndOf(g);
               return (
                 <Fragment key={g.kind}>
@@ -986,6 +995,8 @@ function GroupBreakdown({
                             carries into later years, which show it with
                             "from 2027" (Victor, 2026-10-17). */}
                         <WithdrawPctBox
+                          wrapClassName="mx-auto block w-20"
+                          textClassName={pctText}
                           kind={g.kind}
                           startCents={g.start}
                           shown={takePctShown}
@@ -1001,19 +1012,47 @@ function GroupBreakdown({
                   {isCurrent ? null : (
                     <td className={cell}>
                       <input type="hidden" name={`gretWas_${g.kind}`} value={rate ?? ""} />
-                      <input
-                        name={`gret_${g.kind}`}
-                        inputMode="decimal"
-                        aria-label={`${GROUP_LABEL[g.kind]} proj return %`}
-                        defaultValue={rate ?? ""}
-                        onFocus={(e) => e.currentTarget.select()}
-                        onChange={(e) => {
-                          const v = e.currentTarget.value.replace(/[%\s]/g, "");
-                          setRetEdit((m) => ({ ...m, [g.kind]: v }));
-                        }}
-                        className={`${box} text-foreground`}
-                      />
+                      <PctBox value={retEdit[g.kind] ?? String(rate ?? "")} className={pctWrap} textClassName={pctText}>
+                        <input
+                          name={`gret_${g.kind}`}
+                          inputMode="decimal"
+                          aria-label={`${GROUP_LABEL[g.kind]} proj return %`}
+                          defaultValue={rate ?? ""}
+                          onFocus={(e) => e.currentTarget.select()}
+                          onChange={(e) => {
+                            const v = e.currentTarget.value.replace(/[%\s]/g, "");
+                            setRetEdit((m) => ({ ...m, [g.kind]: v }));
+                          }}
+                          className={`${box} !w-full text-foreground`}
+                        />
+                      </PctBox>
                       {source(o?.retFrom)}
+                    </td>
+                  )}
+                  {isCurrent ? null : (
+                    <td className={cell}>
+                      {isCash ? (
+                        "—"
+                      ) : (
+                        <>
+                          <input type="hidden" name={`gtaxWas_${g.kind}`} value={taxShown} />
+                          <PctBox value={taxEdit[g.kind] ?? String(taxShown)} className={pctWrap} textClassName={pctText}>
+                            <input
+                              name={`gtax_${g.kind}`}
+                              inputMode="decimal"
+                              aria-label={`${GROUP_LABEL[g.kind]} tax on withdraw %`}
+                              defaultValue={taxShown}
+                              onFocus={(e) => e.currentTarget.select()}
+                              onChange={(e) => {
+                                const v = e.currentTarget.value.replace(/[%\s]/g, "");
+                                setTaxEdit((m) => ({ ...m, [g.kind]: v }));
+                              }}
+                              className={`${box} !w-full text-foreground`}
+                            />
+                          </PctBox>
+                          {source(o?.taxFrom)}
+                        </>
+                      )}
                     </td>
                   )}
                   <td className={`${cell} ${gainOf(g) < 0 ? "text-negative" : "text-positive"}`}>
@@ -1037,7 +1076,7 @@ function GroupBreakdown({
                     stays in view while a phone scrolls the table sideways. */}
                 {openKinds.includes(g.kind) && accountsIn(g.kind).length > 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-2 pb-1.5 pt-0">
+                    <td colSpan={10} className="px-2 pb-1.5 pt-0">
                       <span className="sticky left-2 block max-w-[calc(100vw-4rem)] pl-4 text-xs font-normal leading-snug text-foreground sm:max-w-none sm:text-sm">
                         {accountsIn(g.kind).join(" · ")}
                       </span>
@@ -1057,6 +1096,7 @@ function GroupBreakdown({
               {/* Only what the boxes withdraw — not what the plan sells on its own
                   to cover spending, which has no note here (Victor, 2026-10-17). */}
               <td className={cell} style={{ color: "var(--viz-spending)" }}>{$(sum(takeOf))}</td>
+              {isCurrent ? null : <td className={cell} />}
               {isCurrent ? null : <td className={cell} />}
               <td className={`${cell} text-positive`}>{$(sum(gainOf))}</td>
               {isCurrent ? <td className={cell}>{$(sum((g) => g.end))}</td> : null}
@@ -1083,6 +1123,8 @@ function GroupBreakdown({
  * type, on one line under it.
  */
 function WithdrawPctBox({
+  wrapClassName,
+  textClassName,
   kind,
   startCents,
   shown,
@@ -1091,6 +1133,9 @@ function WithdrawPctBox({
   money,
   onText,
 }: {
+  /** Sizes the box; its "%" sits inside (see PctBox). */
+  wrapClassName: string;
+  textClassName: string;
   kind: GroupKind;
   startCents: number;
   shown: number;
@@ -1108,21 +1153,23 @@ function WithdrawPctBox({
   return (
     <>
       <input type="hidden" name={`gtakepctWas_${kind}`} value={shown === 0 && !typed ? "" : shown} />
-      <input
-        name={`gtakepct_${kind}`}
-        inputMode="decimal"
-        aria-label={`${GROUP_LABEL[kind]} proj withdraw %`}
-        value={text}
-        placeholder="0"
-        onFocus={(e) => e.currentTarget.select()}
-        onChange={(e) => {
-          const v = e.target.value.replace(/%/g, "");
-          setText(v);
-          onText?.(v);
-        }}
-        className={className}
-        style={{ color: "var(--viz-spending)" }}
-      />
+      <PctBox value={text} placeholder="0" className={wrapClassName} textClassName={textClassName} color="var(--viz-spending)">
+        <input
+          name={`gtakepct_${kind}`}
+          inputMode="decimal"
+          aria-label={`${GROUP_LABEL[kind]} proj withdraw %`}
+          value={text}
+          placeholder="0"
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => {
+            const v = e.target.value.replace(/%/g, "");
+            setText(v);
+            onText?.(v);
+          }}
+          className={`${className} !w-full`}
+          style={{ color: "var(--viz-spending)" }}
+        />
+      </PctBox>
       {/* Just the amount (Victor, 2026-10-17 — no "from 2027"). */}
       {/* A year's withdrawal: the percent of the group's Start. */}
       {cents > 0 ? <span className="block whitespace-nowrap text-negative">{money(cents)}/yr</span> : null}

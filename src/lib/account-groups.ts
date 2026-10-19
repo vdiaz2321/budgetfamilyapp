@@ -150,6 +150,8 @@ export type GroupYear = {
   startCents: number;
   /** The return the gain was worked out at (typed for the year, else the settings'). */
   returnPct: number;
+  /** The tax on withdrawals the year used (typed for the year, else the settings'). */
+  taxPct: number;
   gainCents: number;
   addCents: number;
   /** Planned withdrawal, the required minimum included. */
@@ -240,7 +242,12 @@ export function groupAccountNames<T extends { accountId: string; bucketId: strin
 
 /** What one year typed for each group: add/take in cents, ret as a return
  *  percent. A missing field = not typed. Cash only ever has ret. */
-export type TypedGroups = Partial<Record<GroupKind, { add?: number; take?: number; takePct?: number; ret?: number }>>;
+export type TypedGroups = Partial<Record<GroupKind, { add?: number; take?: number; takePct?: number; ret?: number; tax?: number }>>;
+
+/** True when a typed group entry holds nothing. */
+export function isEmptyTyped(e: { add?: number; take?: number; takePct?: number; ret?: number; tax?: number }): boolean {
+  return e.add == null && e.take == null && e.takePct == null && e.ret == null && e.tax == null;
+}
 
 /** The year's typed Est. Withdraw: dollars (cents) or a percent of the
  *  year's start. */
@@ -252,7 +259,17 @@ export type TypedWithdraw = { cents: number } | { pct: number };
 export type YearOverrides = Partial<
   Record<
     GroupKind,
-    { add?: number; take?: number; takePct?: number; ret?: number; addFrom?: number; takeFrom?: number; retFrom?: number }
+    {
+      add?: number;
+      take?: number;
+      takePct?: number;
+      ret?: number;
+      tax?: number;
+      addFrom?: number;
+      takeFrom?: number;
+      retFrom?: number;
+      taxFrom?: number;
+    }
   >
 > & { withdraw?: { cents?: number; pct?: number; from: number } };
 
@@ -313,14 +330,21 @@ export function parseTypedGroups(raw: unknown): TypedGroups {
     const take = Number((v as { take?: unknown }).take);
     const ret = Number((v as { ret?: unknown }).ret);
     const takePct = Number((v as { takePct?: unknown }).takePct);
-    const entry: { add?: number; take?: number; takePct?: number; ret?: number } = {};
+    const tax = Number((v as { tax?: unknown }).tax);
+    const entry: { add?: number; take?: number; takePct?: number; ret?: number; tax?: number } = {};
     if (kind !== "cash" && (v as { add?: unknown }).add != null && Number.isFinite(add) && add >= 0) entry.add = Math.round(add);
     if (kind !== "cash" && (v as { take?: unknown }).take != null && Number.isFinite(take) && take >= 0) entry.take = Math.round(take);
     if ((v as { ret?: unknown }).ret != null && Number.isFinite(ret)) entry.ret = clampReturnPct(ret);
     if (kind !== "cash" && (v as { takePct?: unknown }).takePct != null && Number.isFinite(takePct)) entry.takePct = clampWithdrawPct(takePct);
-    if (entry.add != null || entry.take != null || entry.takePct != null || entry.ret != null) out[kind] = entry;
+    if (kind !== "cash" && (v as { tax?: unknown }).tax != null && Number.isFinite(tax)) entry.tax = clampTaxPct(tax);
+    if (!isEmptyTyped(entry)) out[kind] = entry;
   }
   return out;
+}
+
+/** A typed tax on withdrawals, held to the range the plan's save allows. */
+export function clampTaxPct(pct: number): number {
+  return Math.round(Math.min(60, Math.max(0, pct)) * 100) / 100;
 }
 
 /** A typed return, held to the same range the group settings allow. */
@@ -345,6 +369,7 @@ export function resolveOverrides(
   const lastTake = new Map<GroupKind, { cents: number; year: number }>();
   const lastRet = new Map<GroupKind, { pct: number; year: number }>();
   const lastTakePct = new Map<GroupKind, { pct: number; year: number }>();
+  const lastTax = new Map<GroupKind, { pct: number; year: number }>();
   for (const r of [...rows].sort((a, b) => a.year - b.year)) {
     const year: YearOverrides = {};
     // A dollar total grows with inflation from the year it was typed, as a
@@ -376,12 +401,15 @@ export function resolveOverrides(
         lastTake.delete(kind);
       }
       if (t?.ret != null) lastRet.set(kind, { pct: t.ret, year: r.year });
+      if (t?.tax != null) lastTax.set(kind, { pct: t.tax, year: r.year });
       const a = lastAdd.get(kind);
       const w = lastTake.get(kind);
       const p = lastRet.get(kind);
       const wp = lastTakePct.get(kind);
-      if (!a && !w && !p && !wp) continue;
+      const tx = lastTax.get(kind);
+      if (!a && !w && !p && !wp && !tx) continue;
       year[kind] = {
+        ...(tx ? { tax: tx.pct, taxFrom: tx.year } : {}),
         ...(wp ? { takePct: wp.pct, takeFrom: wp.year } : {}),
         ...(p ? { ret: p.pct, retFrom: p.year } : {}),
         ...(a ? { add: a.cents, addFrom: a.year } : {}),
@@ -416,8 +444,9 @@ export function groupsYear(
   for (const kind of GROUP_KINDS) {
     const start = opening[kind];
     const returnPct = ctx.overrides?.[kind]?.ret ?? settings[kind].returnPct;
+    const taxPct = kind === "cash" ? 0 : ctx.overrides?.[kind]?.tax ?? settings[kind].taxPct;
     const gain = start > 0 ? Math.round((start * returnPct) / 100) : 0;
-    rows.set(kind, { kind, startCents: start, returnPct, gainCents: gain, addCents: 0, takeCents: 0, rmdExtraCents: 0, autoCents: 0, taxCents: 0, endCents: start + gain });
+    rows.set(kind, { kind, startCents: start, returnPct, taxPct, gainCents: gain, addCents: 0, takeCents: 0, rmdExtraCents: 0, autoCents: 0, taxCents: 0, endCents: start + gain });
   }
   const cash = rows.get("cash")!;
   const grow = Math.pow(1 + ctx.inflationPct / 100, Math.max(0, ctx.year - ctx.thisYear));
@@ -478,7 +507,7 @@ export function groupsYear(
     take = Math.min(take, available);
     if (r.rmdExtraCents > take) r.rmdExtraCents = take;
     if (take <= 0) continue;
-    const tax = Math.round((take * s.taxPct) / 100);
+    const tax = Math.round((take * r.taxPct) / 100);
     r.takeCents = take;
     r.taxCents = tax;
     r.endCents -= take;
@@ -518,10 +547,10 @@ export function groupsYear(
     const r = rows.get(kind)!;
     const available = Math.max(0, r.endCents);
     if (available <= 0) continue;
-    const keep = 1 - settings[kind].taxPct / 100;
+    const keep = 1 - r.taxPct / 100;
     const need = -cash.endCents;
     const gross = Math.min(available, keep > 0 ? Math.ceil(need / keep) : available);
-    const tax = Math.round((gross * settings[kind].taxPct) / 100);
+    const tax = Math.round((gross * r.taxPct) / 100);
     r.autoCents += gross;
     r.taxCents += tax;
     r.endCents -= gross;
@@ -610,6 +639,8 @@ export type StoredGroupYear = {
   start: number;
   /** Return % behind `gain`; missing on rows saved before it was stored. */
   rate?: number | null;
+  /** Tax % on its withdrawals; missing on rows saved before it was stored. */
+  taxRate?: number | null;
   gain: number;
   add: number;
   take: number;
@@ -630,6 +661,7 @@ export function toStoredGroups(groups: GroupYear[]): StoredGroupYear[] {
       kind: g.kind,
       start: g.startCents,
       rate: g.returnPct,
+      taxRate: g.taxPct,
       gain: g.gainCents,
       add: g.addCents,
       take: g.takeCents,
@@ -648,6 +680,7 @@ export function parseStoredGroups(raw: unknown): StoredGroupYear[] {
       kind: g.kind,
       start: Number(g.start) || 0,
       rate: g.rate == null || !Number.isFinite(Number(g.rate)) ? null : Number(g.rate),
+      taxRate: g.taxRate == null || !Number.isFinite(Number(g.taxRate)) ? null : Number(g.taxRate),
       gain: Number(g.gain) || 0,
       add: Number(g.add) || 0,
       take: Number(g.take) || 0,

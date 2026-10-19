@@ -40,6 +40,8 @@ import {
   scaleBalances,
   toStoredGroups,
   clampReturnPct,
+  clampTaxPct,
+  isEmptyTyped,
   clampWithdrawPct,
   parseTypedGroups,
   parseSpendRestart,
@@ -1501,7 +1503,7 @@ export async function saveProjectionYear(formData: FormData) {
         const value = Math.max(0, displayToCents(raw));
         if (was === "" || displayToCents(was) !== value) entry[field] = value;
       }
-      if (entry.add == null && entry.take == null && entry.takePct == null && entry.ret == null) delete typedGroups[kind];
+      if (isEmptyTyped(entry)) delete typedGroups[kind];
       else typedGroups[kind] = entry;
     }
   }
@@ -1519,7 +1521,7 @@ export async function saveProjectionYear(formData: FormData) {
       const value = Number(raw);
       if (Number.isFinite(value) && (was === "" || Number(was) !== value)) entry.ret = clampReturnPct(value);
     }
-    if (entry.add == null && entry.take == null && entry.takePct == null && entry.ret == null) delete typedGroups[kind];
+    if (isEmptyTyped(entry)) delete typedGroups[kind];
     else typedGroups[kind] = entry;
   }
   // Proj Withdraw %, per investment group: the same rule. A typed percent
@@ -1540,7 +1542,26 @@ export async function saveProjectionYear(formData: FormData) {
         delete entry.take;
       }
     }
-    if (entry.add == null && entry.take == null && entry.takePct == null && entry.ret == null) delete typedGroups[kind];
+    if (isEmptyTyped(entry)) delete typedGroups[kind];
+    else typedGroups[kind] = entry;
+  }
+
+  // Tax % on withdrawals, per investment group: the same rule — only a
+  // changed box is typed and carries into later years.
+  for (const kind of GROUP_KINDS) {
+    if (kind === "cash") continue;
+    const key = `gtax_${kind}`;
+    if (!formData.has(key)) continue;
+    const raw = String(formData.get(key) ?? "").replace(/[%\s]/g, "");
+    const was = String(formData.get(`gtaxWas_${kind}`) ?? "").replace(/[%\s]/g, "");
+    const entry = { ...(typedGroups[kind] ?? {}) };
+    if (raw === "") {
+      delete entry.tax;
+    } else {
+      const value = Number(raw);
+      if (Number.isFinite(value) && (was === "" || Number(was) !== value)) entry.tax = clampTaxPct(value);
+    }
+    if (isEmptyTyped(entry)) delete typedGroups[kind];
     else typedGroups[kind] = entry;
   }
 

@@ -37,17 +37,14 @@ import {
 } from "@/lib/retirement";
 import { saveRetirementPlan } from "./actions";
 import {
-  DEFAULT_TAX_PCT,
-  defaultAddEnd,
-  GROUP_HINT,
   GROUP_KINDS,
   GROUP_LABEL,
-  groupAccountNames,
   isGroupKind,
-  rmdStartAge,
+  groupAccountNames,
   type GroupKind,
 } from "@/lib/account-groups";
 import type { GroupInputs } from "@/lib/account-groups-load";
+import { PctBox } from "@/components/pct-box";
 
 export type FiPlan = {
   birthYear: number | null;
@@ -1630,25 +1627,22 @@ function PlanModal({
   const updateRental = (key: string, patch: Partial<RentalDraft>) =>
     setRentalDrafts((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
-  // Account groups: each one's settings as typed (blank = the default), and
-  // which group each account or bucket sits in.
+  // Account groups: each one's return and tax as typed (blank = the
+  // default), and which group each account or bucket sits in. Adds and
+  // withdrawals are typed per year in the year popup only (Victor,
+  // 2026-10-19) — saving here clears any old plan-wide figures.
   const [groupDrafts, setGroupDrafts] = useState<Record<GroupKind, GroupDraft>>(() => {
     const byKind = new Map(plan.accountGroups.rows.filter((r) => isGroupKind(r.kind)).map((r) => [r.kind as GroupKind, r]));
     const text = (v: number | string | null | undefined) => (v == null || v === "" ? "" : String(Number(v)));
-    const cents = (v: number | null | undefined) => (v == null ? "" : centsToDisplay(v));
     return Object.fromEntries(
       GROUP_KINDS.map((kind) => {
         const r = byKind.get(kind);
         return [
           kind,
           {
-            returnPct: text(r?.return_pct),
-            add: cents(r?.add_annual_cents),
-            addStart: r?.add_start_year?.toString() ?? "",
-            addEnd: r?.add_end_year?.toString() ?? "",
-            take: cents(r?.take_annual_cents),
-            takeStart: r?.take_start_year?.toString() ?? "",
-            takeEnd: r?.take_end_year?.toString() ?? "",
+            // No overall rate box any more (Victor, 2026-10-19): a blank
+            // category starts at the old default so every box shows a rate.
+            returnPct: text(r?.return_pct) || (kind === "cash" ? "" : String(plan.investmentReturnPct)),
             taxPct: text(r?.tax_pct),
           },
         ];
@@ -1657,11 +1651,6 @@ function PlanModal({
   });
   const updateGroup = (kind: GroupKind, patch: Partial<GroupDraft>) =>
     setGroupDrafts((prev) => ({ ...prev, [kind]: { ...prev[kind], ...patch } }));
-  const slotKey = (s: { accountId: string; bucketId: string | null }) => `${s.accountId}:${s.bucketId ?? ""}`;
-  const [slotGroups, setSlotGroups] = useState<Record<string, GroupKind>>(() =>
-    Object.fromEntries(plan.accountGroups.slots.map((s) => [slotKey(s), s.group])),
-  );
-  const [groupAccountsOpen, setGroupAccountsOpen] = useState<Set<GroupKind>>(() => new Set());
   // The account lists under the Rates section's category boxes. Each
   // category opens on its own by clicking its name, like the year popup's
   // groups — never one switch for all (Victor, 2026-10-17). Folded by default.
@@ -1673,8 +1662,8 @@ function PlanModal({
       else next.add(kind);
       return next;
     });
-  // Live, so each group's blank return shows the default it falls back to.
-  const [investDefault, setInvestDefault] = useState(String(plan.investmentReturnPct));
+  // Still saved (a cleared category box falls back to it), but no longer shown.
+  const investDefault = String(plan.investmentReturnPct);
   const [cashDefault, setCashDefault] = useState(String(plan.cashReturnPct));
   const addRental = () =>
     setRentalDrafts((prev) => [
@@ -1869,18 +1858,6 @@ function PlanModal({
       "accountGroups",
       JSON.stringify(GROUP_KINDS.map((kind) => ({ kind, ...groupDrafts[kind] }))),
     );
-    // Only the accounts moved; one moved back to its own type goes automatic.
-    formData.set(
-      "groupMoves",
-      JSON.stringify(
-        plan.accountGroups.slots
-          .filter((s) => slotGroups[slotKey(s)] !== s.group)
-          .map((s) => {
-            const to = slotGroups[slotKey(s)];
-            return { accountId: s.accountId, bucketId: s.bucketId, group: to === s.inferred ? "" : to };
-          }),
-      ),
-    );
     start(async () => {
       const result = await saveRetirementPlan(formData);
       if (result?.error) setError(result.error);
@@ -1893,23 +1870,6 @@ function PlanModal({
     });
   }
 
-  // The accounts in a group as grouped right now (Account Groups below can
-  // move one), buckets named (see groupAccountNames).
-  const accountsInGroup = (kind: GroupKind) =>
-    groupAccountNames(plan.accountGroups.slots, (x) => slotGroups[slotKey(x)] === kind);
-
-  // Which categories fall back to this rate — those whose own box below is
-  // blank — updating as one is typed.
-  const listNames = (names: string[]) =>
-    names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-  const usesDefault = GROUP_KINDS.filter((k) => k !== "cash" && groupDrafts[k].returnPct.trim() === "");
-  const ownRate = GROUP_KINDS.filter((k) => k !== "cash" && groupDrafts[k].returnPct.trim() !== "");
-  const returnHint =
-    usesDefault.length === 0
-      ? "Every category has its own rate below."
-      : ownRate.length === 0
-        ? "Used by every category below unless you type its own."
-        : `Used by ${listNames(usesDefault.map((k) => GROUP_LABEL[k]))}. ${listNames(ownRate.map((k) => GROUP_LABEL[k]))} ${ownRate.length === 1 ? "has its" : "have their"} own below.`;
 
   // Light red, so Close reads apart from Save.
   const closeButtonClass =
@@ -2134,26 +2094,37 @@ function PlanModal({
 
         <SectionHead title="Return, Withdrawal, & Inflation Rates" open={isOpen("rates")} onToggle={() => toggleSection("rates")} />
         <div className={isOpen("rates") ? "contents" : "hidden"}>
-        <Field label="Expected rate of return (%)" hint={returnHint}>
-          <input name="investmentReturnPct" inputMode="decimal" value={investDefault} onChange={(e) => setInvestDefault(e.target.value)} className={inputClass} />
-        </Field>
-        <Field label="Savings APY (%)" hint="What your checking and savings accounts earn a year — the Cash group.">
-          <input name="cashReturnPct" inputMode="decimal" value={cashDefault} onChange={(e) => setCashDefault(e.target.value)} className={inputClass} />
-        </Field>
-        {/* Each category's own rate, side by side. Blank = the rate above.
-            Same setting the Account Groups section used to hold (Victor,
-            2026-10-17); the year popup can still change one year. */}
+        <input type="hidden" name="investmentReturnPct" value={investDefault} />
+        {/* Each category's own rate, side by side, Savings APY first;
+            the year popup can still change one year. */}
         <div className="sm:col-span-2">
-          <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
-            Rate of return by category (%)
-          </span>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-            {GROUP_KINDS.filter((k) => k !== "cash").map((kind) => {
+          {/* Spending inflation sits left of Savings APY on a wide screen
+              (Victor, 2026-10-19); on a phone it drops below the rates so
+              it isn't read as one of them. */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-6 lg:grid-cols-7">
+            <span className="col-span-full block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground lg:col-span-6 lg:col-start-2">
+              Rate of return by category
+            </span>
+            <label className="order-last min-w-0 self-start lg:order-none lg:col-start-1 lg:row-start-2 lg:border-r-2 lg:border-sky-300 lg:pr-2 dark:lg:border-sky-900">
+              <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
+                Spending<br />inflation
+              </span>
+              <PctBox value={inflation}>
+                <input
+                  name="inflationPct"
+                  inputMode="decimal"
+                  value={inflation}
+                  onChange={(e) => setInflation(e.target.value)}
+                  className={`${lineInput} text-center`}
+                />
+              </PctBox>
+            </label>
+            {(["cash", ...GROUP_KINDS.filter((k) => k !== "cash")] as GroupKind[]).map((kind) => {
               // "Traditional / retirement", "Roth / retirement" on two lines.
-              const [first, ...rest] = GROUP_LABEL[kind].split(" ");
-              const names = accountsInGroup(kind);
+              const [first, ...rest] = (kind === "cash" ? "Savings APY" : GROUP_LABEL[kind]).split(" ");
+              const names = groupAccountNames(plan.accountGroups.slots, (x) => x.group === kind);
               return (
-                <div key={kind} className="min-w-0 self-start">
+                <div key={kind} className="min-w-0 self-start lg:row-start-2">
                   {/* The name opens this category's accounts. */}
                   <button
                     type="button"
@@ -2173,20 +2144,33 @@ function PlanModal({
                     >
                       <path d="M5 7.5 10 12.5 15 7.5" />
                     </svg>
-                    <span>{rest.length > 0 ? <>{first}<br />{rest.join(" ")}</> : <><br className="max-sm:hidden" />{first}</>}</span>
+                    <span>{rest.length > 0 ? <>{first}<br />{rest.join(" ")}</> : <><br />{first}</>}</span>
                   </button>
-                  <input
-                    inputMode="decimal"
-                    value={groupDrafts[kind].returnPct}
-                    onChange={(e) => updateGroup(kind, { returnPct: e.target.value })}
-                    placeholder={investDefault}
-                    aria-label={`${GROUP_LABEL[kind]} rate of return`}
-                    className={`${lineInput} text-center`}
-                  />
-                  {/* Which accounts earn this rate — each account (or bucket)
-                      sits in one group only. */}
+                  <PctBox value={kind === "cash" ? cashDefault : groupDrafts[kind].returnPct} placeholder={kind === "cash" ? "" : investDefault}>
+                  {kind === "cash" ? (
+                    <input
+                      name="cashReturnPct"
+                      inputMode="decimal"
+                      value={cashDefault}
+                      onChange={(e) => setCashDefault(e.target.value)}
+                      aria-label="Savings APY"
+                      className={`${lineInput} text-center`}
+                    />
+                  ) : (
+                    <input
+                      inputMode="decimal"
+                      value={groupDrafts[kind].returnPct}
+                      onChange={(e) => updateGroup(kind, { returnPct: e.target.value })}
+                      placeholder={investDefault}
+                      aria-label={`${GROUP_LABEL[kind]} rate of return`}
+                      className={`${lineInput} text-center`}
+                    />
+                  )}
+                  </PctBox>
+                  {/* Which accounts earn this rate — the Accounts page sets
+                      each account's type (Victor, 2026-10-19). */}
                   {rateAccountsOpen.has(kind) ? (
-                    <p className="mt-1 text-center text-xs leading-snug text-foreground sm:text-sm">
+                    <p className="mt-1 text-left text-xs leading-snug text-foreground sm:text-sm">
                       {names.length > 0 ? names.join(" · ") : "No accounts"}
                     </p>
                   ) : null}
@@ -2195,189 +2179,7 @@ function PlanModal({
             })}
           </div>
         </div>
-        <Field label="Spending inflation (%)" hint="Annual Spending Amount Adjusted">
-          <input
-            name="inflationPct"
-            inputMode="decimal"
-            value={inflation}
-            onChange={(e) => setInflation(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
 
-        </div>
-
-        {/* Each kind of money on its own: return, what goes in, what comes
-            out, and the tax on it. Blank boxes use the default shown. Its own
-            section — it was lost under the rates (Victor, 2026-10-16). */}
-        <SectionHead
-          title="Account Groups"
-          open={isOpen("groups")}
-          onToggle={() => toggleSection("groups")}
-          note="Contributions and withdrawals by account type."
-        />
-        <div className={isOpen("groups") ? "contents" : "hidden"}>
-        <div className="space-y-2 sm:col-span-2">
-          <p className="text-xs sm:text-sm text-foreground">
-            Blank = default. Take out: today&rsquo;s dollars, rises with inflation.
-          </p>
-          {GROUP_KINDS.filter(
-            (kind) =>
-              plan.accountGroups.slots.some((s) => slotGroups[slotKey(s)] === kind) ||
-              plan.accountGroups.rows.some((r) => r.kind === kind && (r.add_annual_cents || r.take_annual_cents)),
-          ).map((kind) => {
-            const d = groupDrafts[kind];
-            // Biggest balance first.
-            const slots = plan.accountGroups.slots
-              .filter((s) => slotGroups[slotKey(s)] === kind)
-              .sort((a, b) => b.balanceCents - a.balanceCents);
-            const todayCents = slots.reduce((t, s) => t + s.balanceCents, 0);
-            const measuredCents = plan.accountGroups.measuredAddCents[kind];
-            const isCash = kind === "cash";
-            const accountsOpen = groupAccountsOpen.has(kind);
-            const toggleAccounts = () =>
-              setGroupAccountsOpen((prev) => {
-                const next = new Set(prev);
-                if (next.has(kind)) next.delete(kind);
-                else next.add(kind);
-                return next;
-              });
-            const dollars = (cents: number) => String(Math.round(cents / 100));
-            return (
-              <div key={kind} className="rounded-lg bg-background p-2 ring-1 ring-line">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                  <p className="text-sm font-semibold text-foreground">
-                    {GROUP_LABEL[kind]} · Current Amount:{" "}
-                    <span className="tabular-nums" style={{ color: "var(--viz-savings)" }}>
-                      {formatMoneyWhole(todayCents, currency)}
-                    </span>
-                  </p>
-                  <button
-                    type="button"
-                    onClick={toggleAccounts}
-                    aria-expanded={accountsOpen}
-                    className="rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                  >
-                    {accountsOpen ? "Hide accounts" : `Accounts (${slots.length})`}
-                  </button>
-                </div>
-                <p className="text-xs sm:text-sm text-foreground">
-                  {GROUP_HINT[kind]}
-                  {!isCash && measuredCents > 0 ? ` · added last 12 mo: ${formatMoneyWhole(measuredCents, currency)}/yr` : ""}
-                </p>
-                {accountsOpen ? (
-                  // Three across on a wide screen, so name, balance and group
-                  // sit together instead of at opposite edges.
-                  <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    {slots.length === 0 ? <p className="text-xs text-foreground">No accounts in this group.</p> : null}
-                    {slots.map((s) => (
-                      // Name on its own line — long names stay whole — with
-                      // balance and group under it.
-                      <div key={slotKey(s)} className="min-w-0 rounded-md px-2 py-1.5 text-xs ring-1 ring-line sm:text-sm">
-                        <p className="break-words leading-snug text-foreground">{s.name}</p>
-                        <div className="mt-1 flex items-center gap-2">
-                        <span className="flex-1 text-center tabular-nums text-foreground">{formatMoneyWhole(s.balanceCents, currency)}</span>
-                        <select
-                          value={slotGroups[slotKey(s)]}
-                          onChange={(e) => setSlotGroups((prev) => ({ ...prev, [slotKey(s)]: e.target.value as GroupKind }))}
-                          aria-label={`Group for ${s.name}`}
-                          className="w-32 shrink-0 rounded-md bg-surface px-1.5 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                        >
-                          {GROUP_KINDS.map((k) => (
-                            <option key={k} value={k}>{GROUP_LABEL[k]}</option>
-                          ))}
-                        </select>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {/* Return % lives under Rates, one box per category. Cash has
-                    nothing else to set here. */}
-                {isCash ? null : (
-                <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-7">
-                  {isCash ? null : (
-                    <>
-                      <LineField label="Add $ / yr">
-                        <input
-                          inputMode="decimal"
-                          value={d.add}
-                          onChange={(e) => updateGroup(kind, { add: e.target.value })}
-                          placeholder={dollars(measuredCents)}
-                          className={`${lineInput} text-center`}
-                        />
-                      </LineField>
-                      <LineField label="Add from">
-                        <input
-                          inputMode="numeric"
-                          value={d.addStart}
-                          onChange={(e) => updateGroup(kind, { addStart: e.target.value })}
-                          placeholder="Now"
-                          className={`${lineInput} text-center`}
-                        />
-                      </LineField>
-                      <LineField label="Add to">
-                        <input
-                          inputMode="numeric"
-                          value={d.addEnd}
-                          onChange={(e) => updateGroup(kind, { addEnd: e.target.value })}
-                          placeholder={
-                            defaultAddEnd(
-                              plan.withdrawStartYear ?? toYear(retireYear),
-                              money(d.take),
-                              toYear(d.takeStart),
-                            )?.toString() ?? "Always"
-                          }
-                          className={`${lineInput} text-center`}
-                        />
-                      </LineField>
-                      <LineField label="Take out $ / yr">
-                        <input
-                          inputMode="decimal"
-                          value={d.take}
-                          onChange={(e) => updateGroup(kind, { take: e.target.value })}
-                          placeholder="0"
-                          className={`${lineInput} text-center`}
-                        />
-                      </LineField>
-                      <LineField label="Take from">
-                        <input
-                          inputMode="numeric"
-                          value={d.takeStart}
-                          onChange={(e) => updateGroup(kind, { takeStart: e.target.value })}
-                          className={`${lineInput} text-center`}
-                        />
-                      </LineField>
-                      <LineField label="Take to">
-                        <input
-                          inputMode="numeric"
-                          value={d.takeEnd}
-                          onChange={(e) => updateGroup(kind, { takeEnd: e.target.value })}
-                          placeholder="For life"
-                          className={`${lineInput} text-center`}
-                        />
-                      </LineField>
-                      <LineField label="Tax %">
-                        <input
-                          inputMode="decimal"
-                          value={d.taxPct}
-                          onChange={(e) => updateGroup(kind, { taxPct: e.target.value })}
-                          placeholder={String(DEFAULT_TAX_PCT[kind])}
-                          className={`${lineInput} text-center`}
-                        />
-                      </LineField>
-                    </>
-                  )}
-                </div>
-                )}
-              </div>
-            );
-          })}
-          <p className="text-xs sm:text-sm text-foreground">
-            Short a year: drawn from Brokerage, Crypto, Metals, Traditional, then Roth.
-            {plan.birthYear ? ` Traditional required minimums from age ${rmdStartAge(plan.birthYear)}.` : ""}
-          </p>
-        </div>
         </div>
 
         <SectionHead title="Military retirement" note="Optional. Leave blank if none." open={isOpen("military")} onToggle={() => toggleSection("military")} />
@@ -2938,12 +2740,6 @@ const RAISE_KINDS: IncomeLineKind[] = ["pay", "job", "spouse", "other"];
 /** An account group's settings as typed; blank = the default. */
 type GroupDraft = {
   returnPct: string;
-  add: string;
-  addStart: string;
-  addEnd: string;
-  take: string;
-  takeStart: string;
-  takeEnd: string;
   taxPct: string;
 };
 
