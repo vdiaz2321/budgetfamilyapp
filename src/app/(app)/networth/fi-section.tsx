@@ -22,6 +22,8 @@ import {
   rentalForYear,
   rentalsForYear,
   survivorIncomeForYear,
+  diesOnActiveDuty,
+  type ActiveDutyDeath,
   type ColaPlan,
   type FiScheduleYear,
   type HealthPlan,
@@ -34,8 +36,9 @@ import {
   type IncomeLineKind,
   type RentalProperty,
   type RentalRow,
+  planEndYear,
 } from "@/lib/retirement";
-import { saveRetirementPlan } from "./actions";
+import { saveRetirementPlan, setWithdrawalRate } from "./actions";
 import {
   GROUP_KINDS,
   GROUP_LABEL,
@@ -60,6 +63,8 @@ export type FiPlan = {
   withdrawStartYear: number | null;
   /** Spouse's expected retirement year; null = not set. */
   spouseRetireYear: number | null;
+  /** Spouse's birth year; null = no spouse on the plan (hides Spouse Age). */
+  spouseBirthYear: number | null;
   /** Pension + VA + Social Security per year. */
   guaranteedIncomeCents: number | null;
   /** First year that income arrives; null means it already does. */
@@ -80,6 +85,8 @@ export type FiPlan = {
   sbpPct: number;
   /** The age the plan runs to. */
   longevityAge: number;
+  /** The spouse's plan-until age; the plan runs to whichever ends later. */
+  spouseLongevityAge: number;
   /** TRICARE For Life: yearly Medicare Part B premium at current rates
    *  from the start age, rising inflation + growthPct a year. */
   healthcareAnnualCents: number | null;
@@ -139,6 +146,8 @@ export type FiProjectionYear = {
   eoyCents: number;
   /** That year's tax override on retirement income; null = the default. */
   taxPct: number | null;
+  /** "If you die first": % of the year's spending that carries on. */
+  survivorPct: number;
   /** Gains: investment return + rental equity change. */
   growthCents: number;
   /** Net worth actually recorded for that year, when there is one. */
@@ -268,7 +277,25 @@ export function FiSection({
   const usingGrid = schedule.length > 0;
   // New savings split like the accounts are today — savings vs investments.
   const toInvestPct = investShareOfNew(measured.cashCents, measured.investCents);
-  const untilYear = plan.birthYear ? plan.birthYear + plan.longevityAge : null;
+  const untilYear = planEndYear(plan.birthYear, plan.longevityAge, plan.spouseBirthYear, plan.spouseLongevityAge);
+  // "Through age 90" when the plan is yours alone; with a spouse the end year
+  // can be theirs, so it reads as the year and both ages.
+  const lastsTo =
+    untilYear != null && plan.spouseBirthYear
+      ? `Through ${untilYear} · you ${untilYear - plan.birthYear!}, spouse ${untilYear - plan.spouseBirthYear}`
+      : `Through age ${plan.longevityAge}`;
+  // The card's version: the two ages drop under the year on a phone, so the
+  // label beside it keeps its width.
+  const lastsToCard: React.ReactNode =
+    untilYear != null && plan.spouseBirthYear ? (
+      <>
+        Through {untilYear}
+        <span className="hidden sm:inline"> · </span>
+        <span className="block sm:inline">you {untilYear - plan.birthYear!}, spouse {untilYear - plan.spouseBirthYear}</span>
+      </>
+    ) : (
+      lastsTo
+    );
 
   const fi = useMemo(
     () =>
@@ -289,7 +316,7 @@ export function FiSection({
   );
 
   const fiAge = ageInYear(plan.birthYear, fi.fiYear ?? thisYear);
-  // The year 4% withdrawals start — set on its own (a civilian job can follow
+  // The year withdrawals start — set on its own (a civilian job can follow
   // military retirement), else the military retirement year.
   const withdrawYear = plan.withdrawStartYear ?? plan.targetRetireYear;
   const atTarget = withdrawYear ? fi.years.find((y) => y.year === withdrawYear) ?? null : null;
@@ -346,9 +373,9 @@ export function FiSection({
   // The year the Investments panel checks: when withdrawals start, otherwise
   // the year the plan becomes financially free.
   const mile = atTarget ?? fiRow;
-  const retireSpendYearly = plan.targetRetireYear
-    ? projection.find((p) => p.year === incomeYear)?.spendingCents ?? 0
-    : 0;
+  // The picked year's spending from the Year by year table — whether or not
+  // a military retirement year is set (a blank one read as $0).
+  const retireSpendYearly = projection.find((p) => p.year === incomeYear)?.spendingCents ?? 0;
   const retireSpendMonthly = Math.round(retireSpendYearly / 12);
   const ssLine = plan.incomeLines.find((l) => l.kind === "social_security" && l.startYear != null) ?? null;
 
@@ -383,15 +410,30 @@ export function FiSection({
   const stressEnd = stressed ? endOf(stressed.years) : null;
 
   // ---- Survivor view: the plan from `deathYear` on, if Victor dies first.
-  // Only from the first FULL year of military retirement: before it, the
-  // plan's income is his active-duty pay, which the table doesn't split out.
-  const survivorFirst = Math.max(thisYear + 1, firstFullRetiredYear);
+  // From next year (Victor, 2026-10-19): his pay is its own income line now,
+  // so a death while still working drops it like any other of his incomes.
+  const survivorFirst = thisYear + 1;
+  // The family's spending after his death: each year's Total Spending times
+  // that year's survivor % from Year by year (carried; 100% when none typed).
+  const survSpendIn = (year: number) => (projection.find((p) => p.year === year) ?? projection.at(-1))?.survivorPct ?? 100;
   const [deathYearPick, setDeathYear] = useState<number | null>(null);
   const deathYear = Math.max(survivorFirst, deathYearPick ?? survivorFirst);
   const insuranceCents = plan.survivorExtras.insurance.reduce((t, i) => t + i.cents, 0);
   const benefitsMonthly = plan.survivorExtras.benefits.reduce((t, b) => t + b.monthlyCents, 0);
+  // A death before retired pay starts is an active-duty death: automatic SBP
+  // and DIC from that year, worked out on the saved High-3 (Victor,
+  // 2026-10-19). It reads a little high for an early year, whose real High-3
+  // would be lower.
+  const activeDuty: ActiveDutyDeath | null =
+    diesOnActiveDuty(pension, deathYear) && plan.high3MonthlyCents
+      ? {
+          deathYear,
+          high3MonthlyCents: plan.high3MonthlyCents,
+          spouseYoungerYears: plan.spouseBirthYear && plan.birthYear ? plan.spouseBirthYear - plan.birthYear : null,
+        }
+      : null;
   const survIn = (year: number) =>
-    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, modelLines, 0, plan.cola, colaWhen);
+    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, modelLines, 0, plan.cola, colaWhen, activeDuty);
   const survivor = useMemo(() => {
     if (!usingGrid || untilYear == null) return null;
     // The plan's years carried forward to the plan-until year, so a death
@@ -405,12 +447,14 @@ export function FiSection({
       const surv = survIn(y.year);
       const rent = Math.max(0, rentIn(y.year).cashAfterTaxCents);
       const benefits = benefitsMonthly * 12;
+      const spend = Math.round((y.spendCents * survSpendIn(y.year)) / 100);
       return {
         year: y.year,
-        spendCents: y.spendCents,
-        // Same spending; his income out, the survivor's in, the payout once.
+        spendCents: spend,
+        // Spending cut to the survivor %; his income out, the survivor's in,
+        // the payout once.
         contributionCents:
-          y.contributionCents - base.afterTaxCents + surv.afterTaxCents + benefits + (y.year === deathYear ? insuranceCents : 0),
+          y.contributionCents + (y.spendCents - spend) - base.afterTaxCents + surv.afterTaxCents + benefits + (y.year === deathYear ? insuranceCents : 0),
         guaranteedCents: surv.guaranteedCents + benefits + rent,
       };
     });
@@ -431,7 +475,19 @@ export function FiSection({
       afterTaxMonthly: afterTax + benefits,
       // Counts a line's first year only from its start month.
       afterTaxYearly: surv.afterTaxCents + benefits * 12,
-      spendMonthly: Math.round(spendYearly / 12),
+      spendMonthly: Math.round((spendYearly * survSpendIn(deathYear)) / 100 / 12),
+      spendPct: survSpendIn(deathYear),
+      // Your income that year that the family no longer gets — named on the
+      // card so a $0 total reads as "these stopped", not as a missing figure.
+      stops: incomeIn(deathYear)
+        // Social Security carries on as the survivor benefit under its own
+        // name, so it isn't "stopped".
+        .parts.filter(
+          (p) =>
+            p.monthlyBeforeTaxCents > 0 &&
+            !surv.parts.some((q) => q.name === p.name || (q.kind === "social_security" && p.kind === "social_security")),
+        )
+        .map((p) => p.name),
     };
   })();
   const yearOptions =
@@ -606,13 +662,16 @@ export function FiSection({
                 {mile ? (
                   <>
                     {/* No gap means nothing for the investments to fund —
-                        said in words, since "$0" read like a missing figure. */}
+                        said in words, since "$0" read like a missing figure.
+                        The % is his to pick right here (Victor, 2026-10-19). */}
                     <ValueRow
                       label={`Needed in ${mile.year}`}
                       note={
-                        mile.targetCents > 0
-                          ? `to cover the gap at ${plan.withdrawalRatePct}% a year`
-                          : "Retired pay covers spending"
+                        mile.targetCents > 0 ? (
+                          <>to pay spending your income doesn&apos;t cover, at <PctInput key={plan.withdrawalRatePct} pct={plan.withdrawalRatePct} label="Withdrawal rate" save={setWithdrawalRate} /> a year</>
+                        ) : (
+                          "Retired pay covers spending"
+                        )
                       }
                       value={mile.targetCents > 0 ? formatMoneyWhole(sh(mile.year, mile.targetCents), currency) : "Nothing"}
                       tone={mile.targetCents > 0 ? "" : "text-positive"}
@@ -635,29 +694,16 @@ export function FiSection({
                   value={fi.fiYear ? `${fi.fiYear}${fiAge != null ? ` · age ${fiAge}` : ""}` : "Not on this plan"}
                   tone={fi.fiYear ? "" : "text-negative"}
                 />
+                {/* Whether the investments pay the spending you've typed for
+                    every year to the end of the plan (Victor, 2026-10-19). */}
                 <ValueRow
-                  label="Money lasts"
-                  // The gap as a share of the expected balance — how hard the
-                  // investments work that year, next to the 4% rule of thumb.
-                  note={
-                    mile && mile.endCents > 0 && mile.targetCents > 0
-                      ? (() => {
-                          // The share of the investments the year's gap uses,
-                          // read against the withdrawal-rate limit set in
-                          // Edit assumptions — the one % he can find there.
-                          const usePct = (plan.withdrawalRatePct * mile.targetCents) / mile.endCents;
-                          return `you'd use ${usePct.toFixed(1)}% a year in ${mile.year} · ${
-                            usePct <= plan.withdrawalRatePct ? "under" : "over"
-                          } your ${plan.withdrawalRatePct}% limit`;
-                        })()
-                      : undefined
-                  }
+                  label="Spending covered"
                   value={
                     untilYear == null
                       ? "Add birth year"
                       : runsOutAge != null
-                        ? `Runs out at age ${runsOutAge}`
-                        : `To age ${plan.longevityAge}`
+                        ? `Runs out in ${fi.runsOutYear} · age ${runsOutAge}`
+                        : lastsToCard
                   }
                   tone={untilYear == null ? "" : runsOutAge != null ? "text-negative" : "text-positive"}
                 />
@@ -697,10 +743,33 @@ export function FiSection({
                     <span className="w-[5.75rem] text-right sm:w-28 xl:w-24 2xl:w-28">Yearly</span>
                   </span>
                 </li>
+                {survivorYear.stops.length > 0 ? (
+                  <li className="flex justify-between gap-3 py-1">
+                    <span className="min-w-0">Stops</span>
+                    <span className="text-right text-negative">{survivorYear.stops.join(" · ")}</span>
+                  </li>
+                ) : null}
                 {survivorYear.parts.map((part, i) => (
                   <IncomeRow
                     key={i}
-                    label={part.name}
+                    label={
+                      part.name === "DIC (VA)" ? (
+                        <>
+                          {part.name}
+                          <a
+                            href="https://www.va.gov/family-and-caregiver-benefits/survivor-compensation/dependency-indemnity-compensation/survivor-rates/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block w-fit text-xs font-semibold underline underline-offset-2 sm:text-sm"
+                            style={{ color: "var(--viz-savings)" }}
+                          >
+                            VA DIC rates
+                          </a>
+                        </>
+                      ) : (
+                        part.name
+                      )
+                    }
                     note={part.monthlyBeforeTaxCents !== part.monthlyAfterTaxCents ? "before tax" : undefined}
                     monthly={part.monthlyBeforeTaxCents}
                     yearly={part.monthlyBeforeTaxCents * (part.months ?? 12)}
@@ -729,7 +798,7 @@ export function FiSection({
                   bold
                 />
                 <IncomeRow
-                  label="Planned spending"
+                  label={survivorYear.spendPct === 100 ? "Planned spending" : `Planned spending (${survivorYear.spendPct}%)`}
                   monthly={-survivorYear.spendMonthly}
                   yearly={-survivorYear.spendMonthly * 12}
                   currency={currency}
@@ -758,34 +827,30 @@ export function FiSection({
                   />
                 ) : null}
                 <ValueRow
-                  label="Money lasts"
+                  label="Spending covered"
                   value={
                     !survivor
                       ? untilYear == null ? "Add birth year" : "Add a plan above"
                       : survivor.runsOutYear
-                        ? `Runs out in ${survivor.runsOutYear}`
+                        ? `Runs out in ${survivor.runsOutYear}${plan.spouseBirthYear ? ` · spouse ${survivor.runsOutYear - plan.spouseBirthYear}` : ""}`
                         : `Through ${untilYear}`
                   }
                   tone={!survivor ? "" : survivor.runsOutYear ? "text-negative" : "text-positive"}
                   bold
                 />
               </ul>
-              {/* Without SBP the retired pay stops at death, which is why
-                  family income can read $0 — said here, with the way to fix it
-                  one press away (Victor, 2026-10-15). */}
-              {!plan.sbpEnabled ? (
-                <div className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-md bg-negative/10 px-2 py-1.5 text-center text-xs sm:text-sm">
-                  <span className="text-foreground">
-                    <span className="font-semibold text-negative">SBP: off</span> — retired pay stops for the family
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setEditing("sbp")}
-                    className="rounded-md bg-surface px-2 py-0.5 font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
-                  >
-                    Turn on SBP
-                  </button>
-                </div>
+              {activeDuty ? (
+                <p className="mt-2 text-center text-xs text-foreground sm:text-sm">
+                  Active-duty death: SBP uses your High-3 of {formatMoneyWhole(activeDuty.high3MonthlyCents, currency)}, a bit high for early years.
+                </p>
+              ) : null}
+              {/* Without SBP the retired pay stops at death — said only when
+                  there is retired pay in the plan. No button (Victor,
+                  2026-10-19): SBP is set in Edit Future Projections. */}
+              {!plan.sbpEnabled && pension ? (
+                <p className="mt-2 rounded-md bg-negative/10 px-2 py-1.5 text-center text-xs sm:text-sm">
+                  <span className="font-semibold text-negative">SBP: off</span> — retired pay stops for the family
+                </p>
               ) : null}
             </div>
           </div>
@@ -846,17 +911,17 @@ export function FiSection({
               <span className="font-semibold text-negative">
                 {shockRow ? `−${formatMoneyWhole(Math.abs(shockRow.growthCents), currency)}` : "—"}
               </span>
-              {" · "}Money lasts:{" "}
+              {" · "}Spending covered:{" "}
               <span className={`font-semibold ${untilYear == null ? "" : stressed.runsOutYear ? "text-negative" : "text-positive"}`}>
                 {untilYear == null
                   ? "Add birth year"
                   : stressed.runsOutYear
-                    ? `Runs out at age ${stressed.runsOutYear - (plan.birthYear ?? 0)}`
-                    : `To age ${plan.longevityAge}`}
+                    ? `Runs out in ${stressed.runsOutYear} · age ${stressed.runsOutYear - (plan.birthYear ?? 0)}`
+                    : lastsTo}
               </span>
               {stressEnd != null ? (
                 <>
-                  {" · "}Left at age {plan.longevityAge}:{" "}
+                  {" · "}{plan.spouseBirthYear ? `Left in ${untilYear}` : `Left at age ${plan.longevityAge}`}:{" "}
                   <span className="font-semibold">{formatMoneyWhole(sh(untilYear!, Math.max(0, stressEnd)), currency)}</span>
                   {planEnd != null ? ` (without the drop ${formatMoneyWhole(sh(untilYear!, Math.max(0, planEnd)), currency)})` : ""}
                 </>
@@ -1317,6 +1382,62 @@ function FiChart({
   );
 }
 
+/** A % typed in place on a card (the "Needed in" withdrawal rate, the
+ *  survivor spending), saved on Enter or when the box loses focus. */
+function PctInput({
+  pct,
+  label,
+  save: saveTo,
+}: {
+  pct: number;
+  label: string;
+  save: (pct: number) => Promise<{ error?: string; ok?: boolean }>;
+}) {
+  const router = useRouter();
+  const [draft, setDraft] = useState(String(pct));
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const save = () => {
+    const next = Number(draft.trim());
+    if (draft.trim() === "" || next === pct) {
+      setDraft(String(pct));
+      setError(null);
+      return;
+    }
+    start(async () => {
+      const result = await saveTo(next);
+      if (result && "error" in result) {
+        setError(result.error ?? "Couldn't save the rate.");
+        setDraft(String(pct));
+      } else {
+        setError(null);
+        router.refresh();
+      }
+    });
+  };
+  return (
+    <>
+      <PctBox value={draft} className="inline-block align-middle" textClassName="text-xs font-semibold sm:text-sm">
+        <input
+          inputMode="decimal"
+          aria-label={label}
+          value={draft}
+          disabled={pending}
+          onChange={(e) => setDraft(e.target.value)}
+          // Clicking in selects the number, so typing replaces it.
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+          }}
+          className="w-16 rounded-md bg-surface px-1 py-0.5 text-center text-xs font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60 sm:text-sm"
+        />
+      </PctBox>
+      {error ? <span className="block text-negative">{error}</span> : null}
+    </>
+  );
+}
+
 /** One label/value line in the Investments panel, styled like IncomeRow. */
 function ValueRow({
   label,
@@ -1326,8 +1447,8 @@ function ValueRow({
   bold = false,
 }: {
   label: string;
-  note?: string;
-  value: string;
+  note?: React.ReactNode;
+  value: React.ReactNode;
   tone?: string;
   bold?: boolean;
 }) {
@@ -1913,19 +2034,18 @@ function PlanModal({
       >
         {/* Also up here, so a rejected save from the top Save is seen. */}
         {error ? <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p> : null}
-        <SectionHead title="General Data About You" open={isOpen("info")} onToggle={() => toggleSection("info")} />
-        <div className={isOpen("info") ? "contents" : "hidden"}>
-        <Field label="Birth year" hint="Used to show your age on the chart.">
+        <SectionHead title="General Profile Data" open={isOpen("info")} onToggle={() => toggleSection("info")} />
+        {/* Your own figures on one line, the spouse's on the next (Victor,
+            2026-10-19). A blank spouse birth year hides Spouse Age. */}
+        <div className={isOpen("info") ? "grid grid-cols-1 items-end gap-x-8 gap-y-4 sm:col-span-2 sm:grid-cols-3" : "hidden"}>
+        <Field center label="Birth year">
           <input name="birthYear" inputMode="numeric" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} className={inputClass} />
-        </Field>
-        <Field label="Plan until age" hint="Last age the plan covers.">
-          <input name="longevityAge" inputMode="numeric" defaultValue={plan.longevityAge} className={inputClass} />
         </Field>
         {/* The year all work stops — military, GS or civilian. Up here, not
             under the rates or the military section: it is the plan's own
             retirement, and a military retirement can be followed by a second
             career (Victor, 2026-10-17). */}
-        <Field label="Expected Retirement Year">
+        <Field center label="Expected Retirement Year">
           <input
             name="withdrawStartYear"
             inputMode="numeric"
@@ -1934,13 +2054,22 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field label="Spouse Expected Retirement Year">
+        <Field center label="Plan until age">
+          <input name="longevityAge" inputMode="numeric" defaultValue={plan.longevityAge} className={inputClass} />
+        </Field>
+        <Field center label="Spouse birth year">
+          <input name="spouseBirthYear" inputMode="numeric" defaultValue={plan.spouseBirthYear ?? ""} className={inputClass} />
+        </Field>
+        <Field center label="Spouse Expected Retirement Year">
           <input
             name="spouseRetireYear"
             inputMode="numeric"
             defaultValue={plan.spouseRetireYear ?? ""}
             className={inputClass}
           />
+        </Field>
+        <Field center label="Spouse plan until age">
+          <input name="spouseLongevityAge" inputMode="numeric" defaultValue={plan.spouseLongevityAge} className={inputClass} />
         </Field>
         </div>
 
@@ -3097,12 +3226,15 @@ function Field({
   id,
   className,
   highlight = false,
+  center = false,
   label,
   hint,
   children,
 }: {
   id?: string;
   className?: string;
+  /** Label and box centred in their column (General Profile Data). */
+  center?: boolean;
   /** Light-blue outline for the box a button sent you to. */
   highlight?: boolean;
   label: string;
@@ -3114,8 +3246,8 @@ function Field({
       id={id}
       className={`block ${className ?? ""} ${highlight ? "-m-2 rounded-md bg-sky-50 p-2 ring-2 ring-sky-400 dark:bg-sky-950/40" : ""}`}
     >
-      <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">{label}</span>
-      <span className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3">
+      <span className={`mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground ${center ? "text-center" : ""}`}>{label}</span>
+      <span className={center ? "flex justify-center" : "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3"}>
         {children}
         {hint ? <span className="text-xs leading-snug text-foreground sm:text-sm">{hint}</span> : null}
       </span>
@@ -3137,7 +3269,7 @@ function IncomeRow({
   tone = "",
   bold = false,
 }: {
-  label: string;
+  label: React.ReactNode;
   note?: string;
   monthly: number;
   yearly: number;

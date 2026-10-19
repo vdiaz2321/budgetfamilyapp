@@ -22,10 +22,11 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const TEAL_TEXT = "text-[#165451] dark:text-[#5fb3ad]";
 const AQUA_FILL = "bg-[#adefed] dark:bg-[#4fb8b4]";
 
-const CHIP_ICONS: Record<"flight" | "hotel" | "car", React.ReactNode> = {
+const CHIP_ICONS: Record<"flight" | "hotel" | "car" | "spend", React.ReactNode> = {
   flight: <path d="M2 12l19-7-5 7 5 7-19-7z" />,
   hotel: <path d="M3 18v-8h18v8M3 14h18M7 10V7h10v3" />,
   car: <path d="M5 16V11l2-5h10l2 5v5M3 16h18M7 16v2M17 16v2M5 11h14" />,
+  spend: <path d="M3 7h18v12H3zM3 7l3-3h12l3 3M16 13h2" />,
 };
 
 /** "in 4 days" — aqua once the trip is a week or less away. */
@@ -170,6 +171,11 @@ export function TripCards({
             // teal "100% paid".
             const paidPct = fullyPaid || overPlan ? 100 : planned > 0 ? Math.min(99, Math.round((t.spent / planned) * 100)) : 0;
             const booked = t.counts.flight + t.counts.stay + t.counts.car > 0;
+            // The trip's Spending rows (food, activities, …): what's been
+            // spent so far, and the plan on rows with no actual yet.
+            const spendingSpent = t.miscTotal - t.planOnly.miscTotal;
+            const spendingPlanned = t.planOnly.miscTotal;
+            const hasSpending = spendingSpent > 0 || spendingPlanned > 0;
             // What's been paid for each kind of booking — the same split as
             // Spent below (plan-only bookings left out). Blank when nothing is
             // paid yet; "Pts" when it went on points with no cash.
@@ -213,11 +219,21 @@ export function TripCards({
 
                   {/* On a phone the days pill moves down here, so the dates
                       get the full width. */}
-                  {booked ? (
+                  {booked || hasSpending ? (
                     <span className="flex flex-wrap items-center gap-1.5">
+                      {!booked ? (
+                        <span className="rounded-full border border-dashed border-line px-2.5 py-1 text-xs font-medium text-muted">Nothing booked yet</span>
+                      ) : null}
                       {t.counts.flight ? <Chip icon="flight">{plural(t.counts.flight, "flight")}{paidFor("flight", t.flights, t.planOnly.flights)}{notBooked("flight", t.planOnly.flights)}</Chip> : null}
                       {t.counts.stay ? <Chip icon="hotel">{plural(t.counts.stay, "hotel")}{paidFor("stay", t.hotels, t.planOnly.hotels)}{notBooked("stay", t.planOnly.hotels)}</Chip> : null}
                       {t.counts.car ? <Chip icon="car">{plural(t.counts.car, "rental")}{paidFor("car", t.rentals, t.planOnly.rentals)}{notBooked("car", t.planOnly.rentals)}</Chip> : null}
+                      {hasSpending ? (
+                        <Chip icon="spend">
+                          Spending
+                          {spendingSpent > 0 ? <span className="font-bold text-negative"> · {formatMoneyWhole(spendingSpent, currency)} spent</span> : null}
+                          {spendingPlanned > 0 ? <span className="font-bold"> · {formatMoneyWhole(spendingPlanned, currency)} planned</span> : null}
+                        </Chip>
+                      ) : null}
                       <DaysPill days={days} className="ml-auto sm:hidden" />
                     </span>
                   ) : (

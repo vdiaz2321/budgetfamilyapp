@@ -326,6 +326,19 @@ export function ageInYear(birthYear: number | null, year: number): number | null
   return birthYear ? year - birthYear : null;
 }
 
+/** The plan's last year: whichever of you and your spouse reaches their
+ *  plan-until age last. No birth year of your own → null. */
+export function planEndYear(
+  birthYear: number | null,
+  longevityAge: number,
+  spouseBirthYear: number | null,
+  spouseLongevityAge: number,
+): number | null {
+  if (!birthYear) return null;
+  const yours = birthYear + longevityAge;
+  return spouseBirthYear ? Math.max(yours, spouseBirthYear + spouseLongevityAge) : yours;
+}
+
 // ---- Retirement income, year by year.
 //
 // Military retired pay, VA disability and Social Security get the same
@@ -689,6 +702,44 @@ export function incomeForYear(
   return { parts, afterTaxCents, guaranteedCents };
 }
 
+/** VA DIC, surviving spouse's basic monthly rate effective 2025-12-01 (paid
+ *  from 2026): $1,699.36 (va.gov survivor rates; Federal Register 2026-02993). */
+export const DIC_SPOUSE_MONTHLY_CENTS = 169936;
+export const DIC_RATE_YEAR = 2026;
+
+/**
+ * A death on active duty, before retired pay starts. SBP is automatic: the
+ * base is retired pay at a 100% disability rating (75% of High-3), less the
+ * premium the member would have paid (10%, +5% for each full five years the
+ * spouse is younger, at most 40%), and the spouse gets 55% of what's left.
+ * DIC is paid on top — the SBP-DIC offset ended 2023-01-01.
+ */
+export type ActiveDutyDeath = {
+  deathYear: number;
+  high3MonthlyCents: number;
+  /** Spouse's birth year minus the member's: positive = spouse younger. */
+  spouseYoungerYears: number | null;
+};
+
+/** True when a death in `deathYear` comes before retired pay starts —
+ *  including the retirement year itself when retired pay starts after January. */
+export function diesOnActiveDuty(pension: PensionEstimate | null, deathYear: number): boolean {
+  if (!pension) return false;
+  return deathYear < pension.retireYear || (deathYear === pension.retireYear && pension.retireMonth > 1);
+}
+
+/** The imputed SBP premium on an active-duty death, % of the base. */
+export function activeDutySbpPremiumPct(spouseYoungerYears: number | null): number {
+  const steps = spouseYoungerYears != null && spouseYoungerYears > 0 ? Math.floor(spouseYoungerYears / 5) : 0;
+  return Math.min(40, 10 + 5 * steps);
+}
+
+/** The active-duty SBP annuity per month in the death year. */
+export function activeDutySbpMonthly(d: ActiveDutyDeath): number {
+  const base = d.high3MonthlyCents * 0.75;
+  return Math.round(base * (1 - activeDutySbpPremiumPct(d.spouseYoungerYears) / 100) * 0.55);
+}
+
 /**
  * The same year's income if Victor has died and Jo is the survivor:
  * - retired pay becomes the SBP annuity, 55% of gross retired pay (taxable),
@@ -707,10 +758,31 @@ export function survivorIncomeForYear(
   taxPct: number,
   cola: ColaPlan = NO_COLA,
   when: ColaWhen = { thisYear: year, birthYear: null },
+  activeDuty: ActiveDutyDeath | null = null,
 ): YearIncome {
   const keep = 1 - taxPct / 100;
   const parts: IncomePart[] = [];
-  if (pension && sbpEnabled && pensionStartYear != null && year >= pensionStartYear) {
+  if (activeDuty && year >= activeDuty.deathYear) {
+    // Never retired: the automatic active-duty SBP and DIC, from the death
+    // year on, instead of an elected SBP on retired pay.
+    const sbp = Math.round(
+      activeDutySbpMonthly(activeDuty) * (cola.military ? colaGrowth(cola, activeDuty.deathYear, year) : 1),
+    );
+    parts.push({
+      name: "SBP (active-duty death)",
+      kind: "pension",
+      monthlyAfterTaxCents: Math.round(sbp * keep),
+      monthlyBeforeTaxCents: sbp,
+    });
+    const dic = Math.round(DIC_SPOUSE_MONTHLY_CENTS * (cola.va ? colaGrowth(cola, DIC_RATE_YEAR, year) : 1));
+    parts.push({
+      name: "DIC (VA)",
+      kind: "va",
+      // Not taxed.
+      monthlyAfterTaxCents: dic,
+      monthlyBeforeTaxCents: dic,
+    });
+  } else if (pension && sbpEnabled && pensionStartYear != null && year >= pensionStartYear) {
     // The annuity gets the same COLAs retired pay would have.
     const annuity = Math.round(pensionIn(pension, year, cola).gross * 0.55);
     parts.push({

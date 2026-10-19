@@ -27,6 +27,10 @@ export type ProjectionYear = {
   taxPct: number | null;
   /** Total spending: the typed spending + healthcare from the plan. */
   spendingCents: number;
+  /** "If you die first": the survivor spending % typed on this year (null =
+   *  none), and the one in force — typed here or carried, 100% before any. */
+  survivorPctTyped: number | null;
+  survivorPct: number;
   /** The spending typed for the year. */
   baseSpendingCents: number;
   /** Debt payments no longer needed that year (debts paid off). */
@@ -152,12 +156,20 @@ function yearForecast(y: ProjectionYear, thisYear: number): YearForecast | null 
   };
 }
 
-// Frozen Year + Age columns. Year has a fixed width so Age knows where to sit.
-const pinYear = "sticky left-0 z-10 w-[3.75rem] min-w-[3.75rem] sm:w-[4.75rem] sm:min-w-[4.75rem]";
-const pinAge = "sticky left-[3.75rem] sm:left-[4.75rem] z-10 shadow-[1px_0_0_0_var(--color-line)]";
+// Frozen columns: on desktop Year + Age (+ Spouse Age); on a phone only Year,
+// so the narrow screen keeps room for the money (Victor, 2026-10-19). Year has
+// a fixed width so Age knows where to sit; the edge line goes on the last
+// frozen column.
+const pinYear = "sticky left-0 z-10 w-[3.75rem] min-w-[3.75rem] sm:w-[4.75rem] sm:min-w-[4.75rem] max-sm:shadow-[1px_0_0_0_var(--color-line)]";
+const pinAge = "sm:sticky sm:left-[4.75rem] sm:z-10 sm:shadow-[1px_0_0_0_var(--color-line)]";
+// With a spouse on the plan, Age gets a fixed width on desktop so Spouse Age
+// can pin beside it and take over the edge line.
+const pinAgeWithSpouse = "sm:w-[4.5rem] sm:min-w-[4.5rem] sm:shadow-none";
+const pinSpouseAge = "sm:sticky sm:left-[9.25rem] sm:z-10 sm:shadow-[1px_0_0_0_var(--color-line)]";
 // Opaque versions of the row's this-year wash and hover.
 const pinNowBg = "bg-sky-100 dark:bg-[color-mix(in_srgb,var(--color-sky-900)_50%,var(--color-background))]";
-const pinHover = "group-hover:bg-sky-200 dark:group-hover:bg-sky-900";
+// Fades at the same speed as the row, so the pinned cells don't change ahead of it.
+const pinHover = "transition-colors group-hover:bg-sky-200 dark:group-hover:bg-sky-900";
 
 export function ProjectionSection({
   years,
@@ -165,6 +177,7 @@ export function ProjectionSection({
   thisYear,
   seed,
   militaryRetireYear,
+  spouseBirthYear = null,
   groupSlots,
   currentNwCents,
   inflationPct,
@@ -179,6 +192,8 @@ export function ProjectionSection({
   thisYear: number;
   seed: ProjectionSeed;
   militaryRetireYear: number | null;
+  /** Spouse's birth year; null hides the Spouse Age column. */
+  spouseBirthYear?: number | null;
   /** Today's accounts and the group each sits in — named under each group
    *  in the year popup. */
   groupSlots: GroupSlot[];
@@ -330,7 +345,7 @@ export function ProjectionSection({
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {current ? (
             <Figure
-              label={`${thisYear} projected NW`}
+              label={`${thisYear} Projected EOY NW`}
               value={formatMoneyWhole(current.eoyCents, currency)}
               tone="text-foreground"
               sub={
@@ -349,7 +364,7 @@ export function ProjectionSection({
           ) : null}
           {gap != null ? (
             <Figure
-              label={gapIsPace ? `${thisYear} Proj Forecast NW` : `${thisYear - 1} actual`}
+              label={gapIsPace ? `${thisYear} Forecasted NW` : `${thisYear - 1} actual`}
               value={formatMoneyWhole(gapIsPace ? forecast! : lastYear!.actualCents!, currency)}
               tone={gap >= 0 ? "text-positive" : "text-negative"}
               sub={
@@ -359,7 +374,7 @@ export function ProjectionSection({
                     <span className={`block font-semibold ${gap >= 0 ? "text-positive" : "text-negative"}`}>
                       {gap >= 0 ? "Up" : "Down"}: {formatMoneyWhole(Math.abs(gap), currency)}
                     </span>
-                    <span className="block whitespace-nowrap">from Proj NW</span>
+                    <span className="block whitespace-nowrap">from Proj EOY NW</span>
                   </>
                 ) : (
                   `${gap >= 0 ? "ahead of" : "behind"} projection by ${formatMoneyWhole(Math.abs(gap), currency)}`
@@ -483,7 +498,10 @@ export function ProjectionSection({
                   {/* Year and Age stay pinned on the left so a row can be
                       read while scrolling across to the NW columns. */}
                   <th className={`${pinYear} bg-background px-2.5 py-2 text-center font-semibold`}>Year</th>
-                  <th className={`${pinAge} bg-background px-2.5 py-2 text-center font-semibold`}>Age</th>
+                  <th className={`${pinAge} ${spouseBirthYear ? pinAgeWithSpouse : ""} bg-background px-2.5 py-2 text-center font-semibold`}>Age</th>
+                  {spouseBirthYear ? (
+                    <th className={`${pinSpouseAge} bg-background px-2.5 py-2 text-center font-semibold`}>Spouse<br />Age</th>
+                  ) : null}
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Income</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Spending</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Diff Income -<br />Spending</th>
@@ -511,9 +529,14 @@ export function ProjectionSection({
                       <td className={`${pinYear} ${y.year === thisYear ? pinNowBg : "bg-background"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
                         {y.year}
                       </td>
-                      <td className={`${pinAge} ${y.year === thisYear ? pinNowBg : "bg-background"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
+                      <td className={`${pinAge} ${spouseBirthYear ? pinAgeWithSpouse : ""} ${y.year === thisYear ? pinNowBg : "bg-background"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
                         {y.age ?? "—"}
                       </td>
+                      {spouseBirthYear ? (
+                        <td className={`${pinSpouseAge} ${y.year === thisYear ? pinNowBg : "bg-background"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
+                          {y.year - spouseBirthYear}
+                        </td>
+                      ) : null}
                       {/* Plan on top, what actually happened underneath. */}
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {formatMoneyWhole(y.incomeCents, currency)}
@@ -651,7 +674,7 @@ export function ProjectionSection({
                             >
                               {/* Two lines on a phone, so the longer label
                                   doesn't push past the column's edge. */}
-                              <span className="max-sm:block">Proj Forecast NW:</span> {m(y.year, f, currency)}
+                              <span className="max-sm:block">Forecasted NW:</span> {m(y.year, f, currency)}
                             </span>
                           );
                         })()}
@@ -719,6 +742,8 @@ export function ProjectionSection({
       {editing ? (
         <YearModal
           row={editing}
+          // The survivor % the year would carry if its own box were blank.
+          carriedSurvivorPct={years.filter((y) => y.year < editing.year).at(-1)?.survivorPct ?? 100}
           currency={currency}
           thisYear={thisYear}
           militaryRetireYear={militaryRetireYear}
@@ -1192,7 +1217,7 @@ function ForecastBreakdown({
   const sign = (cents: number) => (cents < 0 ? "text-negative" : "text-positive");
   const months = (n: number) => `${n} ${n === 1 ? "month" : "months"}`;
   return (
-    <Line label="Proj Forecast NW">
+    <Line label="Forecasted NW">
       {MONTH_NAMES[f.monthsDone - 1]} NW {$(f.monthEndCents)} + <span className={sign(f.perMonthCents)}>{$(f.perMonthCents)}</span> avg a
       month × {months(f.monthsLeft)}
       {f.travelCents > 0 ? (
@@ -1254,6 +1279,7 @@ function ConfirmModal({
 
 function YearModal({
   row,
+  carriedSurvivorPct,
   currency,
   thisYear,
   militaryRetireYear,
@@ -1262,6 +1288,7 @@ function YearModal({
   onEditIncome,
 }: {
   row: ProjectionYear;
+  carriedSurvivorPct: number;
   currency: string;
   thisYear: number;
   militaryRetireYear: number | null;
@@ -1334,6 +1361,7 @@ function YearModal({
   const healthCents = row.spendingCents - row.baseSpendingCents + row.debtFreedCents - row.withdrawalTaxCents;
   const planAdjustCents = healthCents - row.debtFreedCents + row.withdrawalTaxCents;
   const [spending, setSpending] = useState(toWhole(row.baseSpendingCents));
+  const [survivorPct, setSurvivorPct] = useState(row.survivorPctTyped == null ? "" : String(row.survivorPctTyped));
   const [gains, setGains] = useState(toWhole(row.growthCents));
   const [oneOff, setOneOff] = useState(row.oneOffCents ? toWhole(row.oneOffCents) : "");
   const [contributed, setContributed] = useState(row.contributedCents == null ? "" : toWhole(row.contributedCents));
@@ -1538,11 +1566,11 @@ function YearModal({
               </span>
             )}
           </p>
-          {/* The same forecast as the "Proj Forecast NW" card, coloured the same:
+          {/* The same forecast as the "Forecasted NW" card, coloured the same:
               green ahead of the plan, red behind it. */}
           {forecastCents != null ? (
             <p>
-              <span className="text-foreground">Proj <br className="max-sm:hidden" />Forecast NW: </span>
+              <span className="text-foreground">Forecasted <br className="max-sm:hidden" />NW: </span>
               <span
                 className={`font-semibold sm:block ${
                   forecastCents >= predictedEoyCents ? "text-positive" : "text-negative"
@@ -1668,7 +1696,7 @@ function YearModal({
             />
           </Field>
         </div>
-        <div className="sm:col-span-2 grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-4">
+        <div className="sm:col-span-2 grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-5">
           {/* Signed, and one number rather than a purchase model: the net
               effect on this year's close (a house ≈ minus closing costs). */}
           <Field label="One-off (+/−)">
@@ -1680,6 +1708,21 @@ function YearModal({
               onChange={(e) => setOneOff(e.target.value)}
               className={inputClass}
             />
+          </Field>
+          {/* The "If you die first" card spends this share of the year's Total
+              Spending. Blank carries the last typed year's % (Victor,
+              2026-10-19). */}
+          <Field label="Survivor Spending">
+            <PctBox value={survivorPct} placeholder={String(carriedSurvivorPct)} className="mx-auto block w-16 sm:w-20" textClassName="text-sm sm:text-base">
+              <input
+                name="survivorPct"
+                inputMode="decimal"
+                value={survivorPct}
+                placeholder={String(carriedSurvivorPct)}
+                onChange={(e) => setSurvivorPct(e.target.value)}
+                className={`${smallInputClass} w-full`}
+              />
+            </PctBox>
           </Field>
           <Field label="Age">
             <input name="age" inputMode="numeric" defaultValue={row.age ?? ""} className={smallInputClass} />
@@ -1715,6 +1758,10 @@ function YearModal({
           <p>
             <span className="font-semibold text-foreground">Diff Income - Spending:</span>{" "}Total
             Income − Total Spending — what&apos;s left over.
+          </p>
+          <p>
+            <span className="font-semibold text-foreground">Survivor Spending:</span> share of Total
+            Spending if you die first. Blank uses the last year typed.
           </p>
         </div>
 

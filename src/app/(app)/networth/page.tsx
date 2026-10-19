@@ -162,7 +162,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, spouse_retire_year, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, spouse_retire_year, spouse_birth_year, spouse_longevity_age, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -183,7 +183,7 @@ export default async function NetworthPage() {
     // The year-by-year plan Victor has kept since 2018.
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts, group_overrides")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, survivor_spending_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts, group_overrides")
       .eq("household_id", household.id)
       .order("year"),
     // The year-end gains typed on Invest / Savings — the sheet's "Growth" row,
@@ -869,7 +869,7 @@ export default async function NetworthPage() {
     // what was adopted rather than what it replaced.
     const refreshed = await supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts, group_overrides")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, survivor_spending_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts, group_overrides")
       .eq("household_id", household.id)
       .order("year");
     if (refreshed.data) projectionRows = refreshed.data;
@@ -1020,8 +1020,20 @@ export default async function NetworthPage() {
     }).filter((g) => g.start !== 0 || g.end !== 0 || g.add !== 0 || g.take !== 0 || g.actualAdd || g.actualTake);
   })();
 
+  // Survivor spending %: typed on a year, carried into later years until
+  // another is typed; 100% before any.
+  const survivorPctByYear = new Map<number, number>();
+  {
+    let carry = 100;
+    for (const r of projectionRows ?? []) {
+      if (r.survivor_spending_pct != null) carry = Number(r.survivor_spending_pct);
+      survivorPctByYear.set(r.year, carry);
+    }
+  }
   const projectionYears = (projectionRows ?? []).map((r) => ({
     year: r.year,
+    survivorPctTyped: r.survivor_spending_pct == null ? null : Number(r.survivor_spending_pct),
+    survivorPct: survivorPctByYear.get(r.year) ?? 100,
     age: r.age ?? null,
     boyCents: r.boy_cents ?? 0,
     incomeCents: r.income_cents ?? 0,
@@ -1100,6 +1112,7 @@ export default async function NetworthPage() {
         investmentReturnPct: planRow?.investment_return_pct == null ? 7.5 : Number(planRow.investment_return_pct),
         withdrawStartYear: planRow?.withdraw_start_year ?? null,
         spouseRetireYear: planRow?.spouse_retire_year ?? null,
+        spouseBirthYear: planRow?.spouse_birth_year ?? null,
         withdrawalRatePct:
           planRow?.withdrawal_rate_pct == null ? 4 : Number(planRow.withdrawal_rate_pct),
         // A pension, VA, Social Security — income the portfolio never has to
@@ -1122,6 +1135,7 @@ export default async function NetworthPage() {
         sbpEnabled: !!planRow?.sbp_enabled,
         sbpPct: planRow?.sbp_pct == null ? 6.5 : Number(planRow.sbp_pct),
         longevityAge: planRow?.longevity_age ?? 90,
+        spouseLongevityAge: planRow?.spouse_longevity_age ?? 90,
         healthcareAnnualCents: planRow?.healthcare_annual_cents ?? null,
         healthPlans: parseHealthPlans(planRow?.health_plans),
         dentalPlans: parseDentalPlans(planRow?.dental_plans),

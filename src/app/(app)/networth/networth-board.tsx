@@ -276,6 +276,7 @@ export function NetworthBoard({
             thisYear={thisYear}
             seed={projectionSeed}
             militaryRetireYear={fiPlan.targetRetireYear}
+            spouseBirthYear={fiPlan.spouseBirthYear}
             groupSlots={fiPlan.accountGroups.slots}
             onEditIncome={editIncome}
             currentNwCents={projectionYears.find((y) => y.inProgress)?.actualCents ?? fiMeasured.assetsCents}

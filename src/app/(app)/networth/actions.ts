@@ -30,6 +30,7 @@ import {
   type IncomeLine,
   type IncomeLineKind,
   type RentalRow,
+  planEndYear,
 } from "@/lib/retirement";
 import {
   GROUP_KINDS,
@@ -390,11 +391,13 @@ export async function saveRetirementPlan(formData: FormData) {
   const investReturn = num("investmentReturnPct");
   const withdrawStart = num("withdrawStartYear");
   const spouseRetire = num("spouseRetireYear");
+  const spouseBirthYear = num("spouseBirthYear");
   const withdrawal = num("withdrawalRatePct");
   const inflation = num("inflationPct");
   const cashReturn = num("cashReturnPct");
   const sbpPct = num("sbpPct");
   const longevity = num("longevityAge");
+  const spouseLongevity = num("spouseLongevityAge");
   const healthStartAge = num("healthcareStartAge");
   // Each row: a plan kind, its yearly premium as typed, and its dates.
   // Health plans and dental & vision plans ride along as JSON: each row a
@@ -463,6 +466,7 @@ export async function saveRetirementPlan(formData: FormData) {
   }
 
   if (!year(birthYear)) return { error: "Enter a four-digit birth year." };
+  if (!year(spouseBirthYear)) return { error: "Enter a four-digit spouse birth year." };
   if (!year(targetYear)) return { error: "Enter a four-digit military retirement year." };
   if (!year(serviceStart)) return { error: "Enter a four-digit year for when service started." };
   if (
@@ -506,6 +510,9 @@ export async function saveRetirementPlan(formData: FormData) {
   }
   if (longevity != null && (longevity < 50 || longevity > 120)) {
     return { error: "Plan until age has to be between 50 and 120." };
+  }
+  if (spouseLongevity != null && (spouseLongevity < 50 || spouseLongevity > 120)) {
+    return { error: "Spouse plan until age has to be between 50 and 120." };
   }
   if (healthStartAge != null && (healthStartAge < 18 || healthStartAge > 120)) {
     return { error: "Healthcare start age has to be between 18 and 120." };
@@ -768,6 +775,7 @@ export async function saveRetirementPlan(formData: FormData) {
       investment_return_pct: investReturn ?? 7.5,
       withdraw_start_year: withdrawStart,
       spouse_retire_year: spouseRetire,
+      spouse_birth_year: spouseBirthYear,
       // No box for it any more (withdrawals are set year by year); keep
       // what's stored rather than resetting it.
       ...(formData.has("withdrawalRatePct") ? { withdrawal_rate_pct: withdrawal ?? 4 } : {}),
@@ -776,6 +784,7 @@ export async function saveRetirementPlan(formData: FormData) {
       sbp_enabled: formData.get("sbpEnabled") === "on",
       sbp_pct: sbpPct ?? 6.5,
       longevity_age: longevity ?? 90,
+      spouse_longevity_age: spouseLongevity ?? 90,
       health_plans: healthPlans,
       healthcare_annual_cents: money("healthcareAnnual"),
       dental_plans: dentalPlans,
@@ -1038,8 +1047,14 @@ async function recomputeRetirementIncome(
     stopWorkYear: plan.withdraw_start_year ?? plan.target_retire_year ?? null,
   });
 
-  // Run to the plan-until age, carrying the last year forward.
-  const lastYear = plan.birth_year ? plan.birth_year + Number(plan.longevity_age ?? 90) : null;
+  // Run to the plan-until age — yours or your spouse's, whichever is later —
+  // carrying the last year forward.
+  const lastYear = planEndYear(
+    plan.birth_year ?? null,
+    Number(plan.longevity_age ?? 90),
+    plan.spouse_birth_year ?? null,
+    Number(plan.spouse_longevity_age ?? 90),
+  );
   const last = rows[rows.length - 1];
   if (lastYear != null) {
     for (let y = last.year + 1; y <= lastYear; y++) {
@@ -1459,6 +1474,12 @@ export async function saveProjectionYear(formData: FormData) {
   if (taxPct != null && (!Number.isFinite(taxPct) || taxPct < 0 || taxPct > 60)) {
     return { error: "Tax rate has to be between 0% and 60%." };
   }
+  // Survivor spending % for this year; blank = carried from an earlier year.
+  const survRaw = String(formData.get("survivorPct") ?? "").trim();
+  const survivorPct = survRaw === "" ? null : Number(survRaw);
+  if (survivorPct != null && (!Number.isFinite(survivorPct) || survivorPct <= 0 || survivorPct > 100)) {
+    return { error: "Survivor spending has to be between 1% and 100%." };
+  }
   // Signed, unlike the others: a windfall is positive, a house is negative.
   const oneOff = displayToCents(String(formData.get("oneOff") ?? "0"));
   // Blank = no estimate. Tracking only; never carried forward or into EOY.
@@ -1612,6 +1633,8 @@ export async function saveProjectionYear(formData: FormData) {
       one_off_cents: oneOff,
       contributed_cents: contributed,
       tax_pct: taxPct,
+      // Only when the popup sent the box, so other saves leave it alone.
+      ...(formData.has("survivorPct") ? { survivor_spending_pct: survivorPct } : {}),
       group_overrides: Object.keys(overridesOut).length > 0 ? overridesOut : null,
       eoy_cents: 0,
       updated_at: new Date().toISOString(),
@@ -1827,4 +1850,26 @@ export async function anchorYearToActualStart(
   if (error) throw new Error(`Could not update the projection: ${error.message}`);
   await rebuildProjectionChain(supabase, householdId, year);
   return true;
+}
+
+/**
+ * The withdrawal rate behind the Investments card's "Needed in" figure — the
+ * yardstick only (how much the investments must be to cover the year's gap at
+ * that %). The withdrawals themselves stay per group in the year popup.
+ */
+export async function setWithdrawalRate(pct: number) {
+  const { supabase, householdId } = await requireHousehold();
+  if (!Number.isFinite(pct) || pct <= 0 || pct > 20) {
+    return { error: "Withdrawal rate has to be between 0% and 20%." };
+  }
+  const { error } = await supabase
+    .from("retirement_plan")
+    .update({ withdrawal_rate_pct: pct, updated_at: new Date().toISOString() })
+    .eq("household_id", householdId);
+  if (error) {
+    console.error("[setWithdrawalRate]", error);
+    return { error: `Couldn't save the rate — ${error.message}` };
+  }
+  revalidatePath("/networth");
+  return { ok: true };
 }
