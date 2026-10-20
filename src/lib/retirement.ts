@@ -421,6 +421,9 @@ export type IncomeLine = {
   raisePct?: number | null;
   /** Typed per year: the amount as typed. `monthlyCents` is then a twelfth of it. */
   annualCents?: number | null;
+  /** Social Security only: the full-retirement-age benefit (PIA) per month,
+   *  in the same money as `monthlyCents`. Null: worked out from the start age. */
+  piaCents?: number | null;
   taxable: boolean;
 };
 
@@ -702,24 +705,112 @@ export function incomeForYear(
   return { parts, afterTaxCents, guaranteedCents };
 }
 
-/** VA DIC, surviving spouse's basic monthly rate effective 2025-12-01 (paid
- *  from 2026): $1,699.36 (va.gov survivor rates; Federal Register 2026-02993). */
+/** VA DIC monthly rates effective 2025-12-01 (paid from 2026), va.gov DIC
+ *  survivor rates. They rise with the VA COLA from DIC_RATE_YEAR. */
 export const DIC_SPOUSE_MONTHLY_CENTS = 169936;
+/** Added to the spouse's DIC for each child under 18. */
+export const DIC_CHILD_UNDER_18_CENTS = 42100;
+/** Added for the first 2 years after the death while a child is under 18. */
+export const DIC_TRANSITIONAL_CENTS = 35900;
+/** Paid to a child 18–22 in a VA-approved school, in their own name. */
+export const DIC_SCHOOL_CHILD_CENTS = 35666;
+/** Children-only DIC (no surviving spouse): the family's total for 1–5
+ *  children under 18, then +$255.95 each. */
+const DIC_CHILDREN_ONLY_CENTS = [0, 71750, 103218, 134692, 160287, 185882];
+const DIC_CHILDREN_ONLY_EXTRA_CENTS = 25595;
 export const DIC_RATE_YEAR = 2026;
 
+/** Military death gratuity, 10 USC 1478: $100,000, tax-free, paid once on a
+ *  death on active duty. */
+export const DEATH_GRATUITY_CENTS = 10_000_000;
+
+/** A child on the plan, for the survivor benefits' age limits. */
+export type PlanChild = {
+  birthYear: number;
+  /** Expected to be a full-time student after high school: SBP to 22, DIC
+   *  to 23, TRICARE to 23. */
+  college: boolean;
+};
+
+/** A stored `children` list, with anything malformed dropped. */
+export function parseChildren(raw: unknown): PlanChild[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((c) => {
+    const y = Number(c?.birthYear);
+    return Number.isInteger(y) && y > 1900 && y < 2200 ? [{ birthYear: y, college: !!c?.college }] : [];
+  });
+}
+
+/** How SGLI or VGLI is paid: once, or in 36 equal monthly payments. */
+export type InsurancePayout = "lump" | "monthly36";
+
+export type MilitaryInsurance = {
+  /** SGLI held on active duty; 0 = declined. */
+  sgliCents: number;
+  sgliPayout: InsurancePayout;
+  /** VGLI kept after retirement; 0 = none. */
+  vgliCents: number;
+  vgliPayout: InsurancePayout;
+};
+
+/** SGLI is $0–$500,000 in $50,000 steps. */
+export const SGLI_STEPS_CENTS = Array.from({ length: 11 }, (_, i) => i * 5_000_000);
+
+/** VGLI premium per $10,000 a month by age band (rates from 2025-07-01,
+ *  va.gov: the $500,000 rate ÷ 50). [lowest age of the band, cents] */
+const VGLI_RATE_PER_10K: [number, number][] = [
+  [0, 60],
+  [30, 80],
+  [35, 100],
+  [40, 140],
+  [45, 190],
+  [50, 290],
+  [55, 500],
+  [60, 850],
+  [65, 1380],
+  [70, 2150],
+  [75, 3850],
+  [80, 4400],
+];
+
+/** VGLI's monthly premium at `age` for `coverageCents`. */
+export function vgliMonthlyPremiumCents(age: number, coverageCents: number): number {
+  const rate = [...VGLI_RATE_PER_10K].reverse().find(([from]) => age >= from)?.[1] ?? VGLI_RATE_PER_10K[0][1];
+  return Math.round((rate * coverageCents) / 1_000_000);
+}
+
+const childAge = (c: PlanChild, year: number) => year - c.birthYear;
+/** Born and under 18 in `year`. */
+const under18 = (c: PlanChild, year: number) => childAge(c, year) >= 0 && childAge(c, year) < 18;
+
 /**
- * A death on active duty, before retired pay starts. SBP is automatic: the
- * base is retired pay at a 100% disability rating (75% of High-3), less the
- * premium the member would have paid (10%, +5% for each full five years the
- * spouse is younger, at most 40%), and the spouse gets 55% of what's left.
- * DIC is paid on top — the SBP-DIC offset ended 2023-01-01.
+ * A death on active duty, before retired pay starts. SBP is automatic and
+ * free: the base is the retired pay of a 100% disability retirement (75% of
+ * High-3) and the spouse gets 55% of it, 10 USC 1451(c). No premium comes
+ * off — the age-gap cost in 10 USC 1452(c) is only for a non-family
+ * beneficiary. With no spouse the children get it, each until 18 (22 in
+ * college). DIC is paid on top in full — the SBP-DIC offset ended 2023-01-01.
  */
 export type ActiveDutyDeath = {
   deathYear: number;
   high3MonthlyCents: number;
-  /** Spouse's birth year minus the member's: positive = spouse younger. */
-  spouseYoungerYears: number | null;
+  hasSpouse: boolean;
+  children: PlanChild[];
+  /** The year the spouse remarries before 55 — her SBP and DIC stop that
+   *  year and the children's take over. Null: never. */
+  spouseEndsYear?: number | null;
 };
+
+/** Remarrying before 55 stops a spouse's SBP (10 USC 1450(b)) and DIC
+ *  (38 USC 103(d)); at 55 or later both carry on. */
+export const SBP_DIC_REMARRY_AGE = 55;
+/** Remarrying before 60 stops the Social Security widow(er) benefit; the
+ *  caregiver benefit stops on any remarriage. */
+export const SS_WIDOW_REMARRY_AGE = 60;
+
+/** The spouse still draws SBP and DIC in `year`. */
+const spouseDraws = (d: ActiveDutyDeath, year: number) =>
+  d.hasSpouse && (d.spouseEndsYear == null || year < d.spouseEndsYear);
 
 /** True when a death in `deathYear` comes before retired pay starts —
  *  including the retirement year itself when retired pay starts after January. */
@@ -728,16 +819,179 @@ export function diesOnActiveDuty(pension: PensionEstimate | null, deathYear: num
   return deathYear < pension.retireYear || (deathYear === pension.retireYear && pension.retireMonth > 1);
 }
 
-/** The imputed SBP premium on an active-duty death, % of the base. */
-export function activeDutySbpPremiumPct(spouseYoungerYears: number | null): number {
-  const steps = spouseYoungerYears != null && spouseYoungerYears > 0 ? Math.floor(spouseYoungerYears / 5) : 0;
-  return Math.min(40, 10 + 5 * steps);
+/** The active-duty SBP annuity per month in the death year: 55% of 75% of
+ *  High-3. */
+export function activeDutySbpMonthly(d: ActiveDutyDeath): number {
+  return Math.round(d.high3MonthlyCents * 0.75 * 0.55);
 }
 
-/** The active-duty SBP annuity per month in the death year. */
-export function activeDutySbpMonthly(d: ActiveDutyDeath): number {
-  const base = d.high3MonthlyCents * 0.75;
-  return Math.round(base * (1 - activeDutySbpPremiumPct(d.spouseYoungerYears) / 100) * 0.55);
+/** A child who can draw SBP in `year`: under 18, or under 22 in college. */
+const sbpChild = (c: PlanChild, year: number) =>
+  childAge(c, year) >= 0 && (childAge(c, year) < 18 || (c.college && childAge(c, year) < 22));
+
+/** DIC's monthly parts in `year`, before the COLA: the spouse's rate with
+ *  its child and transitional add-ons, and any child in school paid in
+ *  their own name. With no spouse — or once she remarries before 55 — the
+ *  children-only rate. */
+function dicParts(d: ActiveDutyDeath, year: number): { name: string; cents: number }[] {
+  const young = d.children.filter((c) => under18(c, year)).length;
+  const school = d.children.filter((c) => c.college && childAge(c, year) >= 18 && childAge(c, year) < 23).length;
+  const parts: { name: string; cents: number }[] = [];
+  if (spouseDraws(d, year)) {
+    parts.push({ name: "DIC (VA)", cents: DIC_SPOUSE_MONTHLY_CENTS });
+    if (young > 0) parts.push({ name: `DIC: ${young} child${young === 1 ? "" : "ren"} under 18`, cents: young * DIC_CHILD_UNDER_18_CENTS });
+    // The first two years after the death, while a child is under 18.
+    if (young > 0 && year - d.deathYear < 2) parts.push({ name: "DIC: first 2 years", cents: DIC_TRANSITIONAL_CENTS });
+  } else if (young > 0) {
+    const cents =
+      young < DIC_CHILDREN_ONLY_CENTS.length
+        ? DIC_CHILDREN_ONLY_CENTS[young]
+        : DIC_CHILDREN_ONLY_CENTS.at(-1)! + (young - DIC_CHILDREN_ONLY_CENTS.length + 1) * DIC_CHILDREN_ONLY_EXTRA_CENTS;
+    parts.push({ name: "DIC (VA, children)", cents });
+  }
+  if (school > 0) parts.push({ name: `DIC: ${school} child${school === 1 ? "" : "ren"} in school`, cents: school * DIC_SCHOOL_CHILD_CENTS });
+  return parts;
+}
+
+/** The family's one-time payouts in the death year: the death gratuity and
+ *  SGLI on an active-duty death, VGLI on a death after retirement. A
+ *  36-month payout comes as income instead (survivorIncomeForYear). */
+export function survivorLumpSums(
+  activeDuty: ActiveDutyDeath | null,
+  insurance: MilitaryInsurance | null,
+  retiredMilitary: boolean,
+): { name: string; cents: number }[] {
+  const out: { name: string; cents: number }[] = [];
+  if (activeDuty) {
+    out.push({ name: "Death gratuity", cents: DEATH_GRATUITY_CENTS });
+    if (insurance && insurance.sgliCents > 0 && insurance.sgliPayout === "lump") out.push({ name: "SGLI", cents: insurance.sgliCents });
+  } else if (retiredMilitary && insurance && insurance.vgliCents > 0 && insurance.vgliPayout === "lump") {
+    out.push({ name: "VGLI", cents: insurance.vgliCents });
+  }
+  return out;
+}
+
+// ---- Social Security survivor benefits (ssa.gov/survivors). Military basic
+// pay counts toward Social Security, so the PIA on the SSA statement already
+// includes active-duty years.
+
+/** Full retirement age: 67 for a worker born 1960 or later and a widow(er)
+ *  born 1962 or later. */
+const SS_FRA = 67;
+
+/** Share of the PIA paid when retirement benefits start at `age`: 5/9% off a
+ *  month for the first 36 months early, 5/12% for each month before that;
+ *  8% a year added after full retirement age, up to 70. 62 → 70%. */
+export function ssClaimFactor(age: number): number {
+  const early = Math.max(0, SS_FRA - age) * 12;
+  if (early > 0) return 1 - (Math.min(36, early) * 5) / 900 - (Math.max(0, early - 36) * 5) / 1200;
+  return 1 + 0.08 * Math.min(Math.max(0, age - SS_FRA), 70 - SS_FRA);
+}
+
+/** A widow(er)'s share of the worker's benefit when it starts at `age`:
+ *  71.5% at 60, rising evenly to 100% at full retirement age. */
+export function ssWidowFactor(age: number): number {
+  return 0.715 + 0.285 * Math.min(1, Math.max(0, (age - 60) / (SS_FRA - 60)));
+}
+
+/** Family-maximum bend points for a worker who dies in 2026 (ssa.gov
+ *  OACT/COLA/familymax). */
+const SS_FAMILY_MAX_BENDS_CENTS = [164300, 237100, 309300];
+
+/** The most the family can draw on one worker's record per month: 150%,
+ *  272%, 134% and 175% of the PIA's four slices — 150–188% of the PIA. */
+export function ssFamilyMaxCents(piaCents: number): number {
+  const [a, b, c] = SS_FAMILY_MAX_BENDS_CENTS;
+  const slice = (lo: number, hi: number) => Math.max(0, Math.min(piaCents, hi) - lo);
+  return Math.floor(1.5 * Math.min(piaCents, a) + 2.72 * slice(a, b) + 1.34 * slice(b, c) + 1.75 * Math.max(0, piaCents - c));
+}
+
+/** A Social Security line's PIA: the one typed, else its amount taken back
+ *  to full retirement age from the age it starts at. */
+export function ssPiaCents(line: IncomeLine, birthYear: number | null): number {
+  if (line.piaCents) return line.piaCents;
+  if (line.startYear == null || birthYear == null) return line.monthlyCents;
+  return Math.round(line.monthlyCents / ssClaimFactor(line.startYear - birthYear));
+}
+
+/** Who is left to draw on the worker's record. */
+export type SsSurvivors = {
+  spouseBirthYear: number | null;
+  children: PlanChild[];
+  /** The year the spouse remarries; null = never. */
+  remarryYear?: number | null;
+};
+
+/**
+ * Social Security on the deceased worker's record in `year`, per month:
+ * - each child 75% of the PIA until 18, or through high school at 18;
+ * - the spouse 75% at any age while caring for a child under 16
+ *   ("caregiver"), else the widow(er) benefit from full retirement age —
+ *   100% of what he got or would have got;
+ * - the total capped by the family maximum, every share cut by the same %.
+ * Worked in two halves: the year a child turns 16 or 18 pays January–June
+ * (the birthday, or graduation, mid-year).
+ */
+function ssSurvivorParts(
+  year: number,
+  deathYear: number,
+  worker: IncomeLine,
+  survivors: SsSurvivors,
+  ownSsCents: number,
+  cola: ColaPlan,
+  when: ColaWhen,
+): { name: string; halves: [number, number] }[] {
+  const pia = ssPiaCents(worker, when.birthYear);
+  // The PIA in this year's money: the same COLAs as the line.
+  const piaNow = lineIn({ ...worker, monthlyCents: pia }, year, cola, when);
+  // What the widow(er) benefit is based on: his own benefit if he had
+  // started it (at least 82.5% of the PIA), the PIA plus delayed credits if
+  // he died past full retirement age without starting, else the PIA.
+  const claimed = worker.startYear == null || worker.startYear <= deathYear;
+  const ageAtDeath = when.birthYear == null ? SS_FRA : deathYear - when.birthYear;
+  const widowBase = claimed
+    ? Math.max(lineIn(worker, year, cola, when), Math.round(piaNow * 0.825))
+    : Math.round(piaNow * ssClaimFactor(Math.max(SS_FRA, Math.min(70, ageAtDeath))));
+  const familyMax = Math.round(ssFamilyMaxCents(pia) * (piaNow / Math.max(1, pia)));
+  const kidAge = (c: PlanChild) => year - c.birthYear;
+  const out = { caregiver: [0, 0] as [number, number], widow: [0, 0] as [number, number], kids: [0, 0] as [number, number], n: [0, 0] };
+  for (const h of [0, 1] as const) {
+    // Born by mid-year in the first half; 16 / 18 this year only in the first half.
+    const kids = survivors.children.filter((c) => kidAge(c) >= 1 - h && kidAge(c) <= 18 - h);
+    const caring = survivors.children.some((c) => kidAge(c) >= 1 - h && kidAge(c) <= 16 - h);
+    let spouse = 0;
+    let widow = false;
+    if (survivors.spouseBirthYear != null) {
+      const age = year - survivors.spouseBirthYear;
+      // The widow(er) benefit starts at full retirement age, or at the
+      // death when that comes later.
+      const startAge = Math.max(SS_FRA, deathYear - survivors.spouseBirthYear);
+      // A remarriage ends the caregiver benefit, and the widow(er) benefit
+      // too when it comes before 60.
+      const r = survivors.remarryYear;
+      const remarried = r != null && year >= r;
+      const widowGone = remarried && r - survivors.spouseBirthYear < SS_WIDOW_REMARRY_AGE;
+      const aged = age >= startAge && !widowGone ? Math.round(widowBase * ssWidowFactor(startAge)) : 0;
+      const care = caring && !remarried ? Math.round(piaNow * 0.75) : 0;
+      spouse = Math.max(aged, care);
+      widow = aged > care;
+      // Her own Social Security is paid instead when it is the larger.
+      if (spouse <= ownSsCents) spouse = 0;
+    }
+    const kidsEach = Math.round(piaNow * 0.75);
+    const total = spouse + kids.length * kidsEach;
+    const cut = total > familyMax ? familyMax / total : 1;
+    if (widow) out.widow[h] = Math.round(spouse * cut);
+    else out.caregiver[h] = Math.round(spouse * cut);
+    out.kids[h] = Math.round(kids.length * kidsEach * cut);
+    out.n[h] = kids.length;
+  }
+  const n = Math.max(out.n[0], out.n[1]);
+  return [
+    { name: `Social Security: ${n === 1 ? "child" : `${n} children`}`, halves: out.kids },
+    { name: "Social Security: caregiver", halves: out.caregiver },
+    { name: "Social Security: widow(er)", halves: out.widow },
+  ];
 }
 
 /**
@@ -745,8 +999,9 @@ export function activeDutySbpMonthly(d: ActiveDutyDeath): number {
  * - retired pay becomes the SBP annuity, 55% of gross retired pay (taxable),
  *   or nothing when SBP wasn't elected;
  * - his pay, VA disability and a second job stop — they were his;
- * - of the Social Security lines only the largest is kept, because a survivor
- *   receives the higher of her own and his benefit, not both;
+ * - Social Security: the largest line is his record; the children and the
+ *   spouse draw on it (ssSurvivorParts). Her own line is paid instead of her
+ *   share when it is larger — a survivor gets the higher of the two, not both;
  * - a spouse's own income and anything else carries on.
  */
 export function survivorIncomeForYear(
@@ -759,48 +1014,115 @@ export function survivorIncomeForYear(
   cola: ColaPlan = NO_COLA,
   when: ColaWhen = { thisYear: year, birthYear: null },
   activeDuty: ActiveDutyDeath | null = null,
+  /** The death year and the SGLI/VGLI held, for a 36-month payout. */
+  insured: { deathYear: number; insurance: MilitaryInsurance | null } | null = null,
+  /** The spouse and children, for Social Security on his record. Omitted:
+   *  the largest Social Security line carries on from its own start. */
+  survivors: SsSurvivors | null = null,
 ): YearIncome {
   const keep = 1 - taxPct / 100;
   const parts: IncomePart[] = [];
+  // SGLI or VGLI in 36 equal monthly payments: 12 a year for three years
+  // from the death year. Tax-free.
+  const thirtySix = (name: string, cents: number) => {
+    if (!insured || year < insured.deathYear || year > insured.deathYear + 2) return;
+    const monthly = Math.round(cents / 36);
+    parts.push({ name, kind: "other", monthlyAfterTaxCents: monthly, monthlyBeforeTaxCents: monthly });
+  };
+  const insurance = insured?.insurance ?? null;
   if (activeDuty && year >= activeDuty.deathYear) {
     // Never retired: the automatic active-duty SBP and DIC, from the death
-    // year on, instead of an elected SBP on retired pay.
-    const sbp = Math.round(
-      activeDutySbpMonthly(activeDuty) * (cola.military ? colaGrowth(cola, activeDuty.deathYear, year) : 1),
-    );
-    parts.push({
-      name: "SBP (active-duty death)",
-      kind: "pension",
-      monthlyAfterTaxCents: Math.round(sbp * keep),
-      monthlyBeforeTaxCents: sbp,
-    });
-    const dic = Math.round(DIC_SPOUSE_MONTHLY_CENTS * (cola.va ? colaGrowth(cola, DIC_RATE_YEAR, year) : 1));
-    parts.push({
-      name: "DIC (VA)",
-      kind: "va",
+    // year on, instead of an elected SBP on retired pay. With no spouse, SBP
+    // goes to the children while one is still young enough.
+    const spouseSbp = spouseDraws(activeDuty, year);
+    if (spouseSbp || activeDuty.children.some((c) => sbpChild(c, year))) {
+      const sbp = Math.round(
+        activeDutySbpMonthly(activeDuty) * (cola.military ? colaGrowth(cola, activeDuty.deathYear, year) : 1),
+      );
+      parts.push({
+        name: spouseSbp ? "SBP (active-duty death)" : "SBP (children)",
+        kind: "pension",
+        monthlyAfterTaxCents: Math.round(sbp * keep),
+        monthlyBeforeTaxCents: sbp,
+      });
+    }
+    const vaCola = cola.va ? colaGrowth(cola, DIC_RATE_YEAR, year) : 1;
+    for (const d of dicParts(activeDuty, year)) {
+      const cents = Math.round(d.cents * vaCola);
       // Not taxed.
-      monthlyAfterTaxCents: dic,
-      monthlyBeforeTaxCents: dic,
-    });
-  } else if (pension && sbpEnabled && pensionStartYear != null && year >= pensionStartYear) {
-    // The annuity gets the same COLAs retired pay would have.
-    const annuity = Math.round(pensionIn(pension, year, cola).gross * 0.55);
-    parts.push({
-      name: "SBP annuity (55%)",
-      kind: "pension",
-      monthlyAfterTaxCents: Math.round(annuity * keep),
-      monthlyBeforeTaxCents: annuity,
-    });
+      parts.push({ name: d.name, kind: "va", monthlyAfterTaxCents: cents, monthlyBeforeTaxCents: cents });
+    }
+    if (insurance && insurance.sgliCents > 0 && insurance.sgliPayout === "monthly36") {
+      thirtySix("SGLI (36 monthly)", insurance.sgliCents);
+    }
+  } else {
+    // Spouse coverage: it stops if she remarries before 55.
+    const remarried =
+      survivors?.remarryYear != null &&
+      survivors.spouseBirthYear != null &&
+      year >= survivors.remarryYear &&
+      survivors.remarryYear - survivors.spouseBirthYear < SBP_DIC_REMARRY_AGE;
+    if (pension && sbpEnabled && !remarried && pensionStartYear != null && year >= pensionStartYear) {
+      // The annuity gets the same COLAs retired pay would have.
+      const annuity = Math.round(pensionIn(pension, year, cola).gross * 0.55);
+      parts.push({
+        name: "SBP annuity (55%)",
+        kind: "pension",
+        monthlyAfterTaxCents: Math.round(annuity * keep),
+        monthlyBeforeTaxCents: annuity,
+      });
+    }
+    if (pension && insurance && insurance.vgliCents > 0 && insurance.vgliPayout === "monthly36") {
+      thirtySix("VGLI (36 monthly)", insurance.vgliCents);
+    }
   }
   const live = lines.filter((l) => active(year, l.startYear, l.endYear) && l.monthlyCents > 0);
-  const ss = live.filter((l) => l.kind === "social_security");
-  const largestSs = ss.reduce<IncomeLine | null>((best, l) => (best == null || l.monthlyCents > best.monthlyCents ? l : best), null);
+  const deathYear = insured?.deathYear ?? activeDuty?.deathYear ?? null;
+  // His record: the Social Security line with the largest PIA, whether or
+  // not it has started.
+  const worker =
+    survivors && deathYear != null
+      ? lines
+          .filter((l) => l.kind === "social_security" && l.monthlyCents > 0)
+          .reduce<IncomeLine | null>(
+            (best, l) => (best == null || ssPiaCents(l, when.birthYear) > ssPiaCents(best, when.birthYear) ? l : best),
+            null,
+          )
+      : null;
+  const largestSs = live
+    .filter((l) => l.kind === "social_security")
+    .reduce<IncomeLine | null>((best, l) => (best == null || l.monthlyCents > best.monthlyCents ? l : best), null);
+  // Her own Social Security this year, before her share on his record.
+  const ownSs = live.filter((l) => l.kind === "social_security" && l !== worker);
+  const ownSsCents = ownSs.reduce((t, l) => t + lineIn(l, year, cola, when), 0);
+  let drawsOnRecord = false;
+  if (worker && survivors && deathYear != null && year >= deathYear) {
+    for (const p of ssSurvivorParts(year, deathYear, worker, survivors, ownSsCents, cola, when)) {
+      const [a, b] = p.halves;
+      if (a === 0 && b === 0) continue;
+      if (p.name.includes("caregiver") || p.name.includes("widow")) drawsOnRecord = true;
+      // Paid half the year when one half is 0; an average month when the
+      // halves differ (a child aging out with others still drawing).
+      const monthly = a === b || b === 0 ? a : a === 0 ? b : Math.round((a + b) / 2);
+      const months = a === b || (a > 0 && b > 0) ? 12 : 6;
+      parts.push({
+        name: p.name,
+        kind: "social_security",
+        monthlyAfterTaxCents: Math.round(monthly * (worker.taxable ? keep : 1)),
+        monthlyBeforeTaxCents: monthly,
+        ...(months < 12 ? { months, firstMonth: a === 0 ? 7 : 1 } : {}),
+      });
+    }
+  }
   for (const line of live) {
     if (line.kind === "pay" || line.kind === "va" || line.kind === "job") continue;
-    if (line.kind === "social_security" && line !== largestSs) continue;
+    if (line.kind === "social_security") {
+      if (worker ? line === worker || drawsOnRecord : line !== largestSs) continue;
+    }
     const monthly = lineIn(line, year, cola, when);
     parts.push({
-      name: line.kind === "social_security" ? "Social Security (survivor)" : line.name,
+      // With his record known, a Social Security line left here is her own.
+      name: line.kind === "social_security" && !worker ? "Social Security (survivor)" : line.name,
       kind: line.kind,
       monthlyAfterTaxCents: Math.round(monthly * (line.taxable ? keep : 1)),
       monthlyBeforeTaxCents: monthly,
@@ -815,7 +1137,27 @@ export function survivorIncomeForYear(
   return { parts, afterTaxCents, guaranteedCents };
 }
 
-export type HealthPlanKind = "tricare_prime" | "tricare_select" | "private";
+/** Health coverage after active duty: retiree TRICARE, or — for a second
+ *  career or no military retirement — FEHB (federal/GS job), an employer
+ *  plan, the ACA marketplace, CHCBP (bridge coverage after separation) or
+ *  any other private plan. */
+export type HealthPlanKind =
+  | "tricare_prime"
+  | "tricare_select"
+  | "fehb"
+  | "employer"
+  | "marketplace"
+  | "chcbp"
+  | "private";
+export const HEALTH_PLAN_KIND_VALUES: readonly HealthPlanKind[] = [
+  "tricare_prime",
+  "tricare_select",
+  "fehb",
+  "employer",
+  "marketplace",
+  "chcbp",
+  "private",
+];
 
 /** When a healthcare cost starts and ends. Blank start = the retirement
  *  month; blank end = until TRICARE For Life (health plans) or for life
@@ -873,7 +1215,7 @@ function parsePlans<K extends string>(raw: unknown, kinds: readonly K[]): ({ kin
 }
 
 export const parseHealthPlans = (raw: unknown): HealthPlan[] =>
-  parsePlans(raw, ["tricare_prime", "tricare_select", "private"] as const);
+  parsePlans(raw, HEALTH_PLAN_KIND_VALUES);
 
 export const parseDentalPlans = (raw: unknown): DentalPlan[] =>
   parsePlans(raw, DENTAL_PLAN_KINDS.map((k) => k.value));

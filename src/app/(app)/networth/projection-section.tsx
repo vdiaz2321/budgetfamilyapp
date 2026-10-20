@@ -266,9 +266,10 @@ export function ProjectionSection({
         : null;
   const gapIsPace = forecast != null;
   const last = years.at(-1) ?? null;
-  // The far-right card opens on the plan's last year (age 90) on a fresh
-  // login; the age picker on it swaps in any future year without opening the
-  // table (Victor, 2026-10-17). Remembered for the session, like the folds.
+  // The far-right card opens on age 80 on a fresh login (the plan's last year
+  // if it never reaches 80); the age picker on it swaps in any future year
+  // without opening the table (Victor, 2026-10-20). Remembered for the
+  // session, like the folds.
   const pickYears = years.filter((y) => y.year >= thisYear && y.age != null);
   const [pickedYear, setPickedYear] = useState<number | null>(null);
   useEffect(() => {
@@ -277,7 +278,7 @@ export function ProjectionSection({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       if (saved) setPickedYear(saved);
     } catch {
-      // sessionStorage unavailable — the card just opens on the last year.
+      // sessionStorage unavailable — the card just opens on age 80.
     }
   }, []);
   const pickYear = (year: number) => {
@@ -288,7 +289,8 @@ export function ProjectionSection({
       // Not remembered — fine.
     }
   };
-  const target = years.find((y) => y.year === pickedYear) ?? last;
+  const target =
+    years.find((y) => y.year === pickedYear) ?? years.find((y) => y.age === 80) ?? last;
 
   // Adding years rewrites the grid in one press, so it asks first — in an
   // in-app dialog rather than window.confirm(), which some browsers and every

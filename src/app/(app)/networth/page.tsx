@@ -1,4 +1,4 @@
-import { CASH_KINDS, inflatedSpending, parseColaByYear, parseDentalPlans, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
+import { CASH_KINDS, inflatedSpending, parseChildren, parseColaByYear, parseDentalPlans, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
 import { withCurrentMonth, captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
@@ -162,7 +162,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, spouse_retire_year, spouse_birth_year, spouse_longevity_age, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, spouse_retire_year, spouse_birth_year, spouse_longevity_age, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security, children, sgli_cents, sgli_payout, vgli_enabled, vgli_cents, vgli_payout")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -203,7 +203,7 @@ export default async function NetworthPage() {
     // Retirement income that switches on and off by year (VA, SS, a job…).
     supabase
       .from("retirement_income_lines")
-      .select("id, name, kind, monthly_cents, start_year, start_month, end_year, end_month, raise_pct, annual_cents, taxable")
+      .select("id, name, kind, monthly_cents, start_year, start_month, end_year, end_month, raise_pct, annual_cents, pia_cents, taxable")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("created_at"),
@@ -1136,6 +1136,14 @@ export default async function NetworthPage() {
         sbpPct: planRow?.sbp_pct == null ? 6.5 : Number(planRow.sbp_pct),
         longevityAge: planRow?.longevity_age ?? 90,
         spouseLongevityAge: planRow?.spouse_longevity_age ?? 90,
+        children: parseChildren(planRow?.children),
+        insurance: {
+          sgliCents: Number(planRow?.sgli_cents ?? 50000000),
+          sgliPayout: planRow?.sgli_payout === "monthly36" ? "monthly36" : "lump",
+          // Kept only when switched on.
+          vgliCents: planRow?.vgli_enabled ? Number(planRow?.vgli_cents ?? 0) : 0,
+          vgliPayout: planRow?.vgli_payout === "monthly36" ? "monthly36" : "lump",
+        },
         healthcareAnnualCents: planRow?.healthcare_annual_cents ?? null,
         healthPlans: parseHealthPlans(planRow?.health_plans),
         dentalPlans: parseDentalPlans(planRow?.dental_plans),
@@ -1175,6 +1183,7 @@ export default async function NetworthPage() {
           endYear: l.end_year,
           endMonth: l.end_month ?? null,
           raisePct: l.raise_pct == null ? null : Number(l.raise_pct),
+          piaCents: l.pia_cents == null ? null : Number(l.pia_cents),
           taxable: l.taxable,
         })),
       }}

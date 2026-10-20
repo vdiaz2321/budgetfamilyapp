@@ -502,7 +502,7 @@ function MobilePlannedInput({
 // the cell it floats over and pinning BOTH edges would squeeze it to the
 // cell's width instead of letting it overflow.
 export const MATCH_BTN_CLASS =
-  "z-20 mb-1 whitespace-nowrap rounded-full bg-muted px-2.5 py-1 text-[12px] font-bold text-white shadow-md ring-1 ring-black/10 transition hover:bg-foreground/75 active:scale-95";
+  "z-20 mb-1 whitespace-nowrap rounded-full bg-sky-100 px-2.5 py-1 text-[12px] font-bold text-sky-950 shadow-md ring-1 ring-sky-400 transition hover:bg-sky-200 active:scale-95 dark:bg-sky-800 dark:text-white dark:ring-sky-400 dark:hover:bg-sky-700";
 
 function PlannedInput({
   subId,

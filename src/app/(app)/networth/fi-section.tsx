@@ -23,7 +23,16 @@ import {
   rentalsForYear,
   survivorIncomeForYear,
   diesOnActiveDuty,
+  survivorLumpSums,
+  ssPiaCents,
+  vgliMonthlyPremiumCents,
+  SGLI_STEPS_CENTS,
+  SBP_DIC_REMARRY_AGE,
+  SS_WIDOW_REMARRY_AGE,
   type ActiveDutyDeath,
+  type InsurancePayout,
+  type MilitaryInsurance,
+  type PlanChild,
   type ColaPlan,
   type FiScheduleYear,
   type HealthPlan,
@@ -87,6 +96,10 @@ export type FiPlan = {
   longevityAge: number;
   /** The spouse's plan-until age; the plan runs to whichever ends later. */
   spouseLongevityAge: number;
+  /** Children's birth years, for the survivor benefits' age limits. */
+  children: PlanChild[];
+  /** SGLI held on active duty and VGLI kept after retirement. */
+  insurance: MilitaryInsurance;
   /** TRICARE For Life: yearly Medicare Part B premium at current rates
    *  from the start age, rising inflation + growthPct a year. */
   healthcareAnnualCents: number | null;
@@ -420,6 +433,20 @@ export function FiSection({
   const deathYear = Math.max(survivorFirst, deathYearPick ?? survivorFirst);
   const insuranceCents = plan.survivorExtras.insurance.reduce((t, i) => t + i.cents, 0);
   const benefitsMonthly = plan.survivorExtras.benefits.reduce((t, b) => t + b.monthlyCents, 0);
+  // What-if: the spouse remarries in a year picked on the card (Victor,
+  // 2026-10-20). Before 55 her SBP and DIC stop; before 60 her Social
+  // Security widow benefit; any remarriage, the caregiver benefit. Only the
+  // years up to 59 are offered — later it changes nothing. Not saved.
+  const [remarryPick, setRemarryPick] = useState<number | null>(null);
+  const remarryOptions =
+    plan.spouseBirthYear == null
+      ? []
+      : Array.from(
+          { length: Math.max(0, plan.spouseBirthYear + SS_WIDOW_REMARRY_AGE - 1 - deathYear) },
+          (_, i) => deathYear + 1 + i,
+        );
+  const remarryYear = remarryPick != null && remarryOptions.includes(remarryPick) ? remarryPick : null;
+  const remarryAge = remarryYear != null && plan.spouseBirthYear != null ? remarryYear - plan.spouseBirthYear : null;
   // A death before retired pay starts is an active-duty death: automatic SBP
   // and DIC from that year, worked out on the saved High-3 (Victor,
   // 2026-10-19). It reads a little high for an early year, whose real High-3
@@ -429,11 +456,30 @@ export function FiSection({
       ? {
           deathYear,
           high3MonthlyCents: plan.high3MonthlyCents,
-          spouseYoungerYears: plan.spouseBirthYear && plan.birthYear ? plan.spouseBirthYear - plan.birthYear : null,
+          hasSpouse: plan.spouseBirthYear != null,
+          children: plan.children,
+          spouseEndsYear: remarryAge != null && remarryAge < SBP_DIC_REMARRY_AGE ? remarryYear : null,
         }
       : null;
+  // The death gratuity and SGLI (active duty) or VGLI (retired), paid once
+  // in the death year — unless SGLI/VGLI comes as 36 monthly payments.
+  const militaryLumps = pension ? survivorLumpSums(activeDuty, plan.insurance, !activeDuty) : [];
+  const lumpCents = insuranceCents + militaryLumps.reduce((t, l) => t + l.cents, 0);
   const survIn = (year: number) =>
-    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, modelLines, 0, plan.cola, colaWhen, activeDuty);
+    survivorIncomeForYear(
+      year,
+      pension,
+      plan.targetRetireYear,
+      plan.sbpEnabled,
+      modelLines,
+      0,
+      plan.cola,
+      colaWhen,
+      activeDuty,
+      { deathYear, insurance: pension ? plan.insurance : null },
+      // Social Security on his record for the spouse and children.
+      { spouseBirthYear: plan.spouseBirthYear, children: plan.children, remarryYear },
+    );
   const survivor = useMemo(() => {
     if (!usingGrid || untilYear == null) return null;
     // The plan's years carried forward to the plan-until year, so a death
@@ -454,13 +500,15 @@ export function FiSection({
         // Spending cut to the survivor %; his income out, the survivor's in,
         // the payout once.
         contributionCents:
-          y.contributionCents + (y.spendCents - spend) - base.afterTaxCents + surv.afterTaxCents + benefits + (y.year === deathYear ? insuranceCents : 0),
+          y.contributionCents + (y.spendCents - spend) - base.afterTaxCents + surv.afterTaxCents + benefits + (y.year === deathYear ? lumpCents : 0),
         guaranteedCents: surv.guaranteedCents + benefits + rent,
       };
     });
     return projectFi({ ...baseInputs, schedule: survSchedule, ownGrowthFrom: deathYear }, thisYear);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedule, usingGrid, untilYear, deathYear, insuranceCents, benefitsMonthly, plan, projection, thisYear, startCents]);
+  }, [schedule, usingGrid, untilYear, deathYear, remarryYear, lumpCents, benefitsMonthly, plan, projection, thisYear, startCents]);
+  // The family's income the year she remarries, for the card.
+  const afterRemarry = remarryYear == null ? null : survIn(remarryYear);
   // The first survivor year, month by month, for the card.
   const survivorYear = (() => {
     const surv = survIn(deathYear);
@@ -735,6 +783,24 @@ export function FiSection({
                   ))}
                 </select>
               </p>
+              {remarryOptions.length > 0 ? (
+                <p className="mt-1 flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm">
+                  Spouse remarries
+                  <select
+                    value={remarryYear ?? ""}
+                    onChange={(e) => setRemarryPick(e.target.value ? Number(e.target.value) : null)}
+                    aria-label="Spouse remarries"
+                    className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-sm font-semibold text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  >
+                    <option value="">Never</option>
+                    {remarryOptions.map((y) => (
+                      <option key={y} value={y}>
+                        {y} · age {y - plan.spouseBirthYear!}
+                      </option>
+                    ))}
+                  </select>
+                </p>
+              ) : null}
               <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
                 <li className="flex justify-between gap-3 py-1 max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
                   <span>Family income</span>
@@ -753,7 +819,7 @@ export function FiSection({
                   <IncomeRow
                     key={i}
                     label={
-                      part.name === "DIC (VA)" ? (
+                      part.name.startsWith("DIC (VA") ? (
                         <>
                           {part.name}
                           <a
@@ -770,7 +836,17 @@ export function FiSection({
                         part.name
                       )
                     }
-                    note={part.monthlyBeforeTaxCents !== part.monthlyAfterTaxCents ? "before tax" : undefined}
+                    note={
+                      [
+                        part.monthlyBeforeTaxCents !== part.monthlyAfterTaxCents ? "before tax" : null,
+                        // Paid part of the year: a child turning 16 or 18.
+                        part.months && part.months < 12 && part.firstMonth
+                          ? `${MONTHS[part.firstMonth - 1]}–${MONTHS[part.firstMonth + part.months - 2]}`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || undefined
+                    }
                     monthly={part.monthlyBeforeTaxCents}
                     yearly={part.monthlyBeforeTaxCents * (part.months ?? 12)}
                     currency={currency}
@@ -826,13 +902,46 @@ export function FiSection({
                     tone="text-positive"
                   />
                 ) : null}
+                {/* What's left once she remarries: before 55 her SBP and DIC
+                    stop (the kids' carry on), before 60 her widow benefit. */}
+                {afterRemarry && remarryYear != null ? (
+                  <IncomeRow
+                    label={`Income from ${remarryYear}`}
+                    note={`remarried at ${remarryAge}`}
+                    monthly={Math.round(afterRemarry.afterTaxCents / 12) + benefitsMonthly}
+                    yearly={afterRemarry.afterTaxCents + benefitsMonthly * 12}
+                    currency={currency}
+                    tone={afterRemarry.afterTaxCents + benefitsMonthly > 0 ? "text-positive" : "text-negative"}
+                    bold
+                  />
+                ) : null}
+                {/* Tax-free and paid once, into savings that year. */}
+                {militaryLumps.map((l) => (
+                  <ValueRow
+                    key={l.name}
+                    label={l.name}
+                    note="once, tax-free"
+                    value={`+${formatMoneyWhole(l.cents, currency)}`}
+                    tone="text-positive"
+                  />
+                ))}
                 <ValueRow
                   label="Spending covered"
                   value={
                     !survivor
                       ? untilYear == null ? "Add birth year" : "Add a plan above"
                       : survivor.runsOutYear
-                        ? `Runs out in ${survivor.runsOutYear}${plan.spouseBirthYear ? ` · spouse ${survivor.runsOutYear - plan.spouseBirthYear}` : ""}`
+                        ? (
+                            <>
+                              Runs out in {survivor.runsOutYear}
+                              {/* The age drops under the year on a phone. */}
+                              {plan.spouseBirthYear ? (
+                                <span className="block sm:inline">
+                                  <span className="hidden sm:inline"> · </span>spouse {survivor.runsOutYear - plan.spouseBirthYear}
+                                </span>
+                              ) : null}
+                            </>
+                          )
                         : `Through ${untilYear}`
                   }
                   tone={!survivor ? "" : survivor.runsOutYear ? "text-negative" : "text-positive"}
@@ -1487,6 +1596,8 @@ type LineDraft = {
   endMonth: string;
   /** Pay only: yearly raise %, "" = none. */
   raisePct: string;
+  /** Social Security only: the PIA per month, "" = worked out. */
+  pia: string;
   /** What `monthly` is typed per: a month or a year. */
   per: "mo" | "yr";
   taxable: boolean;
@@ -1506,8 +1617,23 @@ type PlanDraft<K extends string> = {
 const HEALTH_PLAN_KINDS: { value: HealthPlanKind; label: string }[] = [
   { value: "tricare_prime", label: "TRICARE Prime" },
   { value: "tricare_select", label: "TRICARE Select" },
+  { value: "fehb", label: "FEHB (federal job)" },
+  { value: "employer", label: "Employer plan" },
+  { value: "marketplace", label: "Marketplace (ACA)" },
+  { value: "chcbp", label: "CHCBP" },
   { value: "private", label: "Private insurance" },
 ];
+
+/** The one-line note under a health plan row. */
+const HEALTH_PLAN_NOTE: Record<HealthPlanKind, string> = {
+  tricare_prime: "Retiree TRICARE Prime enrollment fee.",
+  tricare_select: "Retiree TRICARE Select enrollment fee.",
+  fehb: "Your share of the FEHB premium.",
+  employer: "Your share of the employer plan premium.",
+  marketplace: "Marketplace premium after any tax credit.",
+  chcbp: "Bridge coverage after leaving TRICARE, up to 18 or 36 months.",
+  private: "Private plan premium.",
+};
 
 const NO_DATES: CostDates = { startYear: null, startMonth: null, endYear: null, endMonth: null };
 
@@ -1599,6 +1725,18 @@ function PlanModal({
   const [inflation, setInflation] = useState(String(plan.inflationPct));
   const [sbpEnabled, setSbpEnabled] = useState(plan.sbpEnabled);
   const [sbpPct, setSbpPct] = useState(String(plan.sbpPct));
+  // SGLI on active duty, VGLI kept after retirement (never more than SGLI).
+  const [sgliCents, setSgliCents] = useState(plan.insurance.sgliCents);
+  const [sgliPayout, setSgliPayout] = useState<InsurancePayout>(plan.insurance.sgliPayout);
+  const [vgliEnabled, setVgliEnabled] = useState(plan.insurance.vgliCents > 0);
+  const [vgliCents, setVgliCents] = useState(plan.insurance.vgliCents || plan.insurance.sgliCents);
+  const [vgliPayout, setVgliPayout] = useState<InsurancePayout>(plan.insurance.vgliPayout);
+  // Children: a row per child, added with a button.
+  const [childDrafts, setChildDrafts] = useState<{ key: string; birthYear: string; college: boolean }[]>(() =>
+    plan.children.map((c, i) => ({ key: `child-${i}`, birthYear: String(c.birthYear), college: c.college })),
+  );
+  const updateChild = (key: string, patch: Partial<{ birthYear: string; college: boolean }>) =>
+    setChildDrafts((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   // COLA: which incomes get it, the future rate, and the actual one per
   // payment year.
   // There's always a COLA (Victor, 2026-10-16): retired pay, VA and Social
@@ -1703,6 +1841,7 @@ function PlanModal({
       endYear: l.endYear?.toString() ?? "",
       endMonth: l.endMonth == null || l.endMonth === 12 ? "" : String(l.endMonth),
       raisePct: l.raisePct ? String(l.raisePct) : "",
+      pia: l.piaCents ? centsToDisplay(l.piaCents).replace(/\.00$/, "") : "",
       taxable: l.taxable,
     }));
     // Opened from a year's Add income with no Pay yet: start one at this
@@ -1721,6 +1860,7 @@ function PlanModal({
         endYear: "",
         endMonth: "",
         raisePct: "",
+        pia: "",
         taxable: true,
       });
     }
@@ -1907,6 +2047,7 @@ function PlanModal({
           : // Retired pay's own start month, so VA lines up with it by default.
             { startYear: retireYear, startMonth: retireMonth, endYear: "", endMonth: "" }),
         raisePct: "",
+        pia: "",
         // Pay is thought of per year; benefits are paid and quoted per month.
         per: kind === "pay" || kind === "job" || kind === "spouse" ? "yr" : "mo",
         taxable: kind !== "va",
@@ -1933,6 +2074,10 @@ function PlanModal({
       "colaByYear",
       JSON.stringify(colaRows.map((r) => ({ year: r.year.trim(), pct: r.pct.trim() }))),
     );
+    formData.set(
+      "children",
+      JSON.stringify(childDrafts.map((c) => ({ birthYear: c.birthYear.trim(), college: c.college }))),
+    );
     formData.set("healthPlans", planJson(healthPlans));
     formData.set("dentalPlans", planJson(dentalPlans));
     formData.set(
@@ -1949,6 +2094,7 @@ function PlanModal({
           endYear: l.endYear,
           endMonth: l.endMonth,
           raisePct: l.raisePct,
+          piaCents: l.kind === "social_security" ? l.pia : "",
           per: l.per,
           taxable: l.taxable,
         })),
@@ -2071,6 +2217,52 @@ function PlanModal({
         <Field center label="Spouse plan until age">
           <input name="spouseLongevityAge" inputMode="numeric" defaultValue={plan.spouseLongevityAge} className={inputClass} />
         </Field>
+        {/* Children: their ages set the survivor benefits — DIC per child,
+            SBP and TRICARE age limits (Victor, 2026-10-20). */}
+        <div className="space-y-2 sm:col-span-3">
+          <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Children</span>
+          {/* Every child on one line with + Add child, wrapping when it runs
+              out of room (Victor, 2026-10-20). */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {childDrafts.map((c, i) => (
+            <div key={c.key} className="inline-flex items-center gap-1.5">
+              <span className="whitespace-nowrap text-sm font-semibold text-foreground">Child #{i + 1}</span>
+              <input
+                inputMode="numeric"
+                value={c.birthYear}
+                onChange={(e) => updateChild(c.key, { birthYear: e.target.value })}
+                placeholder="Year"
+                aria-label={`Child ${i + 1} birth year`}
+                className={`${inputClass} !w-20`}
+              />
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={c.college}
+                  onChange={(e) => updateChild(c.key, { college: e.target.checked })}
+                  className="size-4 cursor-pointer accent-[color:var(--brand)]"
+                />
+                College
+              </label>
+              <button
+                type="button"
+                onClick={() => setChildDrafts((rows) => rows.filter((r) => r.key !== c.key))}
+                className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+            <button
+              type="button"
+              onClick={() => setChildDrafts((rows) => [...rows, { key: `child-new-${Date.now()}`, birthYear: "", college: true }])}
+              className="shrink-0 rounded-md bg-surface px-2.5 py-1 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 sm:text-sm dark:hover:bg-sky-900/50"
+            >
+              + Add child
+            </button>
+          </div>
+          <span className="block text-xs text-foreground sm:text-sm">College: SBP to 22, DIC and TRICARE to 23.</span>
+        </div>
         </div>
 
         <SectionHead
@@ -2193,6 +2385,34 @@ function PlanModal({
               >
                 Remove
               </button>
+              {/* The PIA drives the survivor benefits on this record: the
+                  children's, the caregiver's and the widow(er)'s. Blank
+                  shows the one worked out from the start age. */}
+              {l.kind === "social_security" ? (
+                <label className="col-span-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:col-span-7">
+                  <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Full retirement benefit (PIA)</span>
+                  <span className="flex items-center gap-1">
+                    <input
+                      inputMode="decimal"
+                      value={l.pia}
+                      onChange={(e) => updateLine(l.key, { pia: e.target.value })}
+                      placeholder={(() => {
+                        const monthly = l.per === "yr" ? money(l.monthly) / 12 : money(l.monthly);
+                        const start = Number(l.startYear) || null;
+                        const pia = ssPiaCents(
+                          { id: l.key, name: l.name, kind: l.kind, monthlyCents: monthly, startYear: start, startMonth: null, endYear: null, taxable: l.taxable },
+                          Number(birthYear) || null,
+                        );
+                        return pia > 0 ? String(Math.round(pia / 100)) : "0.00";
+                      })()}
+                      aria-label="Full retirement benefit (PIA) per month"
+                      className={`${lineInput} max-w-28 text-center`}
+                    />
+                    <span className="text-sm text-foreground">/mo</span>
+                  </span>
+                  <span className="text-xs text-foreground sm:text-sm">Blank: worked out from the start age.</span>
+                </label>
+              ) : null}
               {/* A year's worth. */}
               {money(l.monthly) > 0 ? (
                 <p className="col-span-2 text-center text-xs sm:col-span-7 sm:text-sm text-foreground">
@@ -2364,9 +2584,7 @@ function PlanModal({
         ))}
         <Field
           id="fi-sbp"
-          // Its own row, so the note reads as one line with the link under it
-          // (Victor, 2026-10-16).
-          className="sm:col-span-2"
+          // VGLI sits to its right (Victor, 2026-10-20).
           highlight={focusSbp}
           label="SBP (Survivor Benefit Plan)"
           hint={
@@ -2407,6 +2625,59 @@ function PlanModal({
             </span>
           </span>
         </Field>
+        {/* VGLI: SGLI ends 120 days after retirement; converting keeps up
+            to the SGLI amount. Paid on a death after retirement. */}
+        {/* Not a Field: a checkbox and two dropdowns are too wide to sit
+            beside a note on a phone, so the note goes under them. */}
+        <div>
+          <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
+            VGLI (Veterans&rsquo; Group Life Insurance)
+          </span>
+          <span className="flex flex-wrap items-center gap-2">
+            <input
+              type="checkbox"
+              name="vgliEnabled"
+              checked={vgliEnabled && sgliCents > 0}
+              disabled={sgliCents === 0}
+              onChange={(e) => setVgliEnabled(e.target.checked)}
+              className="size-4 cursor-pointer accent-[color:var(--brand)]"
+              aria-label="Keep VGLI"
+            />
+            <span className={`flex flex-wrap items-center gap-2 ${vgliEnabled && sgliCents > 0 ? "" : "opacity-50"}`}>
+              <select
+                name="vgliCents"
+                value={Math.min(vgliCents, sgliCents)}
+                onChange={(e) => setVgliCents(Number(e.target.value))}
+                aria-label="VGLI coverage"
+                className="rounded-md bg-surface px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                {SGLI_STEPS_CENTS.filter((c) => c > 0 && c <= Math.max(sgliCents, 5_000_000)).map((c) => (
+                  <option key={c} value={c}>{formatMoneyWhole(c, currency)}</option>
+                ))}
+              </select>
+              <PayoutSelect name="vgliPayout" value={vgliPayout} onChange={setVgliPayout} label="VGLI payout" />
+            </span>
+          </span>
+          <span className="mt-1 block text-xs leading-snug text-foreground sm:text-sm">
+              {sgliCents === 0
+                ? "Needs SGLI to convert."
+                : (() => {
+                    const age = toYear(retireYear) && toYear(birthYear) ? toYear(retireYear)! - toYear(birthYear)! : null;
+                    return age != null
+                      ? `At ${age}: ${formatMoneyWhole(vgliMonthlyPremiumCents(age, Math.min(vgliCents, sgliCents)), currency)}/mo, rising with age.`
+                      : "Premium rises with age.";
+                  })()}
+              <a
+                href="https://www.va.gov/life-insurance/options-eligibility/vgli/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-fit whitespace-nowrap font-semibold underline underline-offset-2"
+                style={{ color: "var(--viz-savings)" }}
+              >
+                Read about VGLI (VA)
+              </a>
+          </span>
+        </div>
         {estimate ? (
           <p className="rounded-md bg-background px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
             <span className="block">
@@ -2425,6 +2696,63 @@ function PlanModal({
             </span>
           </p>
         ) : null}
+        </div>
+
+        {/* What the family gets on a death on active duty (Victor,
+            2026-10-20): SGLI is the member's choice; the rest is automatic. */}
+        <SectionHead
+          title="Military survivor benefits"
+          note="Paid if you die on active duty."
+          open={isOpen("survivor")}
+          onToggle={() => toggleSection("survivor")}
+        />
+        <div className={isOpen("survivor") ? "contents" : "hidden"}>
+        <Field
+          label="SGLI coverage"
+          hint={
+            <>
+              {sgliCents > 0
+                ? `${formatMoney(Math.round(sgliCents / 20000) + 100, currency)}/mo from pay. Ends 120 days after you retire.`
+                : "Declined: no SGLI payout."}
+              <a
+                href="https://www.va.gov/life-insurance/options-eligibility/sgli/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-fit whitespace-nowrap font-semibold underline underline-offset-2"
+                style={{ color: "var(--viz-savings)" }}
+              >
+                Read about SGLI (VA)
+              </a>
+            </>
+          }
+        >
+          <select
+            name="sgliCents"
+            value={sgliCents}
+            onChange={(e) => setSgliCents(Number(e.target.value))}
+            aria-label="SGLI coverage"
+            className="rounded-md bg-surface px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          >
+            {SGLI_STEPS_CENTS.map((c) => (
+              <option key={c} value={c}>{c === 0 ? "Declined" : formatMoneyWhole(c, currency)}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="SGLI payout" hint="You can lock in 36 payments; otherwise your family picks.">
+          <PayoutSelect name="sgliPayout" value={sgliPayout} onChange={setSgliPayout} label="SGLI payout" />
+        </Field>
+        <p className="rounded-md bg-background px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
+          <span className="block">
+            <span className="font-semibold">Death gratuity:</span> $100,000 once, tax-free.
+          </span>
+          <span className="block">
+            <span className="font-semibold">SBP:</span> 55% of 75% of High-3, automatic, no cost
+            {high3Cents ? ` (${formatMoneyWhole(Math.round(high3Cents * 0.75 * 0.55), currency)}/mo)` : ""}.
+          </span>
+          <span className="block">
+            <span className="font-semibold">DIC (VA):</span> $1,699/mo, +$421 per child under 18, +$359 the first 2 years.
+          </span>
+        </p>
         </div>
 
         {colaStarts.military != null || colaStarts.va != null || colaStarts.socialSecurity != null ? (
@@ -2526,13 +2854,13 @@ function PlanModal({
           <input type="hidden" name="colaPct" value={colaPct} />
         ) : null}
 
-        <SectionHead title="Healthcare in retirement" open={isOpen("health")} onToggle={() => toggleSection("health")} />
+        <SectionHead title="Healthcare / Insurance Plan" open={isOpen("health")} onToggle={() => toggleSection("health")} />
         <div className={isOpen("health") ? "contents" : "hidden"}>
         {/* One row per plan; two can run side by side (a TRICARE plan plus a
             private supplement). All of them stop when TFL starts. */}
         <div className="space-y-2 sm:col-span-2">
           {healthPlans.length === 0 ? (
-            <p className="text-xs sm:text-sm text-foreground">No health plan premium before TRICARE For Life.</p>
+            <p className="text-xs sm:text-sm text-foreground">No health plan premium before Medicare.</p>
           ) : null}
           {healthPlans.map((row) => (
             <PlanRow
@@ -2543,11 +2871,7 @@ function PlanModal({
               onChange={(patch) => updateHealthPlan(row.key, patch)}
               onRemove={() => setHealthPlans((rows) => rows.filter((r) => r.key !== row.key))}
               endPlaceholder="TFL"
-              note={`${
-                row.kind === "private"
-                  ? "Private or employer plan premium."
-                  : `Retiree ${row.kind === "tricare_prime" ? "TRICARE Prime" : "TRICARE Select"} enrollment fee.`
-              } Blank end = until TRICARE For Life starts${tflYear ? ` (${tflYear})` : ""}.`}
+              note={`${HEALTH_PLAN_NOTE[row.kind]} Blank end = until Medicare at 65${tflYear ? ` (${tflYear})` : ""}.`}
             />
           ))}
           <button
@@ -2800,6 +3124,32 @@ function PlanModal({
         />
       ) : null}
     </ModalShell>
+  );
+}
+
+/** How SGLI or VGLI pays out: once, or 36 equal monthly payments. */
+function PayoutSelect({
+  name,
+  value,
+  onChange,
+  label,
+}: {
+  name: string;
+  value: InsurancePayout;
+  onChange: (v: InsurancePayout) => void;
+  label: string;
+}) {
+  return (
+    <select
+      name={name}
+      value={value}
+      onChange={(e) => onChange(e.target.value === "monthly36" ? "monthly36" : "lump")}
+      aria-label={label}
+      className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+    >
+      <option value="lump">Lump sum</option>
+      <option value="monthly36">36 monthly payments</option>
+    </select>
   );
 }
 

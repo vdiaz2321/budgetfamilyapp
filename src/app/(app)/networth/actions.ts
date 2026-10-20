@@ -31,6 +31,7 @@ import {
   type IncomeLineKind,
   type RentalRow,
   planEndYear,
+  SGLI_STEPS_CENTS,
 } from "@/lib/retirement";
 import {
   GROUP_KINDS,
@@ -514,6 +515,28 @@ export async function saveRetirementPlan(formData: FormData) {
   if (spouseLongevity != null && (spouseLongevity < 50 || spouseLongevity > 120)) {
     return { error: "Spouse plan until age has to be between 50 and 120." };
   }
+  // Children ride along as JSON: a birth year and a college flag each.
+  let childRows: { birthYear?: string; college?: boolean }[] = [];
+  try {
+    childRows = JSON.parse(String(formData.get("children") ?? "[]"));
+    if (!Array.isArray(childRows)) childRows = [];
+  } catch {
+    return { error: "Couldn't read the children." };
+  }
+  const children: { birthYear: number; college: boolean }[] = [];
+  for (const [i, c] of childRows.entries()) {
+    const y = String(c.birthYear ?? "").trim();
+    if (!y) continue;
+    if (!/^\d{4}$/.test(y)) return { error: `Child #${i + 1}: enter a four-digit birth year.` };
+    children.push({ birthYear: Number(y), college: !!c.college });
+  }
+  if (children.length > 15) return { error: "Up to 15 children." };
+  // SGLI: $0–$500,000 in $50,000 steps. VGLI never more than SGLI.
+  const sgliCents = num("sgliCents") ?? 50000000;
+  if (!SGLI_STEPS_CENTS.includes(sgliCents)) return { error: "SGLI has to be $0–$500,000 in $50,000 steps." };
+  const vgliEnabled = formData.get("vgliEnabled") === "on" && sgliCents > 0;
+  const vgliCents = Math.min(num("vgliCents") ?? 0, sgliCents);
+  const payout = (key: string) => (formData.get(key) === "monthly36" ? "monthly36" : "lump");
   if (healthStartAge != null && (healthStartAge < 18 || healthStartAge > 120)) {
     return { error: "Healthcare start age has to be between 18 and 120." };
   }
@@ -532,6 +555,8 @@ export async function saveRetirementPlan(formData: FormData) {
     endYear?: string;
     endMonth?: string;
     raisePct?: string;
+    /** Social Security only: the PIA per month, "" = worked out. */
+    piaCents?: string;
     /** "yr" = the amount is per year; else per month. */
     per?: string;
     taxable?: boolean;
@@ -560,6 +585,7 @@ export async function saveRetirementPlan(formData: FormData) {
     end_month: number | null;
     raise_pct: number | null;
     annual_cents: number | null;
+    pia_cents: number | null;
     taxable: boolean;
     sort_order: number;
   }> = [];
@@ -606,6 +632,7 @@ export async function saveRetirementPlan(formData: FormData) {
       end_year: end,
       end_month: end == null ? null : endMonth,
       raise_pct: raise,
+      pia_cents: kind === "social_security" && String(l.piaCents ?? "").trim() ? Math.max(0, displayToCents(String(l.piaCents))) || null : null,
       // VA disability is never taxed, whatever the box says.
       taxable: kind === "va" ? false : !!l.taxable,
       sort_order: i,
@@ -785,6 +812,12 @@ export async function saveRetirementPlan(formData: FormData) {
       sbp_pct: sbpPct ?? 6.5,
       longevity_age: longevity ?? 90,
       spouse_longevity_age: spouseLongevity ?? 90,
+      children,
+      sgli_cents: sgliCents,
+      sgli_payout: payout("sgliPayout"),
+      vgli_enabled: vgliEnabled,
+      vgli_cents: vgliEnabled ? vgliCents : 0,
+      vgli_payout: payout("vgliPayout"),
       health_plans: healthPlans,
       healthcare_annual_cents: money("healthcareAnnual"),
       dental_plans: dentalPlans,
@@ -852,6 +885,7 @@ export async function saveRetirementPlan(formData: FormData) {
           end_month: l.end_month,
           raise_pct: l.raise_pct,
           annual_cents: l.annual_cents,
+          pia_cents: l.pia_cents,
           taxable: l.taxable,
           sort_order: l.sort_order,
         })),
@@ -997,6 +1031,7 @@ async function recomputeRetirementIncome(
       endYear: l.end_year,
       endMonth: l.end_month ?? null,
       raisePct: l.raise_pct == null ? null : Number(l.raise_pct),
+      piaCents: l.pia_cents == null ? null : Number(l.pia_cents),
       taxable: l.taxable,
     }));
   const pension = estimatePension(
