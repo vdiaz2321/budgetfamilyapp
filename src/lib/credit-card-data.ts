@@ -145,8 +145,8 @@ export async function loadCreditCardBoardData(
       freeNightExpiresOn: d.free_night_expires_on ?? null,
       freeNightPointsLimit: d.free_night_points_limit ?? null,
       freeNightCategoryMax: d.free_night_category_max ?? null,
-      benefitUsedOn: d.benefit_used_on ?? null,
-      benefitBookedOn: d.benefit_booked_on ?? null,
+      benefitUsedOn: currentCertDate(d.benefit_used_on, d.free_night_expires_on),
+      benefitBookedOn: currentCertDate(d.benefit_booked_on, d.free_night_expires_on),
       spendingLimitCents: d.spending_limit_cents ?? null,
       remarks: d.remarks ?? null,
       // Derived from the `debts` table, not from the detail row's own flags —
@@ -233,4 +233,17 @@ export async function loadCreditCardBoardData(
     nonCardAccounts,
     allBuckets,
   };
+}
+
+/**
+ * A free-night Booked-on or Check-in date, or null when it falls before the
+ * current certificate's year (the 12 months up to its expiration). Such a
+ * date belongs to last year's certificate and must not mark this one used —
+ * a stale 2026-07-23 kept the Hyatt night showing spent (Victor, 2026-10-20).
+ */
+export function currentCertDate(date: string | null | undefined, expiresOn: string | null | undefined): string | null {
+  if (!date) return null;
+  if (!expiresOn) return date;
+  const yearStart = `${Number(expiresOn.slice(0, 4)) - 1}${expiresOn.slice(4)}`;
+  return date < yearStart ? null : date;
 }

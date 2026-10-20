@@ -1,5 +1,6 @@
 import { currentMonthFirst } from "@/lib/snapshots";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
+import { currentCertDate } from "@/lib/credit-card-data";
 import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, type RewardActivity } from "./accounts-board";
 import type { CardPayment } from "@/components/card-payments-ledger";
 import { getSessionContext } from "@/lib/auth-context";
@@ -348,8 +349,8 @@ export default async function AccountsPage() {
       freeNightExpiresOn: d.free_night_expires_on ?? null,
       freeNightPointsLimit: d.free_night_points_limit ?? null,
       freeNightCategoryMax: "free_night_category_max" in d ? (d.free_night_category_max ?? null) : null,
-      benefitUsedOn: d.benefit_used_on ?? null,
-      benefitBookedOn: (d as { benefit_booked_on?: string | null }).benefit_booked_on ?? null,
+      benefitUsedOn: currentCertDate(d.benefit_used_on, d.free_night_expires_on),
+      benefitBookedOn: currentCertDate((d as { benefit_booked_on?: string | null }).benefit_booked_on, d.free_night_expires_on),
       spendingLimitCents: d.spending_limit_cents ?? null,
       remarks: d.remarks ?? null,
       // Derived from the `debts` table, not from

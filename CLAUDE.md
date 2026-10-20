@@ -26,6 +26,16 @@ are how you answer questions about the code's history.
   been run ad hoc in the Supabase SQL Editor. Both machines share one live
   database, so each migration is applied once, from whichever machine is doing
   the work.
+- From 2026-10-30 Supabase no longer auto-grants API access to new tables or
+  views in `public`. Every migration that creates one must grant it in the
+  same file, or the app gets "permission denied":
+  ```sql
+  alter table public.my_table enable row level security;
+  grant select, insert, update, delete on public.my_table to authenticated;
+  grant select, insert, update, delete on public.my_table to service_role;
+  ```
+  (A view gets `grant select` only.) Do NOT grant `anon` — nothing in the app
+  reads data signed out, and RLS stays the real guard either way.
 
 Machine setup (first-time install on a new Mac or PC, day-to-day git sync) is
 in [docs/machine-setup.md](docs/machine-setup.md).

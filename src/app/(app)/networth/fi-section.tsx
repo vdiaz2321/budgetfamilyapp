@@ -716,7 +716,14 @@ export function FiSection({
                       label={`Needed in ${mile.year}`}
                       note={
                         mile.targetCents > 0 ? (
-                          <>to pay spending your income doesn&apos;t cover, at <PctInput key={plan.withdrawalRatePct} pct={plan.withdrawalRatePct} label="Withdrawal rate" save={setWithdrawalRate} /> a year</>
+                          <>
+                            Covers a{" "}
+                            {formatMoneyWhole(sh(mile.year, Math.round((mile.targetCents * plan.withdrawalRatePct) / 100)), currency)}
+                            /yr spending gap,{" "}
+                            <span className="whitespace-nowrap">
+                              drawing <PctInput key={plan.withdrawalRatePct} pct={plan.withdrawalRatePct} label="Withdrawal rate" save={setWithdrawalRate} /> a year
+                            </span>
+                          </>
                         ) : (
                           "Retired pay covers spending"
                         )
@@ -2181,17 +2188,22 @@ function PlanModal({
         {/* Also up here, so a rejected save from the top Save is seen. */}
         {error ? <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p> : null}
         <SectionHead title="General Profile Data" open={isOpen("info")} onToggle={() => toggleSection("info")} />
-        {/* Your own figures on one line, the spouse's on the next (Victor,
-            2026-10-19). A blank spouse birth year hides Spouse Age. */}
-        <div className={isOpen("info") ? "grid grid-cols-1 items-end gap-x-8 gap-y-4 sm:col-span-2 sm:grid-cols-3" : "hidden"}>
-        <Field center label="Birth year">
+        {/* You and your spouse side by side on one row on a wide screen,
+            each under their own heading so the labels can stay short
+            (Victor, 2026-10-20). A blank spouse birth year hides Spouse Age. */}
+        <div className={isOpen("info") ? "grid grid-cols-1 gap-y-4 sm:col-span-2" : "hidden"}>
+        <div className="grid grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-2">
+        <div className="rounded-lg px-3 pb-3 pt-2 ring-1 ring-line">
+        <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line bg-sky-50 px-3 py-1.5 text-center text-sm font-bold sm:text-base dark:bg-sky-950/40">You</p>
+        <div className="grid grid-cols-1 items-end gap-x-4 gap-y-4 sm:grid-cols-3">
+        <Field center label={<>Birth <br className="max-sm:hidden" /> year</>}>
           <input name="birthYear" inputMode="numeric" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} className={inputClass} />
         </Field>
         {/* The year all work stops — military, GS or civilian. Up here, not
             under the rates or the military section: it is the plan's own
             retirement, and a military retirement can be followed by a second
             career (Victor, 2026-10-17). */}
-        <Field center label="Expected Retirement Year">
+        <Field center label={<>Retirement <br className="max-sm:hidden" /> Year</>}>
           <input
             name="withdrawStartYear"
             inputMode="numeric"
@@ -2200,13 +2212,18 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field center label="Plan until age">
+        <Field center label={<>Plan until <br className="max-sm:hidden" /> age</>}>
           <input name="longevityAge" inputMode="numeric" defaultValue={plan.longevityAge} className={inputClass} />
         </Field>
-        <Field center label="Spouse birth year">
+        </div>
+        </div>
+        <div className="rounded-lg px-3 pb-3 pt-2 ring-1 ring-line">
+        <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line bg-sky-50 px-3 py-1.5 text-center text-sm font-bold sm:text-base dark:bg-sky-950/40">Spouse</p>
+        <div className="grid grid-cols-1 items-end gap-x-4 gap-y-4 sm:grid-cols-3">
+        <Field center label={<>Birth <br className="max-sm:hidden" /> year</>}>
           <input name="spouseBirthYear" inputMode="numeric" defaultValue={plan.spouseBirthYear ?? ""} className={inputClass} />
         </Field>
-        <Field center label="Spouse Expected Retirement Year">
+        <Field center label={<>Retirement <br className="max-sm:hidden" /> Year</>}>
           <input
             name="spouseRetireYear"
             inputMode="numeric"
@@ -2214,13 +2231,16 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field center label="Spouse plan until age">
+        <Field center label={<>Plan until <br className="max-sm:hidden" /> age</>}>
           <input name="spouseLongevityAge" inputMode="numeric" defaultValue={plan.spouseLongevityAge} className={inputClass} />
         </Field>
+        </div>
+        </div>
+        </div>
         {/* Children: their ages set the survivor benefits — DIC per child,
             SBP and TRICARE age limits (Victor, 2026-10-20). */}
-        <div className="space-y-2 sm:col-span-3">
-          <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Children</span>
+        <div className="rounded-lg px-3 pb-3 pt-2 ring-1 ring-line">
+          <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line bg-sky-50 px-3 py-1.5 text-center text-sm font-bold sm:text-base dark:bg-sky-950/40">Children</p>
           {/* Every child on one line with + Add child, wrapping when it runs
               out of room (Victor, 2026-10-20). */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -2235,33 +2255,24 @@ function PlanModal({
                 aria-label={`Child ${i + 1} birth year`}
                 className={`${inputClass} !w-20`}
               />
-              <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-foreground">
-                <input
-                  type="checkbox"
-                  checked={c.college}
-                  onChange={(e) => updateChild(c.key, { college: e.target.checked })}
-                  className="size-4 cursor-pointer accent-[color:var(--brand)]"
-                />
-                College
-              </label>
               <button
                 type="button"
                 onClick={() => setChildDrafts((rows) => rows.filter((r) => r.key !== c.key))}
-                className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                aria-label={`Remove child ${i + 1}`}
+                className="flex size-7 shrink-0 items-center justify-center rounded-full text-lg font-bold leading-none text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
               >
-                Remove
+                ×
               </button>
             </div>
           ))}
             <button
               type="button"
-              onClick={() => setChildDrafts((rows) => [...rows, { key: `child-new-${Date.now()}`, birthYear: "", college: true }])}
+              onClick={() => setChildDrafts((rows) => [...rows, { key: `child-new-${Date.now()}`, birthYear: "", college: false }])}
               className="shrink-0 rounded-md bg-surface px-2.5 py-1 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 sm:text-sm dark:hover:bg-sky-900/50"
             >
               + Add child
             </button>
           </div>
-          <span className="block text-xs text-foreground sm:text-sm">College: SBP to 22, DIC and TRICARE to 23.</span>
         </div>
         </div>
 
@@ -2741,6 +2752,32 @@ function PlanModal({
         <Field label="SGLI payout" hint="You can lock in 36 payments; otherwise your family picks.">
           <PayoutSelect name="sgliPayout" value={sgliPayout} onChange={setSgliPayout} label="SGLI payout" />
         </Field>
+        {/* College only changes these benefits, so it is set here, not
+            beside each child's birth year (Victor, 2026-10-20). Click a
+            child to turn it on. */}
+        {childDrafts.length > 0 ? (
+          <div className="space-y-1.5 sm:col-span-2">
+            <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">In college after high school</span>
+            <div className="flex flex-wrap gap-2">
+              {childDrafts.map((c, i) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  aria-pressed={c.college}
+                  onClick={() => updateChild(c.key, { college: !c.college })}
+                  className={`rounded-md px-2.5 py-1 text-sm font-semibold text-foreground ring-1 transition ${
+                    c.college
+                      ? "bg-sky-100 ring-sky-400 dark:bg-sky-900/50"
+                      : "bg-surface ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                  }`}
+                >
+                  {c.college ? "✓ " : ""}Child #{i + 1}{c.birthYear.trim() ? ` (${c.birthYear.trim()})` : ""}
+                </button>
+              ))}
+            </div>
+            <span className="block text-xs text-foreground sm:text-sm">Keeps SBP to 22, DIC and TRICARE to 23.</span>
+          </div>
+        ) : null}
         <p className="rounded-md bg-background px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
           <span className="block">
             <span className="font-semibold">Death gratuity:</span> $100,000 once, tax-free.
@@ -3587,7 +3624,7 @@ function Field({
   center?: boolean;
   /** Light-blue outline for the box a button sent you to. */
   highlight?: boolean;
-  label: string;
+  label: React.ReactNode;
   hint?: React.ReactNode;
   children: React.ReactNode;
 }) {
