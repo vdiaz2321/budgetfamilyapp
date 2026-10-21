@@ -8,6 +8,7 @@ import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
 import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments-ledger";
 import { ModalShell } from "@/components/modal-shell";
+import { BalanceTransferModal } from "@/components/balance-transfer-modal";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
 import { FreeNightCapField, GripHandle, LabeledInput, PayCardModal, usePointerReorder } from "./shared-ui";
@@ -1162,7 +1163,7 @@ function CardTile({
   let strip: { text: string; className: string } | null = null;
   if (closed) {
     strip = { text: "Closed", className: "bg-sky-50 text-foreground dark:bg-sky-950/40" };
-  } else if (owed <= 0) {
+  } else if (owed <= 0 && (card.transferCents ?? 0) <= 0) {
     strip = { text: "Nothing owed", className: "bg-emerald-50 text-positive dark:bg-emerald-950/30" };
   } else if (!card.paymentDueDay) {
     strip = { text: "No due day set", className: "bg-sky-50 text-foreground dark:bg-sky-950/40" };
@@ -1196,6 +1197,12 @@ function CardTile({
         <span className={`mt-1 block truncate text-sm font-semibold ${closed ? "text-foreground" : "text-sky-800 dark:text-sky-200"}`}>
           {cardShortName(card.name)}
         </span>
+        {/* A balance transfer is its own debt, so it isn't in Card owed. */}
+        {(card.transferCents ?? 0) > 0 ? (
+          <span className="mt-0.5 block whitespace-nowrap text-sm font-semibold">
+            Balance transfer: <span className="tabular-nums text-negative">{formatMoney(card.transferCents ?? 0, currency)}</span>
+          </span>
+        ) : null}
       </span>
     </>
   );
@@ -1256,13 +1263,14 @@ function CreditCardListSection({
   const [editCardFor, setEditCardFor] = useState<AccountData | null>(null);
   // The header's Card Payment button: choose a card first, then Pay opens.
   const [pickingCard, setPickingCard] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const isMain = section.key === "credit";
   const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
   // Payment due dates, from each card's due day. Today is the browser's own
   // day (null on the server), so nothing date-based renders until then.
   const todayIso = useLocalToday();
   const dueOf = (a: AccountData) =>
-    todayIso && a.paymentDueDay && !a.dateClosed && (a.owedCents ?? 0) > 0 ? nextDueDate(a.paymentDueDay, todayIso) : null;
+    todayIso && a.paymentDueDay && !a.dateClosed && ((a.owedCents ?? 0) > 0 || (a.transferCents ?? 0) > 0) ? nextDueDate(a.paymentDueDay, todayIso) : null;
   const dueSoon = accounts.filter((a) => {
     const due = dueOf(a);
     return due != null && due.daysLeft <= DUE_SOON_DAYS;
@@ -1281,7 +1289,7 @@ function CreditCardListSection({
   // The due day and bank are in it too: the tiles' strip and card face read
   // them, and an Edit save changes them without touching the rest.
   const serverKey = accounts
-    .map((a) => `${a.id}:${a.owedCents ?? 0}:${a.dateClosed ?? ""}:${a.name}:${a.paymentDueDay ?? ""}:${a.cardDetails?.bank ?? a.institution ?? ""}`)
+    .map((a) => `${a.id}:${a.owedCents ?? 0}:${a.transferCents ?? 0}:${a.dateClosed ?? ""}:${a.name}:${a.paymentDueDay ?? ""}:${a.cardDetails?.bank ?? a.institution ?? ""}`)
     .join("|");
   const [syncedKey, setSyncedKey] = useState(serverKey);
   if (syncedKey !== serverKey) {
@@ -1341,6 +1349,20 @@ function CreditCardListSection({
         >
           Make Card Payment
         </button>
+        {/* Moves part of one card's balance onto another card's promo; saved
+            as its own debt on the Debt page. */}
+        {isMain ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTransferOpen(true);
+            }}
+            className="h-7 shrink-0 cursor-pointer rounded-full bg-surface px-3 text-xs font-bold text-brand shadow-sm ring-1 ring-inset ring-sky-300 transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/50"
+          >
+            Balance Transfer
+          </button>
+        ) : null}
         {/* Wraps "Not in Net Worth" under the total on a phone. */}
         <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 whitespace-nowrap">
           <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Total credit card owed:</span>
@@ -1428,7 +1450,14 @@ function CreditCardListSection({
                     className="flex w-full cursor-pointer items-center gap-2 rounded-lg bg-surface px-2.5 py-2 text-left ring-1 ring-line transition hover:ring-foreground/30 sm:hidden"
                   >
                     {grip(a.id)}
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                      {a.name}
+                      {(a.transferCents ?? 0) > 0 ? (
+                        <span className="block text-xs font-semibold">
+                          Transfer: <span className="tabular-nums text-negative">{formatMoney(a.transferCents ?? 0, currency)}</span>
+                        </span>
+                      ) : null}
+                    </span>
                     {/* Red is for money actually owed. A settled card prints
                         nothing at all — twelve rows of "$0.00" buried the one
                         card that actually owes money. */}
@@ -1475,6 +1504,14 @@ function CreditCardListSection({
       ) : null}
       {reorderError ? <p className="px-4 pb-2 text-xs font-medium text-negative sm:px-6">{reorderError}</p> : null}
 
+      {transferOpen ? (
+        <BalanceTransferModal
+          cards={accounts.filter((a) => !a.dateClosed).map((a) => ({ id: a.id, name: a.name, owedCents: a.owedCents ?? 0 }))}
+          startMonth={todayIso ? `${todayIso.slice(0, 7)}-01` : new Date().toISOString().slice(0, 8) + "01"}
+          currency={currency}
+          onClose={() => setTransferOpen(false)}
+        />
+      ) : null}
       {pickingCard ? (
         <PickCardModal
           cards={localCards.filter((a) => !a.dateClosed)}

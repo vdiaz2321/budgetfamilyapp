@@ -29,7 +29,7 @@ export default async function SnowballPage() {
     await Promise.all([
       supabase
         .from("debts")
-        .select("id, subcategory_id, account_id, current_balance_cents, original_balance_cents, min_payment_cents, target_payment_cents, escrow_cents, interest_paid_cents, interest_method, apr, post_promo_apr, promo_apr_ends_on, due_day, debt_kind, paid_off_at, term_months, notes")
+        .select("id, subcategory_id, account_id, current_balance_cents, original_balance_cents, min_payment_cents, target_payment_cents, escrow_cents, interest_paid_cents, interest_method, apr, post_promo_apr, promo_apr_ends_on, due_day, debt_kind, paid_off_at, term_months, notes, bt_card_account_id, bt_from_account_id, bt_fee_cents")
         .eq("household_id", household.id)
         .eq("tracking_enabled", true),
       supabase
@@ -119,10 +119,12 @@ export default async function SnowballPage() {
   let accountOptions: AccountOption[] = [];
   let debtAccountOptions: AccountOption[] = [];
   let debtGroupOptions: { id: string; name: string; kind: "debt" }[] = [];
+  // Open cards with what each owes, for the Balance transfer form.
+  let transferCards: { id: string; name: string; owedCents: number }[] = [];
   const accountKindById = new Map<string, string>();
   const accountNameById = new Map<string, string>();
   if (debtSubIds.length) {
-    const [{ data: txRows, error: txRowsError }, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: debtCategories, error: debtCategoriesError }] = await Promise.all([
+    const [{ data: txRows, error: txRowsError }, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: debtCategories, error: debtCategoriesError }, { data: cardBalances, error: cardBalancesError }] = await Promise.all([
       supabase
         .from("transactions")
         .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, paid_to_account_id, movement_type, cleared, is_withdrawal")
@@ -143,8 +145,13 @@ export default async function SnowballPage() {
         .eq("household_id", household.id)
         .eq("kind", "debt")
         .order("sort_order"),
+      supabase.from("v_card_balances").select("account_id, owed_cents").eq("household_id", household.id),
     ]);
-    throwIfAny({ txRows: txRowsError, payees: payeesError, accounts: accountsError, debtCategories: debtCategoriesError });
+    throwIfAny({ txRows: txRowsError, payees: payeesError, accounts: accountsError, debtCategories: debtCategoriesError, cardBalances: cardBalancesError });
+    const owedByCard = new Map((cardBalances ?? []).map((b) => [b.account_id as string, Number(b.owed_cents ?? 0)]));
+    transferCards = (accounts ?? [])
+      .filter((a) => a.kind === "credit_card")
+      .map((a) => ({ id: a.id, name: a.name, owedCents: owedByCard.get(a.id) ?? 0 }));
     const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
     for (const a of accounts ?? []) accountNameById.set(a.id, a.name);
     debtAccountOptions = (accounts ?? [])
@@ -280,7 +287,14 @@ export default async function SnowballPage() {
       postPromoApr: d.post_promo_apr == null ? null : Number(d.post_promo_apr),
       dueDay: d.due_day as number | null,
       debtKind: d.debt_kind as string | null,
-      accountKind: d.account_id
+      // A balance transfer lives on a card without being that card's own
+      // payoff debt, so it has no account_id but is still a card balance.
+      btCardName: d.bt_card_account_id ? accountNameById.get(d.bt_card_account_id) ?? "card" : null,
+      btFromName: d.bt_from_account_id ? accountNameById.get(d.bt_from_account_id) ?? null : null,
+      btFeeCents: Number(d.bt_fee_cents ?? 0),
+      accountKind: d.bt_card_account_id
+        ? "credit_card"
+        : d.account_id
         ? d.debt_kind === "credit_card" || accountKindById.get(d.account_id) === "credit_card" ? "credit_card" : "debt_loan"
         : "budget",
       interestMethod: d.interest_method === "statement_manual" ? "statement_manual" : "monthly_estimate",
@@ -455,7 +469,11 @@ export default async function SnowballPage() {
           debtKind: r.debtKind,
           accountKind: r.accountKind as "credit_card" | "debt_loan" | "budget",
           interestMethod: r.interestMethod as "monthly_estimate" | "statement_manual",
+          btCardName: r.btCardName,
+          btFromName: r.btFromName,
+          btFeeCents: r.btFeeCents,
         }))}
+        transferCards={transferCards}
         promoOutlook={promoOutlook}
         totalHistory={totalHistory}
         historyBySub={historyBySubObj}

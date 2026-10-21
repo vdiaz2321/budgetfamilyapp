@@ -134,6 +134,9 @@ export type AccountData = {
   cardDetails?: CardDetails | null;
   rewardActivities: RewardActivity[];
   owedCents?: number;
+  /** Credit cards: balance transfers sitting on this card (their own debts,
+   *  not in owedCents). */
+  transferCents?: number;
   monthSpendCents?: number;
   // Prior-month account_snapshots (null = never recorded yet for that month).
   // For bucketed accounts these are derived server-side from bucket_snapshots.

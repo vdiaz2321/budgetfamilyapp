@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { addMonths, monthsBetween, projectSnowball, type MonthlyEntry } from "@/lib/snowball";
-import { applyClassicPlan, applyPayoffPlan, recordDebtInterest } from "./actions";
+import { applyClassicPlan, applyPayoffPlan, recordDebtInterest, undoBalanceTransfer } from "./actions";
+import { BalanceTransferModal } from "@/components/balance-transfer-modal";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 import { ItemPanel } from "../budget/item-panel";
 import { TransactionModal } from "../budget/transaction-modal";
@@ -52,6 +53,11 @@ type Row = {
   debtKind: string | null;
   accountKind: "credit_card" | "debt_loan" | "budget";
   interestMethod: "monthly_estimate" | "statement_manual";
+  // Set on a balance transfer: the card it sits on, the card it came from,
+  // and the fee already inside the balance.
+  btCardName: string | null;
+  btFromName: string | null;
+  btFeeCents: number;
 };
 
 // A debt still inside a promotional-rate window, with what will be left when
@@ -100,14 +106,17 @@ type Props = {
     accountNames: Record<string, string>;
   };
   settings: ReactNode;
+  /** Open credit cards and what each owes, for the Balance transfer form. */
+  transferCards: { id: string; name: string; owedCents: number }[];
 };
 
 export function SnowballBoard(props: Props) {
   const {
     rows, promoOutlook = [], totalHistory = [], historyBySub = {}, startMonth, focusId, totalBalanceCents, totalMinCents, plannedTotalCents,
     currentExtraCents, monthlyAttackCents, plannedPayoffMonth, plannedLedger,
-    classicPayoffMonth, classicLedger, currency, settings, itemPanel,
+    classicPayoffMonth, classicLedger, currency, settings, itemPanel, transferCards,
   } = props;
+  const [transferOpen, setTransferOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("planned");
   const [filter, setFilter] = useState<Filter>("all");
   // Start on the household-wide projection. A debt is selected only after the
@@ -253,7 +262,19 @@ export function SnowballBoard(props: Props) {
         <FilterButton active={filter === "loans"} onClick={() => setFilter("loans")}>Loans ({loanCount})</FilterButton>
         <FilterButton active={filter === "cards"} onClick={() => setFilter("cards")}>Credit Cards ({cardCount})</FilterButton>
         <FilterButton active={filter === "paid"} onClick={() => setFilter("paid")}>Paid off ({paidCount})</FilterButton>
+        {transferCards.length > 1 ? (
+          <button
+            type="button"
+            onClick={() => setTransferOpen(true)}
+            className="rounded-full bg-surface px-3 py-1.5 text-xs font-bold text-foreground ring-1 ring-sky-300 transition hover:bg-sky-100 hover:ring-sky-400 dark:ring-sky-700 dark:hover:bg-sky-900/50"
+          >
+            + Balance transfer
+          </button>
+        ) : null}
       </div>
+      {transferOpen ? (
+        <BalanceTransferModal cards={transferCards} startMonth={startMonth} currency={currency} onClose={() => setTransferOpen(false)} />
+      ) : null}
 
       {rows.length === 0 ? (
         <section className="rounded-2xl bg-surface px-4 py-8 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -311,6 +332,7 @@ export function SnowballBoard(props: Props) {
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => setSimulatorOpen(true)} className="rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white hover:bg-brand-strong">Open Payoff Simulator</button>
                 <InterestForm debtId={selected.debtId} />
+                {selected.btCardName ? <UndoTransfer debtId={selected.debtId} onDone={() => setSelectedId(null)} /> : null}
                 <span className="ml-auto text-[11px] text-muted">
                   {selected.interestMethod === "statement_manual" ? "Statement interest is authoritative" : "Projection uses APR ÷ 12"}
                 </span>
@@ -418,7 +440,7 @@ function DebtCard({ row, color, selected, focus, classic, payoff, months, curren
     <button type="button" data-debt-card onClick={onClick} aria-pressed={selected} className={`flex w-[184px] shrink-0 flex-col overflow-hidden rounded-2xl border-2 text-left shadow-sm transition ${selected || focus ? "border-brand" : "border-transparent ring-1 ring-black/5 dark:ring-white/10"}`}>
       <div className={`px-3 py-2 ${color}`}>
         <div className="flex h-5 items-center justify-between text-[10px] font-bold uppercase tracking-wide text-foreground">
-          <span>{row.accountKind === "credit_card" ? "Credit card" : humanizeDebtKind(row.debtKind)}</span>
+          <span>{row.btCardName ? "Balance transfer" : row.accountKind === "credit_card" ? "Credit card" : humanizeDebtKind(row.debtKind)}</span>
           {focus ? <span className="rounded-full bg-brand px-1.5 py-0.5 text-white">Focus</span> : null}
         </div>
         <p className="truncate text-xs italic">{row.name}</p>
@@ -450,6 +472,9 @@ function DebtCard({ row, color, selected, focus, classic, payoff, months, curren
           <CardRow label="Paid so far" value={formatMoney(row.paidCents, currency)} />
           <CardRow label="Minimum" value={formatMoney(row.minCents, currency)} />
           <CardRow label="APR" value={row.apr ? `${row.apr}%` : "—"} />
+          {row.promoEndsOn ? <CardRow label="Promo ends" value={formatShortDate(row.promoEndsOn)} /> : null}
+          {row.btFromName ? <CardRow label="From" value={row.btFromName} /> : null}
+          {row.btCardName ? <CardRow label="Fee" value={formatMoney(row.btFeeCents, currency)} /> : null}
           {/* Classic doesn't pay the Budget plan — it pays minimums plus the
               rolled-over extra — so show what it actually pays, month by month,
               or the card reads as "$135 clears $667 in a month". */}
@@ -1190,5 +1215,43 @@ function SummaryCard({ label, value, hint, highlight }: { label: string; value: 
       <p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>
       {hint ? <p className="text-[11px] text-muted">{hint}</p> : null}
     </div>
+  );
+}
+
+function formatShortDate(iso: string) {
+  return `${parseInt(iso.slice(8, 10), 10)} ${MONTHS_SHORT[parseInt(iso.slice(5, 7), 10) - 1]} ${iso.slice(2, 4)}`;
+}
+
+function UndoTransfer({ debtId, onDone }: { debtId: string; onDone: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  if (!confirming) {
+    return (
+      <button type="button" onClick={() => setConfirming(true)} className="rounded-lg px-3 py-2 text-xs font-bold text-negative ring-1 ring-rose-300 transition hover:bg-rose-50 dark:ring-rose-800 dark:hover:bg-rose-950/40">
+        Undo transfer
+      </button>
+    );
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <span className="text-xs font-semibold">Move it back to the old card?</span>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => start(async () => {
+          const fd = new FormData();
+          fd.set("debtId", debtId);
+          const result = await undoBalanceTransfer(fd);
+          if (result?.error) setError(result.error);
+          else onDone();
+        })}
+        className="rounded-md bg-negative px-3 py-1.5 text-xs font-bold text-white disabled:opacity-60"
+      >
+        {pending ? "Undoing…" : "Yes, undo"}
+      </button>
+      <button type="button" onClick={() => { setConfirming(false); setError(null); }} className="px-2 py-1.5 text-xs font-semibold">Cancel</button>
+      {error ? <span className="w-full text-xs font-semibold text-negative">{error}</span> : null}
+    </span>
   );
 }

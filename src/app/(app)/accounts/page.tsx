@@ -112,7 +112,7 @@ export default async function AccountsPage() {
       .order("name"),
     supabase
       .from("debts")
-      .select("subcategory_id, account_id, current_balance_cents, min_payment_cents, target_payment_cents, apr, due_day, debt_kind, tracking_enabled, promo_apr_ends_on, property_account_id")
+      .select("subcategory_id, account_id, current_balance_cents, min_payment_cents, target_payment_cents, apr, due_day, debt_kind, tracking_enabled, promo_apr_ends_on, property_account_id, bt_card_account_id, bt_transaction_id")
       .eq("household_id", household.id),
     supabase
       .from("subcategories")
@@ -418,6 +418,9 @@ export default async function AccountsPage() {
     cardDetails: cardDetailsByAccount.get(a.id) ?? null,
     rewardActivities: rewardActivitiesByAccount.get(a.id) ?? [],
     owedCents: cardOwed.get(a.id) ?? 0,
+    transferCents: (debtRows ?? [])
+      .filter((d) => d.bt_card_account_id === a.id && d.tracking_enabled !== false)
+      .reduce((sum, d) => sum + Math.max(0, d.current_balance_cents ?? 0), 0),
     monthSpendCents: cardMonthSpend.get(a.id) ?? 0,
     prevMonthCents: acctHistory.get(`${a.id}:${prevMonth}`) ?? null,
     prev2MonthCents: acctHistory.get(`${a.id}:${prev2Month}`) ?? null,
@@ -516,12 +519,16 @@ export default async function AccountsPage() {
   // Debt Payments already holds is skipped, and debt payments made on Budget
   // are no longer copied in.
   const debtPaymentIds = new Set((debtPaymentRows ?? []).map((t) => t.id));
+  // A balance transfer lowers the old card with a payment row, but no bank
+  // paid it — the money is now owed on the new card's transfer debt.
+  const transferTxIds = new Set((debtRows ?? []).map((d) => d.bt_transaction_id).filter(Boolean));
   const cardPayments: CardPayment[] = (cardPaymentRows ?? [])
     .filter(
       (t) =>
         t.paid_to_account_id &&
         cardIds.has(t.paid_to_account_id) &&
         !debtPaymentIds.has(t.id) &&
+        !transferTxIds.has(t.id) &&
         (t.movement_type === "card_payment" || t.movement_type == null),
     )
     .map((t) => ({
