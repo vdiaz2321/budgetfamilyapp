@@ -103,14 +103,9 @@ export function AddTravelLogModal({
     else setEndOn(value);
   }
   const hasDates = startOn.trim() !== "" || endOn.trim() !== "";
-  // Closing with something typed asks first — one stray tap on the backdrop
-  // would otherwise throw away four sections of a phone's worth of typing.
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
   function requestClose() {
     if (pending) return;
-    const typed = tripName.trim() || hasDates || units().some((u) => u.handle && !u.handle.isEmpty());
-    if (typed && saved.length === 0) setConfirmDiscard(true);
-    else onClose();
+    onClose();
   }
   const handles = {
     stay: useRef<SectionHandle | null>(null),
@@ -391,40 +386,12 @@ export function AddTravelLogModal({
               </p>
             ))}
             {saved.length > 0 ? (
-              <p className="text-xs text-muted">{saved.map(label).join(", ")} already saved — fix the rest and press again.</p>
+              <p className="text-xs text-foreground">{saved.map(label).join(", ")} saved. Fix the rest and press Save again.</p>
             ) : null}
           </div>
         ) : null}
-        {confirmDiscard ? (
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-sky-100 px-3 py-2 text-sm dark:bg-sky-900/50">
-            <span className="font-medium">Throw away what you typed?</span>
-            <span className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmDiscard(false)}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-              >
-                Keep editing
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-md bg-negative px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
-              >
-                Discard
-              </button>
-            </span>
-          </div>
-        ) : null}
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={requestClose}
-            disabled={pending}
-            className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
-          >
-            Cancel
-          </button>
+        {/* Save, then the red Close the other travel popups use — on the left. */}
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={save}
@@ -432,6 +399,14 @@ export function AddTravelLogModal({
             className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
           >
             {pending ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={requestClose}
+            disabled={pending}
+            className="rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/15 disabled:opacity-60"
+          >
+            Close
           </button>
         </div>
       </div>

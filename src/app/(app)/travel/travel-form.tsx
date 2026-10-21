@@ -1,6 +1,6 @@
 // Field pieces shared by the Travel Log's flight, stay and car forms.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FX_CURRENCIES, loadFxRates } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, foreignSymbol } from "@/lib/money";
 import type { TravelTrip } from "./types";
@@ -43,7 +43,7 @@ export function spentMissingError(opts: {
   alsoTry?: string;
 }): string | null {
   if (!opts.reservedOn.trim() || opts.spentTyped || opts.exempt) return null;
-  return `Enter "${opts.dateLabel}" when Spent is made, or clear it for Planned${opts.alsoTry ? `, ${opts.alsoTry}` : ""}.`;
+  return `${opts.dateLabel} has a date, so it counts as booked — enter what you paid in Spent, or clear the date to keep it as a plan.${opts.alsoTry ? ` ${opts.alsoTry}` : ""}`;
 }
 
 /**
@@ -114,6 +114,7 @@ export function PlanSpentFields({
   spentOnPoints = false,
   showForeign = true,
   spentRateDate,
+  picker,
 }: {
   value: PlanSpent;
   onChange: (next: PlanSpent) => void;
@@ -136,6 +137,9 @@ export function PlanSpentFields({
   /** The booking date: Spent converts at that day's rate (what the card
    *  charged); Planned at today's. Blank → today's for both. */
   spentRateDate?: string;
+  /** The currency picker. Dollars only, it shares the row with the two
+   *  boxes instead of taking a line of its own above two half-width boxes. */
+  picker?: React.ReactNode;
 }) {
   const usd = currencySymbol(currency);
   // Typing in a foreign box fills the dollar box beside it, the way the
@@ -157,11 +161,35 @@ export function PlanSpentFields({
     const n = Number(raw.replace(/,/g, ""));
     return Number.isFinite(n) ? centsToDisplay(Math.round((n / rate) * 100)) : null;
   };
+  const fromUsd = (raw: string, spent: boolean): string | null => {
+    const rate = rates?.key === ratesKey ? (spent ? rates.spent : rates.planned)?.[foreignCurrency] : undefined;
+    if (!rate) return null;
+    if (!raw.trim()) return "";
+    const n = Number(raw.replace(/,/g, ""));
+    return Number.isFinite(n) ? centsToDisplay(Math.round(n * rate * 100)) : null;
+  };
+  // Boxes this form filled in by converting, not typed — those may be
+  // refilled; a figure typed by hand (the card's real charge) never is.
+  const autoFilled = useRef(new Set<PlanSpentSlot>());
+  const PARTNER: Record<PlanSpentSlot, PlanSpentSlot> = {
+    planned: "plannedForeign",
+    plannedForeign: "planned",
+    spent: "spentForeign",
+    spentForeign: "spent",
+  };
   const type = (slot: PlanSpentSlot, raw: string) => {
     const next = { ...value, [slot]: raw };
-    if (slot === "plannedForeign" || (slot === "spentForeign" && !spentLocked)) {
-      const dollars = toUsd(raw, slot === "spentForeign");
-      if (dollars != null) next[slot === "plannedForeign" ? "planned" : "spent"] = dollars;
+    autoFilled.current.delete(slot);
+    const partner = PARTNER[slot];
+    const isSpent = slot.startsWith("spent");
+    // Typing either box fills the other at the day's rate: euros into
+    // dollars, or dollars into euros. Linked payments own Spent ($).
+    if (!(isSpent && spentLocked) && (!value[partner].trim() || autoFilled.current.has(partner))) {
+      const converted = slot.endsWith("Foreign") ? toUsd(raw, isSpent) : fromUsd(raw, isSpent);
+      if (converted != null) {
+        next[partner] = converted;
+        autoFilled.current.add(partner);
+      }
     }
     onChange(next);
   };
@@ -176,7 +204,7 @@ export function PlanSpentFields({
   const box = (b: (typeof boxes)[number]) => {
     const locked = spentLocked && b.slot === "spent";
     return (
-      <Field key={b.slot} label={b.label} action={locked && onOpenSpent ? <OpenLinkedButton onOpen={onOpenSpent} /> : undefined}>
+      <Field key={b.slot} center label={b.label} action={locked && onOpenSpent ? <OpenLinkedButton onOpen={onOpenSpent} /> : undefined}>
         <input
           value={value[b.slot]}
           onChange={(e) => type(b.slot, e.target.value)}
@@ -185,7 +213,7 @@ export function PlanSpentFields({
           readOnly={locked}
           tabIndex={locked ? -1 : undefined}
           inputMode="decimal"
-          className={`${inputClass} ${locked ? "opacity-70" : ""} ${locked && onOpenSpent ? openableClass : ""}`}
+          className={`${inputClass} text-center ${locked ? "opacity-70" : ""} ${locked && onOpenSpent ? openableClass : ""}`}
         />
         {locked ? <PaidNote linked onOpen={onOpenSpent} /> : null}
       </Field>
@@ -194,12 +222,28 @@ export function PlanSpentFields({
   // Planned and Spent each in their own group; Spent's sits in the blue
   // frame the flight form and trip tables use, so the two never blur.
   const group = showForeign ? "grid grid-cols-2 gap-3" : "grid grid-cols-1 gap-3";
-  return (
-    <div className={`grid gap-3 ${showForeign ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2"}`}>
+  const groups = (
+    <>
       <div className={`${group} p-2`}>{boxes.filter((b) => b.slot.startsWith("planned")).map(box)}</div>
       <div className={`${group} rounded-lg p-2 ring-2 ring-sky-400 dark:ring-sky-500`}>
         {boxes.filter((b) => b.slot.startsWith("spent")).map(box)}
       </div>
+    </>
+  );
+  if (picker && !showForeign) {
+    // One row: picker, Planned, Spent. The picker sits level with the boxes
+    // (each group has p-2 under its box). On a phone it takes its own line.
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-[auto_1fr_1fr] sm:items-end">
+        <div className="col-span-2 sm:col-span-1 sm:mb-[11px]">{picker}</div>
+        {groups}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {picker ? <div>{picker}</div> : null}
+      <div className={`grid gap-3 ${showForeign ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2"}`}>{groups}</div>
     </div>
   );
 }
@@ -257,13 +301,14 @@ export function Section({ title, action, children }: { title: string; action?: R
   );
 }
 
-export function Field({ label, action, className, children }: { label: string; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
+export function Field({ label, action, center = false, className, children }: { label: string; action?: React.ReactNode; center?: boolean; className?: string; children: React.ReactNode }) {
   return (
-    <label className={`block min-w-0 ${className ?? ""}`}>
+    // center: the label sits over a centred figure, so it is centred too.
+    <label className={`block min-w-0 ${center ? "text-center" : ""} ${className ?? ""}`}>
       {action ? (
         // A button on the label's own line, right after it. It keeps the
         // line's height, so the box stays level with the boxes beside it.
-        <span className="mb-0.5 flex h-[18px] items-center gap-2">
+        <span className={`mb-0.5 flex h-[18px] items-center gap-2 ${center ? "justify-center" : ""}`}>
           <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
           {action}
         </span>

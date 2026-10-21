@@ -279,10 +279,8 @@ export function CarModal({
         >
           {/* The currency the second Planned / Spent box is in — always
               showing, like the flight form's. */}
-          <div className="mb-3">
-            <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
-          </div>
           <PlanSpentFields
+            picker={<CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />}
             value={fig}
             onChange={setFig}
             currency={currency}

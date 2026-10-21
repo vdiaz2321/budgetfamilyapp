@@ -8,7 +8,7 @@ import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./acti
 import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import {
-  CurrencySelect, MoreDetailsToggle, PlanSpentFields, PlannedPointsNote, isPlannedOnly, outsideTripNote, spentMissingError,
+  CurrencySelect, PlanSpentFields, PlannedPointsNote, isPlannedOnly, outsideTripNote, spentMissingError,
   type PlanSpent,
 } from "./travel-form";
 import type { Embed, SectionHandle } from "./embedded-section";
@@ -143,19 +143,6 @@ export function StayModal({
   // Paid with the card's free-night certificate instead. The two are
   // exclusive: ticking one unticks the other.
   const [freeNightUsed, setFreeNightUsed] = useState(stay?.freeNightUsed ?? false);
-  // The short form: points, credits, card owner and remarks fold away. A saved stay that already uses any of them opens with
-  // them showing, so editing never hides a figure that's there.
-  const [showMore, setShowMore] = useState(
-    () =>
-      !!stay &&
-      !!(
-        stay.cardLabel?.trim() || stay.holder?.trim() || stay.pointsCost > 0 || stay.hotelCreditCents > 0 ||
-        stay.hotelCostCents > 0 || stay.freeNightUsed || stay.pointsUsed || stay.breakfastIncluded ||
-        stay.remarks?.trim() || stay.costForeignCents || stay.plannedCostForeignCents ||
-        stay.payAtProperty || stay.freeCancelUntil
-      ),
-  );
-  const more = showMore ? "contents" : "hidden";
   const [freeNightPoints, setFreeNightPoints] = useState(
     stay?.freeNightPoints ? String(stay.freeNightPoints) : preset?.freeNightPointsLimit ? String(preset.freeNightPointsLimit) : "",
   );
@@ -215,7 +202,7 @@ export function StayModal({
     spentTyped: Boolean(fig.spent.trim() || fig.spentForeign.trim()),
     exempt: pointsUsed || freeNightUsed || payAtProperty || stay?.paidCents != null,
     dateLabel: "Reservation Made",
-    alsoTry: "or tick Pay at check-in under More details",
+    alsoTry: "Paying at the hotel? Select Pay at check-in.",
   });
 
   const card = cards.find((c) => c.id === accountId) ?? null;
@@ -434,23 +421,28 @@ export function StayModal({
           </p>
         ) : null}
 
-        <Field label="Hotel / Apartment Name">
-          <input
-            name="propertyName"
-            defaultValue={base?.propertyName ?? ""}
-            className={inputClass}
-          />
-        </Field>
-        <Field label="City, State/Country">
-          <input name="city" defaultValue={base?.city ?? ""} className={inputClass} />
-        </Field>
+        {/* Where and who it was booked through, on one row. */}
+        <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3">
+          <Field label="Hotel / Apartment Name">
+            <input
+              name="propertyName"
+              defaultValue={base?.propertyName ?? ""}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="City, State/Country">
+            <input name="city" defaultValue={base?.city ?? ""} className={inputClass} />
+          </Field>
+          <Field label="Booked thru / Brand">
+            <BrandPicker brands={brands} value={brand} onChange={setBrand} />
+          </Field>
+        </div>
 
-        {/* The three dates and the two counts on one row — none of them
-             needs more than a fifth of the form. Two per row at 375px. */}
-        {/* The three dates get the width — at a fifth each, "03/28/2027"
-            was cut off (worse in Room 2's inset box); nights and pax are a
-            number or two. Two to a row on a phone, as before. */}
-        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-[minmax(9.5rem,1.3fr)_minmax(9.5rem,1.3fr)_minmax(9.5rem,1.3fr)_minmax(0,0.6fr)_minmax(0,0.6fr)]">
+        {/* The three dates, the two counts and the card on one row. The dates
+            get the width — at a fifth each, "03/28/2027" was cut off (worse in
+            Room 2's inset box); nights and pax are a number or two. Two to a
+            row on a phone, the card across both. */}
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-[minmax(9.5rem,1fr)_minmax(9.5rem,1fr)_minmax(9.5rem,1fr)_4rem_4.5rem_minmax(0,1.5fr)]">
           <Field label="Reservation made">
             <input
               type="date"
@@ -487,7 +479,7 @@ export function StayModal({
               className={`${inputClass} disabled:opacity-50`}
             />
           </Field>
-          <Field label="Nights">
+          <Field label="Nights" className="text-center">
             <input
               type="number"
               name="nights"
@@ -495,22 +487,14 @@ export function StayModal({
               step="1"
               value={nights}
               onChange={(e) => setNights(e.target.value)}
-              className={inputClass}
+              className={`${inputClass} text-center`}
             />
           </Field>
-          <Field label="Total pax">
-            <input type="number" name="pax" min="1" step="1" defaultValue={stay?.pax ?? ""} className={inputClass} />
-          </Field>
-        </div>
-
-        {/* How it was booked and on what: the brand, the card, the card's name
-             when it isn't linked, and whose it is. */}
-        <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-4">
-          <Field label="Booked thru / Brand">
-            <BrandPicker brands={brands} value={brand} onChange={setBrand} />
+          <Field label="Total pax" className="text-center">
+            <input type="number" name="pax" min="1" step="1" defaultValue={stay?.pax ?? ""} className={`${inputClass} text-center`} />
           </Field>
           {/* What the card has left is spelled out in the strip below. */}
-          <Field label="Card used">
+          <Field label="Card used" className="col-span-2 sm:col-span-1">
             <select
               name="accountId"
               value={accountId}
@@ -551,28 +535,13 @@ export function StayModal({
               </span>
             ) : null}
           </Field>
-          <div className={more}>
-          <Field label="Card used (if not linked)">
-            <input name="cardLabel" defaultValue={stay?.cardLabel ?? ""} className={inputClass} />
-          </Field>
-          <Field label="Card owner">
-            <input
-              name="holder"
-              value={holder}
-              onChange={(e) => setHolder(e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-          </div>
         </div>
 
         {/* Planned beside Spent, each in dollars and the stay's other
             currency. Spent is what left the wallet. */}
         <div className="space-y-2 sm:col-span-2">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
-          </div>
           <PlanSpentFields
+            picker={<CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />}
             value={fig}
             onChange={setFig}
             currency={currency}
@@ -591,27 +560,30 @@ export function StayModal({
           <input type="hidden" name="foreignCurrency" value={foreignCurrency} />
         </div>
 
-        <MoreDetailsToggle open={showMore} onToggle={() => setShowMore((v) => !v)} className="sm:col-span-2" />
+        {/* Always open (Victor, 2026-10-21): a heading, not a fold. */}
+        <h3 className="border-t border-line pt-3 text-xs font-bold uppercase tracking-wide sm:col-span-2">
+          More details: points, credits, remarks
+        </h3>
 
-        <div className={more}>
-        {/* The six figures are all short — the free-night cap, points, a
-             rate, three money amounts — so they ride on one line instead of
-             eating six rows of the form. Two per row at 375px. */}
+        <div className="contents">
+        {/* The five figures are all short — the free-night cap, points, a
+             rate, two money amounts — so they ride on one line instead of
+             eating five rows of the form. Two per row at 375px. */}
         <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-5">
           {/* A category-capped certificate (World of Hyatt) has no points
               ceiling to type — the field shows the category instead, read-only,
               and the stay saves no free-night points. */}
           {card?.freeNightCategoryMax && !card.freeNightPointsLimit && !freeNightPoints.trim() ? (
-            <Field label="Free-night max">
+            <Field label="Free-night max" className="text-center">
               <input
                 value={`Cat 1\u2013${card.freeNightCategoryMax}`}
                 readOnly
                 tabIndex={-1}
-                className={`${inputClass} ${freeNightUsed ? "" : "opacity-50"}`}
+                className={`${inputClass} text-center ${freeNightUsed ? "" : "opacity-50"}`}
               />
             </Field>
           ) : (
-          <Field label="Free-night max">
+          <Field label="Free-night max" className="text-center">
             <input
               type="number"
               name="freeNightPoints"
@@ -624,14 +596,14 @@ export function StayModal({
               // Still reachable by click when a free night is ticked.
               tabIndex={-1}
               placeholder={freeNightUsed ? "0" : ""}
-              className={`${inputClass} disabled:opacity-50`}
+              className={`${inputClass} text-center disabled:opacity-50`}
             />
           </Field>
           )}
           {/* Unticked labels stay as short as the ticked ones: the longer
               "Points it would've cost" wrapped to two lines and pushed its box
               below Hotel cost and Pocket cost in the same row. */}
-          <Field label={pointsUsed ? "Points used" : "Pts if used"}>
+          <Field label={pointsUsed ? "Points used" : "Pts if used"} className="text-center">
             <input
               type="number"
               name="pointsCost"
@@ -639,7 +611,7 @@ export function StayModal({
               step="1"
               value={points}
               onChange={(e) => setPoints(e.target.value)}
-              className={inputClass}
+              className={`${inputClass} text-center`}
             />
             {/* Whether the night fits inside the card's yearly certificate. */}
             {overAllotment > 0 ? (
@@ -649,7 +621,7 @@ export function StayModal({
               </span>
             ) : null}
           </Field>
-          <Field label="Value per pt (¢)">
+          <Field label="Value per pt (¢)" className="text-center">
             <input
               value={pointsValue}
               onChange={(e) => {
@@ -657,7 +629,7 @@ export function StayModal({
                 setPointsValue(e.target.value);
                 setExactRate(null);
               }}
-              className={inputClass}
+              className={`${inputClass} text-center`}
             />
             {/* What actually posts: the rounded display never reaches the row. */}
             <input type="hidden" name="pointsValueCents" value={exactRate ?? pointsValue} />
@@ -691,31 +663,34 @@ export function StayModal({
             ) : null}
           </Field>
 
-          <Field label={`Hotel cost (${currencySymbol(currency)})`}>
+          <Field label={`Hotel cost (${currencySymbol(currency)})`} className="text-center">
             <input
               name="hotelCost"
               value={hotelCost}
               onChange={(e) => setHotelCost(e.target.value)}
               inputMode="decimal"
-              className={inputClass}
+              className={`${inputClass} text-center`}
             />
           </Field>
 
-          <Field label={`Hotel credit (${currencySymbol(currency)})`}>
+          <Field label={`Hotel credit (${currencySymbol(currency)})`} className="text-center">
             <input
               name="hotelCredit"
               value={hotelCredit}
               onChange={(e) => setHotelCredit(e.target.value)}
               inputMode="decimal"
-              className={inputClass}
+              className={`${inputClass} text-center`}
             />
           </Field>
+          {/* The unlinked card's name and the card's owner are no longer typed
+              here (Victor, 2026-10-21); a saved stay keeps what it had, and the
+              owner still fills in from the card picked above. */}
+          <input type="hidden" name="cardLabel" value={stay?.cardLabel ?? ""} />
+          <input type="hidden" name="holder" value={holder} />
+          <Field label="Remarks" className="col-span-2 sm:col-span-5">
+            <input name="remarks" defaultValue={stay?.remarks ?? ""} className={inputClass} />
+          </Field>
         </div>
-
-        {/* Remarks on a line of their own — confirmation numbers run long. */}
-        <Field label="Remarks" className="sm:col-span-2">
-          <input name="remarks" defaultValue={stay?.remarks ?? ""} className={inputClass} />
-        </Field>
 
         {/* How it was paid, in one row (each label on one line): free night, points, breakfast, pay at
             the hotel (Spent stays empty until the check-in charge is linked),
@@ -724,7 +699,7 @@ export function StayModal({
           {/* Free night and points are either/or: ticking one clears the
               other. Ticking free night stamps the card's Booked date with this
               stay's check-in and takes no points. */}
-          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight sm:text-sm">
             <input
               type="checkbox"
               name="freeNightUsed"
@@ -741,7 +716,7 @@ export function StayModal({
               card. Unticked, the stay was paid in cash and the figure is
               only there to compare the two — it never reaches a total or
               the card's balance. */}
-          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight sm:text-sm">
             <input
               type="checkbox"
               name="pointsUsed"
@@ -754,7 +729,7 @@ export function StayModal({
             />
             <span className="whitespace-nowrap">Pts used</span>
           </label>
-          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight sm:text-sm">
             <input
               type="checkbox"
               name="breakfastIncluded"
@@ -763,7 +738,7 @@ export function StayModal({
             />
             <span className="whitespace-nowrap">B&apos;fast incl</span>
           </label>
-          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight sm:text-sm">
             <input type="hidden" name="payAtPropertySent" value="1" />
             <input
               type="checkbox"
@@ -774,14 +749,14 @@ export function StayModal({
             />
             <span className="whitespace-nowrap">Pay at check-in</span>
           </label>
-          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold">
-            <span className="whitespace-nowrap uppercase tracking-wide">Cancel by</span>
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold sm:text-sm">
+            <span className="whitespace-nowrap">Cancel by</span>
             <input
               type="date"
               name="freeCancelUntil"
               value={freeCancelUntil}
               onChange={(e) => setFreeCancelUntil(e.target.value)}
-              className={`${inputClass} w-40`}
+              className={`${inputClass} w-40 font-normal`}
             />
           </label>
         </div>

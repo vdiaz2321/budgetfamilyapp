@@ -607,6 +607,15 @@ export function TransactionsTable({
       <div className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block dark:ring-white/10">
         {selectMode && selectedIds.size > 0 ? (
           <div className="flex items-center gap-3 bg-brand-soft px-4 py-2.5 text-xs lg:text-sm">
+            {/* The action first, where the eye lands — then what it acts on. */}
+            <BatchActionButtons
+              onClear={() => batchClear(true)}
+              onUnclear={() => batchClear(false)}
+              clearedCount={selectedClearedCount()}
+              selectedCount={selectedIds.size}
+              pending={batchPending}
+              pendingAction={batchAction}
+            />
             <div className="flex items-center gap-3">
               <span className="font-semibold text-brand">{selectedIds.size} selected</span>
               <span className="text-muted">·</span>
@@ -617,15 +626,6 @@ export function TransactionsTable({
                 </span>
               </span>
             </div>
-            <span className="text-base font-bold leading-none text-muted">/</span>
-            <BatchActionButtons
-              onClear={() => batchClear(true)}
-              onUnclear={() => batchClear(false)}
-              clearedCount={selectedClearedCount()}
-              selectedCount={selectedIds.size}
-              pending={batchPending}
-              pendingAction={batchAction}
-            />
           </div>
         ) : (
           <div
@@ -848,9 +848,11 @@ function BatchActionButtons({
   pendingAction?: "clear" | "unclear" | null;
   mobile?: boolean;
 }) {
+  // Desktop: the same size as the toolbar's Select and + Transaction
+  // buttons — at text-xs/py-1 Clear was easy to miss (Victor, 2026-10-21).
   const buttonClass = mobile
-    ? "flex-1 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold transition disabled:opacity-60"
-    : "whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-60";
+    ? "flex-1 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-semibold transition disabled:opacity-60"
+    : "whitespace-nowrap rounded-xl px-3 py-1.5 text-sm font-semibold transition disabled:opacity-60";
 
   const showClear = clearedCount < selectedCount;
   const showUnclear = clearedCount > 0;
@@ -862,9 +864,15 @@ function BatchActionButtons({
           type="button"
           onClick={onClear}
           disabled={pending}
-          className={`${buttonClass} flex items-center justify-center gap-1.5 bg-positive/10 text-positive hover:bg-positive/20`}
+          className={`${buttonClass} flex items-center justify-center gap-1.5 bg-positive text-background shadow-sm hover:brightness-110`}
         >
-          {pending && pendingAction === "clear" ? <Spinner /> : null}
+          {pending && pendingAction === "clear" ? (
+            <Spinner />
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M5 12.5l4.5 4.5L19 7.5" />
+            </svg>
+          )}
           {pending && pendingAction === "clear" ? "Clearing…" : "Clear"}
         </button>
       ) : null}
@@ -873,7 +881,7 @@ function BatchActionButtons({
           type="button"
           onClick={onUnclear}
           disabled={pending}
-          className={`${buttonClass} flex items-center justify-center gap-1.5 bg-sky-100 text-muted hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900`}
+          className={`${buttonClass} flex items-center justify-center gap-1.5 bg-sky-100 text-foreground ring-1 ring-sky-300 hover:bg-sky-200 dark:bg-sky-900/50 dark:ring-sky-700 dark:hover:bg-sky-900`}
         >
           {pending && pendingAction === "unclear" ? <Spinner /> : null}
           {pending && pendingAction === "unclear" ? "Unclearing…" : "Unclear"}

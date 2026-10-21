@@ -174,6 +174,13 @@ export function TripDetailModal({
   const [startOn, setStartOn] = useState(t.trip.startOn ?? "");
   const [endOn, setEndOn] = useState(t.trip.endOn ?? "");
   const [notes, setNotes] = useState(t.trip.notes ?? "");
+  function openEdit() {
+    setName(t.trip.name);
+    setStartOn(t.trip.startOn ?? "");
+    setEndOn(t.trip.endOn ?? "");
+    setNotes(t.trip.notes ?? "");
+    setMode("edit");
+  }
 
   // A hotel booked as several reservations (two rooms, night by night) is
   // listed once, its reservations under it.
@@ -360,8 +367,8 @@ export function TripDetailModal({
       headerActionsBelow
       headerActions={
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-foreground">
-          {/* The trip's two actions side by side: add a flight/stay/rental,
-              then edit the trip itself. */}
+          {/* Add a flight/stay/rental. The trip's own name, dates and notes
+              are edited from the notes button at the end of this row. */}
           <button
             type="button"
             onClick={onAddBooking}
@@ -369,24 +376,6 @@ export function TripDetailModal({
           >
             Add to this trip
           </button>
-          {mode !== "edit" ? (
-            <button
-              type="button"
-              onClick={() => {
-                setName(t.trip.name);
-                setStartOn(t.trip.startOn ?? "");
-                setEndOn(t.trip.endOn ?? "");
-                setNotes(t.trip.notes ?? "");
-                setMode("edit");
-              }}
-              className={SECTION_BUTTON}
-            >
-              <svg aria-hidden viewBox="0 0 20 20" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M13.5 3.5l3 3L7 16H4v-3z" />
-              </svg>
-              Edit trip
-            </button>
-          ) : null}
           {/* Log a purchase for this trip without leaving the popup. */}
           {/* The Transactions page's "+ Transaction" colours, at this row's size. */}
           <AddTransactionButton
@@ -420,6 +409,11 @@ export function TripDetailModal({
               <span>No dates yet</span>
             )}
           </span>
+          {mode !== "edit" ? (
+            <button type="button" onClick={openEdit} className={SECTION_BUTTON}>
+              {t.trip.notes ? "Edit notes / trip" : "+ Add notes / trip"}
+            </button>
+          ) : null}
           {budgetPlanCents > 0 && !budgetMonth ? (
             <span className="self-end font-semibold text-negative">Add dates to put its plan on the Budget</span>
           ) : null}
@@ -452,8 +446,8 @@ export function TripDetailModal({
             >
               Delete trip
             </button>
-            {/* Hidden while Edit trip is open: Close doesn't save, so the
-                way out of that form is Save trip or Cancel. */}
+            {/* Hidden while the edit form is open: Close doesn't save, so the
+                way out of that form is Save notes / trip or Cancel. */}
             {mode !== "edit" ? (
               <button type="button" onClick={onClose} className="rounded-md border border-black/25 bg-background px-4 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40">
                 Close
@@ -471,8 +465,8 @@ export function TripDetailModal({
         style={{ "--trip-stats-h": `${statsHeight}px` } as React.CSSProperties}
       >
         {error ? <p className="rounded-md bg-negative/10 px-3 py-2 text-xs font-medium text-negative">{error}</p> : null}
-        {/* ---- Edit trip (name, dates, notes) opens right under the button
-             that starts it; otherwise the notes read here. */}
+        {/* ---- The trip's notes, read here; clicking them (or the header's
+             notes button) opens the edit form for the name, dates and notes. */}
         {mode === "edit" ? (
           <section>
             <form
@@ -496,7 +490,7 @@ export function TripDetailModal({
               </Field>
               <div className="col-span-2 flex flex-wrap gap-2 sm:col-span-3">
                 <button type="submit" disabled={pending} className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
-                  {pending ? "Saving…" : "Save trip"}
+                  {pending ? "Saving…" : "Save notes / trip"}
                 </button>
                 <button type="button" onClick={() => setMode("view")} className="rounded-md px-3 py-1.5 text-xs font-semibold text-foreground hover:underline">
                   Cancel
@@ -506,10 +500,14 @@ export function TripDetailModal({
           </section>
         ) : t.trip.notes ? (
           // A labelled box, so the trip's notes don't read as a footnote to
-          // the header above them.
-          <p className="whitespace-pre-line rounded-lg px-3 py-2 text-xs ring-1 ring-line">
+          // the header above them. Clicking it opens the edit form.
+          <button
+            type="button"
+            onClick={openEdit}
+            className="block w-full whitespace-pre-line rounded-lg px-3 py-2 text-left text-xs ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+          >
             <span className="font-bold uppercase tracking-wide">Notes/Remarks:</span> {t.trip.notes}
-          </p>
+          </button>
         ) : null}
 
         {/* The trip at a glance, in the tables' own columns: Planned, Spent,

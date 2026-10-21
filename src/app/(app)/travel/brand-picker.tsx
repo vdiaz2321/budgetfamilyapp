@@ -8,8 +8,9 @@ import type { TravelBrand } from "./types";
 // One picker for what used to be two free-text fields, "Booked through" and
 // "Brand". The list lives in travel_brands so the by-brand chart has a fixed
 // set of names to group on. It's a type-to-search box: typing narrows the
-// list, Enter takes the match, and a name that isn't there yet is added from
-// the same box. The chosen name posts as the stay's `brand`.
+// list, the arrow keys move through it, Enter takes the highlighted row, and a
+// name that isn't there yet is added from the same box. The chosen name posts
+// as the stay's `brand`.
 export function BrandPicker({
   brands,
   value,
@@ -22,6 +23,8 @@ export function BrandPicker({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // The row the arrow keys are on: an index into `options` below, -1 for none.
+  const [active, setActive] = useState(-1);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const box = useRef<HTMLDivElement>(null);
@@ -34,6 +37,7 @@ export function BrandPicker({
       if (!box.current?.contains(e.target as Node)) {
         setOpen(false);
         setQuery("");
+        setActive(-1);
       }
     }
     document.addEventListener("mousedown", onDown);
@@ -45,11 +49,21 @@ export function BrandPicker({
     ? brands.filter((b) => b.name.toLowerCase().includes(typed.toLowerCase()))
     : brands;
   const exact = brands.some((b) => b.name.toLowerCase() === typed.toLowerCase());
+  // What the arrow keys step through: each match, then "Add …" when shown.
+  const options: { kind: "pick" | "add"; name: string }[] = [
+    ...matches.map((b) => ({ kind: "pick" as const, name: b.name })),
+    ...(typed && !exact ? [{ kind: "add" as const, name: typed }] : []),
+  ];
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    list.current?.querySelector(`[data-option="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [active]);
 
   function pick(name: string) {
     onChange(name);
     setQuery("");
     setOpen(false);
+    setActive(-1);
   }
 
   function add(name: string) {
@@ -82,16 +96,30 @@ export function BrandPicker({
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        setActive(0);
+        return;
+      }
+      const last = options.length - 1;
+      if (last < 0) return;
+      setActive((i) => (e.key === "ArrowDown" ? (i >= last ? 0 : i + 1) : i <= 0 ? last : i - 1));
+      return;
+    }
     if (e.key === "Enter") {
       // Enter here must never submit the stay form behind the panel.
       e.preventDefault();
-      if (matches.length === 1) pick(matches[0].name);
-      else if (typed && !exact) add(typed);
+      const chosen = options[active] ?? (matches.length === 1 ? options[0] : undefined);
+      if (chosen?.kind === "pick") pick(chosen.name);
+      else if (chosen?.kind === "add" || (typed && !exact)) add(typed);
       return;
     }
     if (e.key === "Escape") {
       setOpen(false);
       setQuery("");
+      setActive(-1);
     }
   }
 
@@ -106,6 +134,8 @@ export function BrandPicker({
           onChange={(e) => {
             setQuery(e.target.value);
             setOpen(true);
+            // Typing puts the top row under Enter.
+            setActive(e.target.value.trim() ? 0 : -1);
           }}
           onKeyDown={onKeyDown}
           className="min-w-0 flex-1 bg-transparent focus:outline-none"
@@ -135,7 +165,7 @@ export function BrandPicker({
       </div>
 
       {open ? (
-        <div className="absolute left-0 right-0 z-20 mt-1 rounded-md bg-surface shadow-lg ring-1 ring-line">
+        <div ref={list} className="absolute left-0 right-0 z-20 mt-1 rounded-md bg-surface shadow-lg ring-1 ring-line">
           <ul className="max-h-48 overflow-y-auto py-1">
             {value && !typed ? (
               <li>
@@ -148,8 +178,8 @@ export function BrandPicker({
                 </button>
               </li>
             ) : null}
-            {matches.map((b) => (
-              <li key={b.id} className="group flex items-center">
+            {matches.map((b, i) => (
+              <li key={b.id} data-option={i} className={`group flex items-center ${i === active ? "bg-sky-200 dark:bg-sky-800" : ""}`}>
                 <button
                   type="button"
                   onClick={() => pick(b.name)}
@@ -181,9 +211,12 @@ export function BrandPicker({
           {typed && !exact ? (
             <button
               type="button"
+              data-option={matches.length}
               disabled={pending}
               onClick={() => add(typed)}
-              className="w-full border-t border-line px-2 py-2 text-left text-sm font-semibold transition hover:bg-sky-50 disabled:opacity-50 dark:hover:bg-sky-950/40"
+              className={`w-full border-t border-line px-2 py-2 text-left text-sm font-semibold transition hover:bg-sky-50 disabled:opacity-50 dark:hover:bg-sky-950/40 ${
+                active === matches.length ? "bg-sky-200 dark:bg-sky-800" : ""
+              }`}
             >
               {pending ? "Adding…" : `Add “${typed}”`}
             </button>

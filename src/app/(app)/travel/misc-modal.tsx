@@ -117,7 +117,9 @@ export function MiscModal({
   const showFx = Boolean(foreignCurrency);
   // Category, then Planned / Spent / Difference — each in dollars and, with a
   // currency picked, that currency too.
-  const COLS = showFx ? "sm:grid-cols-[8.5rem_repeat(6,minmax(0,1fr))]" : "sm:grid-cols-[8.5rem_repeat(3,minmax(0,1fr))]";
+  // Dollars only, the three columns keep a box's natural width instead of
+  // stretching a third of the popup each (Victor, 2026-10-21: dead space).
+  const COLS = showFx ? "sm:grid-cols-[8.5rem_repeat(6,minmax(0,1fr))]" : "sm:grid-cols-[8.5rem_repeat(3,9rem)]";
   // The field the currency converter fills: the one last clicked into.
   const focused = useRef<{ category: ExpenseCategory; slot: Slot } | null>(null);
 
@@ -285,11 +287,31 @@ export function MiscModal({
           if (key.endsWith("Eur")) loadRatesFor(r.category, slot);
         }}
         inputMode="decimal"
+        data-col={key}
+        data-row={r.category}
         className={`${inputClass} sm:text-center`}
       />
       )}
     </label>
   );
+  // Tab goes down a column (Restaurants, Groceries, …), then on to the top of
+  // the next column, the way the sheet is filled in — not across each row.
+  const tabDown = (e: React.KeyboardEvent<HTMLUListElement>) => {
+    if (e.key !== "Tab") return;
+    const colOrder = ["planned", "plannedEur", "actual", "actualEur"];
+    const rowOrder = rows.map((x) => x.category as string);
+    const cells = [...e.currentTarget.querySelectorAll<HTMLInputElement>("input[data-col]")].sort(
+      (a, b) =>
+        colOrder.indexOf(a.dataset.col!) - colOrder.indexOf(b.dataset.col!) ||
+        rowOrder.indexOf(a.dataset.row!) - rowOrder.indexOf(b.dataset.row!),
+    );
+    const i = cells.indexOf(e.target as HTMLInputElement);
+    if (i < 0) return;
+    const next = cells[i + (e.shiftKey ? -1 : 1)];
+    if (!next) return; // off the end: leave the table as usual
+    e.preventDefault();
+    next.focus();
+  };
 
   // Pinned in the popup header (in place of the X) so they are reachable
   // without scrolling to the bottom of a long form.
@@ -383,7 +405,7 @@ export function MiscModal({
             <span className="font-semibold text-muted">{usdHead}</span>
             {showFx ? <span className="font-semibold text-muted">{fxHead}</span> : null}
           </div>
-          <ul className="space-y-2">
+          <ul className="space-y-2" onKeyDown={tabDown}>
             {/* From the trip's own bookings, not typed here — shown so the
                 Total below is the whole trip. Editing one is the Stay, Flight
                 or Rental section itself. */}

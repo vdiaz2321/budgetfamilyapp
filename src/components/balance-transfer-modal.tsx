@@ -25,6 +25,9 @@ export function BalanceTransferModal({ cards, startMonth, currency, onClose }: {
   const biggest = [...cards].sort((a, b) => b.owedCents - a.owedCents)[0];
   const [fromId, setFromId] = useState(biggest?.owedCents > 0 ? biggest.id : "");
   const [toId, setToId] = useState("");
+  // True while the From list is open, so the picked card shows its balance in
+  // the list but only its name in the closed box.
+  const [fromOpen, setFromOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [feePct, setFeePct] = useState("3");
   const [promoEndsOn, setPromoEndsOn] = useState("");
@@ -54,17 +57,17 @@ export function BalanceTransferModal({ cards, startMonth, currency, onClose }: {
   return (
     <ModalShell title="Balance transfer" onClose={onClose} className="sm:max-w-xl">
       <form action={submit} className="space-y-4 p-5">
-        <div className="grid grid-cols-2 gap-3">
-          <label className={`${LABEL} col-span-2 sm:col-span-1`}>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1.4fr_1fr_1.3fr_1.5fr]">
+          <label className={`${LABEL} col-span-2`}>
             From card
-            <select name="fromAccountId" value={fromId} onChange={(e) => setFromId(e.target.value)} required className={FIELD}>
+            <select name="fromAccountId" value={fromId} onMouseDown={() => setFromOpen(true)} onKeyDown={() => setFromOpen(true)} onChange={(e) => { setFromId(e.target.value); setFromOpen(false); }} onBlur={() => setFromOpen(false)} required className={FIELD}>
               <option value="">Pick a card</option>
               {cards.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}{c.owedCents > 0 ? ` · owes ${formatMoney(c.owedCents, currency)}` : ""}</option>
+                <option key={c.id} value={c.id}>{c.name}{c.owedCents > 0 && (fromOpen || c.id !== fromId) ? ` · owes ${formatMoney(c.owedCents, currency)}` : ""}</option>
               ))}
             </select>
           </label>
-          <label className={`${LABEL} col-span-2 sm:col-span-1`}>
+          <label className={`${LABEL} col-span-2`}>
             To card (the offer)
             <select name="toAccountId" value={toId} onChange={(e) => setToId(e.target.value)} required className={FIELD}>
               <option value="">Pick a card</option>
@@ -73,7 +76,7 @@ export function BalanceTransferModal({ cards, startMonth, currency, onClose }: {
               ))}
             </select>
           </label>
-          <label className={LABEL}>
+          <label className={`${LABEL} sm:order-1 sm:whitespace-nowrap`}>
             Amount to transfer
             <input name="amount" type="number" min="0.01" step="0.01" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} className={FIELD} />
             {from && from.owedCents > 0 ? (
@@ -82,31 +85,31 @@ export function BalanceTransferModal({ cards, startMonth, currency, onClose }: {
               </button>
             ) : null}
           </label>
-          <label className={LABEL}>
+          <label className={`${LABEL} sm:order-2 sm:whitespace-nowrap`}>
             Transfer fee %
             <input name="feePct" type="number" min="0" max="10" step="0.01" inputMode="decimal" required value={feePct} onChange={(e) => setFeePct(e.target.value)} className={FIELD} />
           </label>
-          <label className={LABEL}>
+          <label className={`${LABEL} sm:order-4 sm:whitespace-nowrap`}>
             Transfer date
             <input name="date" type="date" defaultValue={today} className={FIELD} />
           </label>
-          <label className={LABEL}>
+          <label className={`${LABEL} sm:order-3 sm:whitespace-nowrap`}>
             Promo APR %
             <input name="promoApr" type="number" min="0" step="0.01" inputMode="decimal" defaultValue="0" className={FIELD} />
           </label>
-          <label className={LABEL}>
+          <label className={`${LABEL} sm:order-8 sm:whitespace-nowrap`}>
             Promo ends
             <input name="promoEndsOn" type="date" required value={promoEndsOn} onChange={(e) => setPromoEndsOn(e.target.value)} className={FIELD} />
           </label>
-          <label className={LABEL}>
+          <label className={`${LABEL} sm:order-7 sm:whitespace-nowrap`}>
             APR after promo %
             <input name="postPromoApr" type="number" min="0" step="0.01" inputMode="decimal" placeholder="e.g. 18.74" className={FIELD} />
           </label>
-          <label className={LABEL}>
+          <label className={`${LABEL} sm:order-5 sm:whitespace-nowrap`}>
             Minimum / mo
             <input name="minimum" type="number" min="0" step="0.01" inputMode="decimal" className={FIELD} />
           </label>
-          <label className={LABEL}>
+          <label className={`${LABEL} sm:order-6 sm:whitespace-nowrap`}>
             Planned / mo
             <input name="planned" type="number" min="0" step="0.01" inputMode="decimal" value={planned} onChange={(e) => setPlanned(e.target.value)} placeholder={clearCents ? centsToDisplay(clearCents) : ""} className={FIELD} />
           </label>
