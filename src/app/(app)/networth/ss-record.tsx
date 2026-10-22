@@ -5,7 +5,7 @@
 // import + "Add month" pattern. The statement is read on this device; only
 // its numbers go to the server (lib/ssa-statement-pdf, lib/ssa-statement).
 
-import { useMemo, useState, useTransition } from "react";
+import { Fragment, useMemo, useState, useTransition } from "react";
 import { ModalShell } from "@/components/modal-shell";
 import { displayToCents, formatMoneyWhole } from "@/lib/money";
 import {
@@ -21,6 +21,7 @@ import { clearSsRecord, deleteSsYear, importSsStatement, saveSsYear } from "./ac
 
 const box = "rounded-md bg-surface px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 const label = "block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground";
+const chip = "rounded-md px-3 py-1.5 text-sm font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** The first month a claim at `age` can be paid: at 62, the month after the birthday. */
@@ -47,13 +48,16 @@ export function SsRecordSection({
   const [importing, setImporting] = useState(false);
   const [year, setYear] = useState("");
   const [amount, setAmount] = useState("");
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editAmount, setEditAmount] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [why, setWhy] = useState(false);
   const [claimAge, setClaimAge] = useState(spouseClaimAge == null ? "" : String(spouseClaimAge));
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   const money = (c: number) => formatMoneyWhole(c, currency);
   const birthMonth = record?.birthMonth ?? 1;
-  const lastPosted = record?.statement ? Number(record.statement.statementDate.slice(0, 4)) - 1 : thisYear - 1;
 
   // His benefit at 62, 67 and 70 from the record as it stands.
   const atAge = useMemo(() => {
@@ -86,6 +90,14 @@ export function SsRecordSection({
     return Math.floor((pia / 200) * spousalFactor(early) + 1e-7) * 100;
   }, [record, birthYear, birthMonth, spouseBirthYear, claimAge, thisYear]);
 
+  const saveEdit = () => {
+    if (editing == null || !editAmount.trim()) return;
+    const fd = new FormData();
+    fd.set("year", String(editing));
+    fd.set("earnings", editAmount.trim());
+    run(() => saveSsYear(fd), () => setEditing(null));
+  };
+
   const run = (fn: () => Promise<{ error: string | null }>, after?: () => void) =>
     start(async () => {
       const r = await fn();
@@ -100,21 +112,34 @@ export function SsRecordSection({
     run(() => saveSsYear(fd), () => {
       setYear("");
       setAmount("");
+      setAdding(false);
     });
   };
 
   const rows = record?.earnings ?? [];
-  const posted = rows.filter((r) => r.year <= lastPosted).reduce((t, r) => t + r.cents, 0);
+  // Only years that have happened; a year gets added once it's over.
+  const past = rows.filter((r) => r.year < thisYear);
+  const per = Math.ceil(past.length / 3);
+  const thirds = [past.slice(0, per), past.slice(per, per * 2), past.slice(per * 2)];
+  const posted = past.reduce((t, r) => t + r.cents, 0);
+  const spouseOk = spouseBirthYear != null && record != null;
+  const yearOk = /^\d{4}$/.test(year.trim()) && Number(year) < thisYear;
+  const openAdd = () => {
+    const next = (past.at(-1)?.year ?? thisYear - 2) + 1;
+    setYear(next < thisYear ? String(next) : "");
+    setAmount("");
+    setAdding(true);
+  };
 
   return (
     <div className="space-y-3 sm:col-span-2">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex max-w-2xl flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setImporting(true)}
-          className="rounded-lg bg-sky-100 px-3 py-2 text-sm font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
+          className={chip}
         >
-          {record ? "Import a newer statement" : "Import SSA statement (PDF)"}
+          Import SSA Statement
         </button>
         <a
           href="https://www.ssa.gov/myaccount/"
@@ -138,10 +163,9 @@ export function SsRecordSection({
           </button>
         ) : null}
       </div>
-      <p className="text-xs text-foreground sm:text-sm">Read on this device: only the numbers are saved.</p>
 
       {record && atAge ? (
-        <div className="overflow-x-auto rounded-lg ring-1 ring-line">
+        <div className="max-w-2xl overflow-x-auto rounded-lg ring-1 ring-line">
           <table className="w-full text-sm tabular-nums">
             <thead>
               <tr className="bg-sky-50 dark:bg-sky-950/40">
@@ -181,116 +205,225 @@ export function SsRecordSection({
           </table>
         </div>
       ) : null}
-      {check ? (
-        <p className={`text-xs sm:text-sm ${check.off <= 200 ? "text-positive" : "text-negative"}`}>
-          {check.off <= 200
-            ? "✓ On the statement's assumptions, the calculator matches it."
-            : `On the statement's assumptions, the calculator is off by up to ${money(check.off)}/mo.`}
-        </p>
+      {check && check.off > 200 ? (
+        <p className="text-xs text-negative sm:text-sm">Calculator is off from the statement by up to {money(check.off)}/mo.</p>
       ) : null}
 
       {record ? (
-        <div className="overflow-hidden rounded-lg ring-1 ring-line">
-          <table className="w-full text-sm tabular-nums">
-            <thead>
-              <tr className="bg-sky-50 dark:bg-sky-950/40">
-                <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Year</th>
-                <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Age</th>
-                <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Earnings</th>
-                <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Source</th>
-                <th className="w-0 px-1 py-1.5 sm:px-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {rows.map((r) => (
-                <tr
-                  key={r.year}
-                  onClick={() => {
-                    setYear(String(r.year));
-                    setAmount((r.cents / 100).toFixed(2));
-                  }}
-                  className={`cursor-pointer transition hover:bg-sky-50 dark:hover:bg-sky-950/40 ${String(r.year) === year ? "bg-sky-50 dark:bg-sky-950/40" : ""}`}
-                >
-                  <td className="px-1.5 sm:px-3 py-1 text-center">{r.year}</td>
-                  <td className="px-1.5 sm:px-3 py-1 text-center">{birthYear != null ? r.year - birthYear : "—"}</td>
-                  <td className="px-1.5 sm:px-3 py-1 text-right" style={{ color: r.year <= lastPosted ? "var(--viz-income)" : "var(--viz-savings)" }}>
-                    {money(r.cents)}
-                  </td>
-                  <td className="px-1.5 sm:px-3 py-1 text-center text-xs sm:text-sm">
-                    {r.year > lastPosted ? "Planned" : r.split ? "Split" : "SSA"}
-                  </td>
-                  <td className="px-1 py-1 text-right sm:px-2">
-                    <button
-                      type="button"
-                      disabled={pending}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        run(() => deleteSsYear(r.year));
-                      }}
-                      aria-label={`Remove ${r.year}`}
-                      className="rounded px-1.5 text-negative transition hover:bg-sky-100 disabled:opacity-50 dark:hover:bg-sky-900/50"
-                    >
-                      ×
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              <tr className="font-semibold">
-                <td colSpan={2} className="px-1.5 sm:px-3 py-1.5 text-center">Posted total</td>
-                <td className="px-1.5 sm:px-3 py-1.5 text-right" style={{ color: "var(--viz-income)" }}>{money(posted)}</td>
-                <td colSpan={2} />
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-      {rows.some((r) => r.split) ? (
-        <p className="text-xs text-foreground sm:text-sm">Split: spread from a combined range. Type each year for exact numbers.</p>
-      ) : null}
-
-      {/* One year by hand: next year's posted earnings, or a planned one. */}
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="w-24">
-          <span className={label}>Year</span>
-          <input value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" placeholder={String(thisYear)} className={`${box} mt-1 w-full text-center`} />
-        </label>
-        <label className="w-36">
-          <span className={label}>Earnings</span>
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="0.00" className={`${box} mt-1 w-full text-center`} />
-        </label>
-        <button
-          type="button"
-          disabled={pending || !year.trim() || !amount.trim()}
-          onClick={saveYear}
-          className="h-[34px] rounded-md bg-brand px-3 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-50"
-        >
-          {pending ? "Saving…" : rows.some((r) => String(r.year) === year.trim()) ? "Update year" : "Add year"}
-        </button>
-      </div>
-      <p className="text-xs text-foreground sm:text-sm">Future years: in that year&rsquo;s dollars.</p>
-
-      {spouseBirthYear != null && record ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className={label}>Spouse&rsquo;s spousal benefit</span>
-          <select
-            name="spouseSsClaimAge"
-            value={claimAge}
-            onChange={(e) => setClaimAge(e.target.value)}
-            aria-label="Spouse's spousal benefit starts at age"
-            className={`${box} cursor-pointer`}
-          >
-            <option value="">None</option>
-            {[62, 63, 64, 65, 66, 67].map((a) => (
-              <option key={a} value={a}>From age {a} ({spouseBirthYear + a})</option>
+        <>
+          {/* Three columns on desktop; one list on the phone. Click a row to edit or delete it. */}
+          <div className="grid gap-3 max-sm:gap-0 sm:grid-cols-3">
+            {thirds.map((part, i) => (
+              <div key={i} className={`self-start overflow-hidden ring-1 ring-line rounded-lg ${i > 0 ? "max-sm:-mt-px max-sm:rounded-t-none" : ""} ${i < 2 ? "max-sm:rounded-b-none" : ""} ${part.length ? "" : "max-sm:hidden"}`}>
+                <table className="w-full table-fixed text-sm tabular-nums">
+                  {/* Fixed widths so the parts line up when stacked on the phone. */}
+                  <colgroup>
+                    <col className="w-[30%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-1/2" />
+                  </colgroup>
+                  <thead className={i > 0 ? "max-sm:hidden" : ""}>
+                    <tr className="bg-sky-50 dark:bg-sky-950/40">
+                      <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Year</th>
+                      <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Age</th>
+                      <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Earnings</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {part.map((r) =>
+                      editing === r.year ? (
+                        <Fragment key={r.year}>
+                          <tr className="bg-sky-50 dark:bg-sky-950/40">
+                            <td className="px-1.5 sm:px-3 py-1 text-center font-semibold">{r.year}</td>
+                            <td className="px-1.5 sm:px-3 py-1 text-center">{birthYear != null ? r.year - birthYear : "—"}</td>
+                            <td className="px-1 py-1">
+                              <input
+                                autoFocus
+                                value={editAmount}
+                                onChange={(e) => setEditAmount(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    saveEdit();
+                                  } else if (e.key === "Escape") {
+                                    e.stopPropagation();
+                                    setEditing(null);
+                                  }
+                                }}
+                                inputMode="decimal"
+                                aria-label={`Earnings for ${r.year}`}
+                                className={`${box} mx-auto block w-full max-w-32 py-1 text-center`}
+                              />
+                            </td>
+                          </tr>
+                          <tr className="bg-sky-50 dark:bg-sky-950/40">
+                            <td colSpan={3} className="px-1.5 pb-1.5 sm:px-3">
+                              <div className="flex flex-wrap items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={pending || !editAmount.trim()}
+                                  onClick={saveEdit}
+                                  className="rounded-md bg-brand px-2.5 py-1 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-50"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={pending}
+                                  onClick={() => run(() => deleteSsYear(r.year), () => setEditing(null))}
+                                  className="rounded-md px-2.5 py-1 text-sm font-semibold text-negative ring-1 ring-line transition hover:bg-sky-100 disabled:opacity-50 dark:hover:bg-sky-900/50"
+                                >
+                                  Delete
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditing(null)}
+                                  className="rounded-md px-2.5 py-1 text-sm font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        </Fragment>
+                      ) : (
+                        <tr
+                          key={r.year}
+                          onClick={() => {
+                            setEditing(r.year);
+                            setEditAmount((r.cents / 100).toFixed(2));
+                          }}
+                          className="cursor-pointer transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                        >
+                          <td className="px-1.5 sm:px-3 py-1 text-center">{r.year}</td>
+                          <td className="px-1.5 sm:px-3 py-1 text-center">{birthYear != null ? r.year - birthYear : "—"}</td>
+                          <td className="px-1.5 sm:px-3 py-1 text-center" style={{ color: "var(--viz-income)" }}>
+                            {money(r.cents)}
+                          </td>
+                        </tr>
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              </div>
             ))}
-          </select>
-          {spousal != null ? (
-            <span className="text-sm font-semibold" style={{ color: "var(--viz-income)" }}>
-              {money(spousal)}/mo
-            </span>
-          ) : null}
-          <span className="basis-full text-xs text-foreground sm:text-sm">No record of her own: half your benefit at 67, less before. Starts once you start yours.</span>
+          </div>
+        </>
+      ) : null}
+
+      {/* Add year · total · spousal benefit — one row. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {adding ? null : (
+          <button type="button" onClick={openAdd} className={chip}>
+            Add year
+          </button>
+        )}
+        {record ? (
+          <p className="text-sm font-semibold">
+            Total Earnings <span className="ml-1 tabular-nums" style={{ color: "var(--viz-income)" }}>{money(posted)}</span>
+          </p>
+        ) : null}
+        {spouseOk && !claimAge ? (
+          <button type="button" onClick={() => setClaimAge("67")} className={chip}>
+            Add Spousal Benefit
+          </button>
+        ) : null}
+        {spouseOk ? (
+          <button
+            type="button"
+            aria-expanded={why}
+            onClick={() => setWhy((v) => !v)}
+            className="text-sm font-semibold underline underline-offset-2"
+            style={{ color: "var(--viz-savings)" }}
+          >
+            Why it exists
+          </button>
+        ) : null}
+      </div>
+
+      {adding ? (
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="w-24">
+            <span className={label}>Year</span>
+            <input autoFocus={!year} value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" placeholder={String(thisYear - 1)} className={`${box} mt-1 w-full text-center`} />
+          </label>
+          <label className="w-36">
+            <span className={label}>Earnings</span>
+            <input autoFocus={!!year} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="0.00" className={`${box} mt-1 w-full text-center`} />
+          </label>
+          <button
+            type="button"
+            disabled={pending || !yearOk || !amount.trim()}
+            onClick={saveYear}
+            className="h-[34px] rounded-md bg-brand px-3 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-50"
+          >
+            {pending ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdding(false)}
+            className="h-[34px] rounded-md px-3 text-sm font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+          >
+            Cancel
+          </button>
         </div>
+      ) : null}
+
+      {spouseOk ? (
+        <>
+          {/* Saved with the plan form; the select below only shows once it's added. */}
+          <input type="hidden" name="spouseSsClaimAge" value={claimAge} />
+          {claimAge ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className={label}>Spousal benefit</span>
+              <select
+                value={claimAge}
+                onChange={(e) => setClaimAge(e.target.value)}
+                aria-label="Spousal benefit starts at age"
+                className={`${box} cursor-pointer`}
+              >
+                {[62, 63, 64, 65, 66, 67].map((a) => (
+                  <option key={a} value={a}>From age {a} ({spouseBirthYear! + a})</option>
+                ))}
+              </select>
+              {spousal != null ? (
+                <span className="text-sm font-semibold" style={{ color: "var(--viz-income)" }}>
+                  {money(spousal)}/mo
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setClaimAge("")}
+                className="rounded-md px-2 py-1 text-sm font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              >
+                Remove
+              </button>
+            </div>
+          ) : null}
+          {why ? (
+            <div className="space-y-2 rounded-lg px-4 py-3 text-sm text-foreground ring-1 ring-line">
+              <p>
+                <span className="font-semibold">Why it exists:</span>{" "}a spouse who hasn&rsquo;t worked enough to earn Social Security of her own can
+                still collect a &ldquo;spousal benefit.&rdquo; It pays up to half of what you&rsquo;d get at 67.
+              </p>
+              <ul className="list-disc space-y-1 pl-5">
+                <li>The dropdown picks the age she starts collecting (62 to 67). At 67 she gets the full half. Each year earlier lowers it, down to about a third at 62.</li>
+                <li>Pick an age and her monthly amount appears next to the dropdown. That amount is added to the plan&rsquo;s income from that year on.</li>
+                <li>She can&rsquo;t collect before you do: her payments only start once you&rsquo;ve started yours.</li>
+                <li>Leave it off if she&rsquo;ll get her own Social Security from her own work. She can&rsquo;t collect both in full; she gets whichever is bigger.</li>
+              </ul>
+              <a
+                href="https://www.ssa.gov/family"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block font-semibold underline underline-offset-2"
+                style={{ color: "var(--viz-savings)" }}
+              >
+                Family benefits at SSA.gov
+              </a>
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       {error ? <p className="text-sm font-medium text-negative">{error}</p> : null}
