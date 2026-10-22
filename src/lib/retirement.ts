@@ -362,7 +362,7 @@ export const INCOME_LINE_KINDS: { value: IncomeLineKind; label: string }[] = [
   { value: "social_security", label: "Social Security" },
   { value: "job", label: "Second job" },
   { value: "spouse", label: "Spouse income" },
-  { value: "other", label: "Other" },
+  { value: "other", label: "Other income" },
 ];
 
 /** The COLA plan. A COLA is keyed by the year the raised payment is first

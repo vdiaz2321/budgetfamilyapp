@@ -2233,9 +2233,11 @@ function PlanModal({
       onClose={onClose}
       // Empty: Close sits in the title row above, so no X at the edge.
       headerEnd={<></>}
-      // Wide enough on desktop for each section's title and footnote to share
-      // one line (Victor, 2026-10-16).
-      className="sm:max-w-3xl lg:max-w-5xl xl:max-w-6xl"
+      // Wide enough on desktop for the seven rates, and the Social Security
+      // record's Total · Add SSA Year · Add Spousal Benefit · Explanation
+      // row, to each fit one line — and no wider: the old 1152px was dead
+      // space beside the collapsed sections (Victor, 2026-10-22).
+      className="sm:max-w-[54rem]"
     >
       <form
         id="fi-plan-form"
@@ -2252,9 +2254,9 @@ function PlanModal({
         <div className="grid grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-2">
         <div className="rounded-lg px-3 pb-3 pt-2 ring-1 ring-line">
         <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line bg-sky-50 px-3 py-1.5 text-center text-sm font-bold sm:text-base dark:bg-sky-950/40">You</p>
-        <div className="grid grid-cols-1 items-end gap-x-4 gap-y-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 items-end gap-x-2 gap-y-4 sm:grid-cols-3">
         <Field center label={<>Birth <br className="max-sm:hidden" /> year</>}>
-          <input name="birthYear" inputMode="numeric" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} className={inputClass} />
+          <input name="birthYear" inputMode="numeric" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} className={`${inputClass} sm:!w-20`} />
         </Field>
         {/* The year all work stops — military, GS or civilian. Up here, not
             under the rates or the military section: it is the plan's own
@@ -2266,30 +2268,30 @@ function PlanModal({
             inputMode="numeric"
             value={withdrawStartDraft}
             onChange={(e) => setWithdrawStartDraft(e.target.value)}
-            className={inputClass}
+            className={`${inputClass} sm:!w-20`}
           />
         </Field>
-        <Field center label={<>Plan until <br className="max-sm:hidden" /> age</>}>
-          <input name="longevityAge" inputMode="numeric" defaultValue={plan.longevityAge} className={inputClass} />
+        <Field center label={<>Plan <br className="max-sm:hidden" /> until age</>}>
+          <input name="longevityAge" inputMode="numeric" defaultValue={plan.longevityAge} className={`${inputClass} sm:!w-20`} />
         </Field>
         </div>
         </div>
         <div className="rounded-lg px-3 pb-3 pt-2 ring-1 ring-line">
         <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line bg-sky-50 px-3 py-1.5 text-center text-sm font-bold sm:text-base dark:bg-sky-950/40">Spouse</p>
-        <div className="grid grid-cols-1 items-end gap-x-4 gap-y-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 items-end gap-x-2 gap-y-4 sm:grid-cols-3">
         <Field center label={<>Birth <br className="max-sm:hidden" /> year</>}>
-          <input name="spouseBirthYear" inputMode="numeric" defaultValue={plan.spouseBirthYear ?? ""} className={inputClass} />
+          <input name="spouseBirthYear" inputMode="numeric" defaultValue={plan.spouseBirthYear ?? ""} className={`${inputClass} sm:!w-20`} />
         </Field>
         <Field center label={<>Retirement <br className="max-sm:hidden" /> Year</>}>
           <input
             name="spouseRetireYear"
             inputMode="numeric"
             defaultValue={plan.spouseRetireYear ?? ""}
-            className={inputClass}
+            className={`${inputClass} sm:!w-20`}
           />
         </Field>
-        <Field center label={<>Plan until <br className="max-sm:hidden" /> age</>}>
-          <input name="spouseLongevityAge" inputMode="numeric" defaultValue={plan.spouseLongevityAge} className={inputClass} />
+        <Field center label={<>Plan <br className="max-sm:hidden" /> until age</>}>
+          <input name="spouseLongevityAge" inputMode="numeric" defaultValue={plan.spouseLongevityAge} className={`${inputClass} sm:!w-20`} />
         </Field>
         </div>
         </div>
@@ -2357,32 +2359,49 @@ function PlanModal({
                 if (!e.currentTarget.contains(e.relatedTarget as Node | null))
                   setLines((prev) => byLineDates(prev, thisYear));
               }}
-              className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(7rem,1fr)_10rem_11rem_8rem_8.5rem_8.5rem_auto]">
-              {/* Your own name ("Mil Pay"); the type decides how it is
-                  treated — COLA, survivor, when Pay stops (Victor, 2026-10-16).
-                  Blank shows the type's name as a hint and saves it. */}
-              <LineField label="Name">
-                <input
-                  value={l.name}
-                  onChange={(e) => updateLine(l.key, { name: e.target.value })}
-                  placeholder={DEFAULT_LINE_NAME[l.kind]}
-                  className={lineInput}
-                />
-              </LineField>
-              <LineField label="Type">
-                <select
-                  value={l.kind}
-                  onChange={(e) => {
-                    const kind = e.target.value as IncomeLineKind;
-                    updateLine(l.key, { kind, taxable: kind !== "va" });
-                  }}
-                  className={lineInput}
+              className="space-y-2 rounded-lg bg-background p-2 ring-1 ring-line">
+              {/* Name and type head the card with Remove at the far end; the
+                  fields below are sized to their values, not stretched to
+                  fill columns (Victor, 2026-10-22). */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                {/* Your own name ("Mil Pay"); the type decides how it is
+                    treated — COLA, survivor, when Pay stops (Victor, 2026-10-16).
+                    Blank shows the type's name as a hint and saves it. */}
+                <label className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+                  <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Name</span>
+                  <input
+                    value={l.name}
+                    onChange={(e) => updateLine(l.key, { name: e.target.value })}
+                    placeholder={DEFAULT_LINE_NAME[l.kind]}
+                    className={`${lineInput} sm:w-56`}
+                  />
+                </label>
+                <label className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Type</span>
+                  <select
+                    value={l.kind}
+                    onChange={(e) => {
+                      const kind = e.target.value as IncomeLineKind;
+                      updateLine(l.key, { kind, taxable: kind !== "va" });
+                    }}
+                    // Wide enough for "Spouse income", the longest type, with
+                    // room to spare.
+                    className={`${lineInput} sm:w-44`}
+                  >
+                    {INCOME_LINE_KINDS.map((k) => (
+                      <option key={k.value} value={k.value}>{k.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
+                  className="ml-auto h-[34px] shrink-0 rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 >
-                  {INCOME_LINE_KINDS.map((k) => (
-                    <option key={k.value} value={k.value}>{k.label}</option>
-                  ))}
-                </select>
-              </LineField>
+                  Remove
+                </button>
+              </div>
+              <div className="grid grid-cols-2 items-end gap-2 sm:flex sm:justify-between sm:gap-4">
               {/* Typed per month or per year — pay is thought of yearly,
                   benefits monthly (Victor, 2026-10-16). */}
               <LineField label="Amount">
@@ -2393,7 +2412,7 @@ function PlanModal({
                     onChange={(e) => updateLine(l.key, { monthly: e.target.value })}
                     readOnly={!!fromRecord(l)}
                     placeholder="0.00"
-                    className={`${lineInput} text-center`}
+                    className={`${lineInput} text-center sm:w-24`}
                   />
                   <select
                     value={fromRecord(l) ? "mo" : l.per}
@@ -2416,7 +2435,7 @@ function PlanModal({
                     value={l.raisePct}
                     onChange={(e) => updateLine(l.key, { raisePct: e.target.value })}
                     placeholder="0"
-                    className={`${lineInput} text-center`}
+                    className={`${lineInput} block text-center sm:mx-auto sm:w-20`}
                   />
                 </LineField>
               ) : (
@@ -2425,7 +2444,7 @@ function PlanModal({
                 </LineField>
               )}
               {/* Month + year: the first year only counts from this month on. */}
-              <LineField label="Starts">
+              <LineField label="Starts" className="sm:w-[8.75rem]">
                 <MonthYearBox
                   label="Start"
                   blankMonth="Jan"
@@ -2437,7 +2456,7 @@ function PlanModal({
                 />
               </LineField>
               {/* Month + year: the last year only counts through this month. */}
-              <LineField label="Ends">
+              <LineField label="Ends" className="sm:w-[8.75rem]">
                 <MonthYearBox
                   label="End"
                   blankMonth="Dec"
@@ -2448,18 +2467,12 @@ function PlanModal({
                   yearPlaceholder="Never"
                 />
               </LineField>
-              <button
-                type="button"
-                onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
-                className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-              >
-                Remove
-              </button>
+              </div>
               {/* The PIA drives the survivor benefits on this record: the
                   children's, the caregiver's and the widow(er)'s. Blank
                   shows the one worked out from the start age. */}
               {fromRecord(l) ? (
-                <p className="col-span-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:col-span-7">
+                <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
                   <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Full retirement benefit (PIA)</span>
                   <span className="text-sm font-semibold tabular-nums" style={{ color: "var(--viz-income)" }}>
                     {formatMoneyWhole(fromRecord(l)!.pia, currency)}/mo
@@ -2467,7 +2480,7 @@ function PlanModal({
                   <span className="text-xs text-foreground sm:text-sm">From your Social Security record.</span>
                 </p>
               ) : l.kind === "social_security" ? (
-                <label className="col-span-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:col-span-7">
+                <label className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
                   <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Full retirement benefit (PIA)</span>
                   <span className="flex items-center gap-1">
                     <input
@@ -2493,7 +2506,7 @@ function PlanModal({
               ) : null}
               {/* A year's worth. */}
               {money(l.monthly) > 0 ? (
-                <p className="col-span-2 text-center text-xs sm:col-span-7 sm:text-sm text-foreground">
+                <p className="text-center text-xs sm:text-sm text-foreground">
                   {/* The same amount the other way round. */}
                   {l.per === "yr"
                     ? `Estimated Monthly Income: ${formatMoneyWhole(money(l.monthly) / 12, currency)}`
@@ -2548,7 +2561,9 @@ function PlanModal({
           {/* Spending inflation sits left of Savings APY on a wide screen
               (Victor, 2026-10-19); on a phone it drops below the rates so
               it isn't read as one of them. */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-6 lg:grid-cols-7">
+          {/* Columns sized to each name ("Traditional retirement" needs more
+              than "Crypto"), so all seven fit the narrower popup. */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-6 lg:grid-cols-[repeat(7,auto)]">
             <span className="col-span-full block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground lg:col-span-6 lg:col-start-2">
               Rate of return by category
             </span>
@@ -2560,6 +2575,8 @@ function PlanModal({
                 <input
                   name="inflationPct"
                   inputMode="decimal"
+                  // Takes its column's width rather than setting it.
+                  size={1}
                   value={inflation}
                   onChange={(e) => setInflation(e.target.value)}
                   className={`${lineInput} text-center`}
@@ -2598,6 +2615,7 @@ function PlanModal({
                     <input
                       name="cashReturnPct"
                       inputMode="decimal"
+                      size={1}
                       value={cashDefault}
                       onChange={(e) => setCashDefault(e.target.value)}
                       aria-label="Savings APY"
@@ -2606,6 +2624,7 @@ function PlanModal({
                   ) : (
                     <input
                       inputMode="decimal"
+                      size={1}
                       value={groupDrafts[kind].returnPct}
                       onChange={(e) => updateGroup(kind, { returnPct: e.target.value })}
                       placeholder={investDefault}

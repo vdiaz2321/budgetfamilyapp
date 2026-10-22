@@ -53,6 +53,7 @@ export function SsRecordSection({
   const [adding, setAdding] = useState(false);
   const [why, setWhy] = useState(false);
   const [claimAge, setClaimAge] = useState(spouseClaimAge == null ? "" : String(spouseClaimAge));
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -150,19 +151,34 @@ export function SsRecordSection({
         >
           Get it at my Social Security
         </a>
-        {record ? (
+        {record && !confirmRemove ? (
           <button
             type="button"
             disabled={pending}
-            onClick={() => {
-              if (window.confirm("Remove the Social Security record? The plan goes back to the amount typed on the line.")) run(clearSsRecord);
-            }}
+            onClick={() => setConfirmRemove(true)}
             className="ml-auto rounded-md px-2 py-1 text-sm font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 disabled:opacity-50 dark:hover:bg-sky-950/40"
           >
             Remove record
           </button>
         ) : null}
       </div>
+      {/* In the app, not the browser's OK box: that one put the focus on OK,
+          so Enter deleted every year (Victor, 2026-10-22). */}
+      {record && confirmRemove ? (
+        <ConfirmStrip
+          message={
+            <>
+              {/* The years shown in the table; later planned years go too. */}
+              Delete all {past.length} years of earnings{past.length ? ` (${past[0].year}–${past.at(-1)!.year})` : ""} and the statement?{" "}
+              This can&rsquo;t be undone; you&rsquo;d have to import the PDF again.
+            </>
+          }
+          confirmLabel={pending ? "Deleting…" : "Delete"}
+          pending={pending}
+          onConfirm={() => run(clearSsRecord, () => setConfirmRemove(false))}
+          onKeep={() => setConfirmRemove(false)}
+        />
+      ) : null}
 
       {record && atAge ? (
         <div className="max-w-2xl overflow-x-auto rounded-lg ring-1 ring-line">
@@ -177,7 +193,13 @@ export function SsRecordSection({
             </thead>
             <tbody className="divide-y divide-line">
               <tr>
-                <td className="px-3 py-1.5 font-semibold">Your plan</td>
+                <td className="px-3 py-1.5 font-semibold">
+                  Your plan
+                  {/* Planned years run to retirement; none after (Victor, 2026-10-22). */}
+                  {rows.length ? (
+                    <span className="block text-xs font-normal sm:text-sm">Earnings stop after {rows.at(-1)!.year}</span>
+                  ) : null}
+                </td>
                 {atAge.map((a) => (
                   <td key={a.age} className="px-3 py-1.5 text-center font-semibold" style={{ color: "var(--viz-income)" }}>
                     {money(a.cents)}
@@ -187,10 +209,12 @@ export function SsRecordSection({
               {record.statement ? (
                 <tr>
                   <td className="px-3 py-1.5">
-                    Statement
+                    SSA statement
+                    {/* SSA's own estimate keeps you working at last year's pay
+                        right up to the claim age — why it runs higher. */}
                     {record.statement.assumedEarningsCents ? (
                       <span className="block text-xs sm:text-sm">
-                        Assumes {money(record.statement.assumedEarningsCents)}/yr to then
+                        If you earn {money(record.statement.assumedEarningsCents)}/yr until you claim
                       </span>
                     ) : null}
                   </td>
@@ -311,18 +335,20 @@ export function SsRecordSection({
         </>
       ) : null}
 
-      {/* Add year · total · spousal benefit — one row. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {adding ? null : (
-          <button type="button" onClick={openAdd} className={chip}>
-            Add year
-          </button>
-        )}
+      {/* Total · add year · spousal benefit — one row, the two buttons side
+          by side (Victor, 2026-10-22). The tighter gap keeps the longer
+          "Spousal Benefit Explanation" link on the same line. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
         {record ? (
           <p className="text-sm font-semibold">
-            Total Earnings <span className="ml-1 tabular-nums" style={{ color: "var(--viz-income)" }}>{money(posted)}</span>
+            Total Earnings So Far: <span className="ml-1 tabular-nums" style={{ color: "var(--viz-income)" }}>{money(posted)}</span>
           </p>
         ) : null}
+        {adding ? null : (
+          <button type="button" onClick={openAdd} className={chip}>
+            Add SSA Year
+          </button>
+        )}
         {spouseOk && !claimAge ? (
           <button type="button" onClick={() => setClaimAge("67")} className={chip}>
             Add Spousal Benefit
@@ -336,7 +362,7 @@ export function SsRecordSection({
             className="text-sm font-semibold underline underline-offset-2"
             style={{ color: "var(--viz-savings)" }}
           >
-            Why it exists
+            Spousal Benefit Explanation
           </button>
         ) : null}
       </div>
@@ -345,11 +371,11 @@ export function SsRecordSection({
         <div className="flex flex-wrap items-end gap-2">
           <label className="w-24">
             <span className={label}>Year</span>
-            <input autoFocus={!year} value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" placeholder={String(thisYear - 1)} className={`${box} mt-1 w-full text-center`} />
+            <input autoFocus={!year} value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" className={`${box} mt-1 w-full text-center`} />
           </label>
           <label className="w-36">
             <span className={label}>Earnings</span>
-            <input autoFocus={!!year} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="0.00" className={`${box} mt-1 w-full text-center`} />
+            <input autoFocus={!!year} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" className={`${box} mt-1 w-full text-center`} />
           </label>
           <button
             type="button"
@@ -403,13 +429,14 @@ export function SsRecordSection({
           {why ? (
             <div className="space-y-2 rounded-lg px-4 py-3 text-sm text-foreground ring-1 ring-line">
               <p>
-                <span className="font-semibold">Why it exists:</span>{" "}a spouse who hasn&rsquo;t worked enough to earn Social Security of her own can
+                <span className="font-semibold">Spousal Benefit Explanation:</span>{" "}a spouse who hasn&rsquo;t worked enough to earn Social Security of her own can
                 still collect a &ldquo;spousal benefit.&rdquo; It pays up to half of what you&rsquo;d get at 67.
               </p>
               <ul className="list-disc space-y-1 pl-5">
                 <li>The dropdown picks the age she starts collecting (62 to 67). At 67 she gets the full half. Each year earlier lowers it, down to about a third at 62.</li>
                 <li>Pick an age and her monthly amount appears next to the dropdown. That amount is added to the plan&rsquo;s income from that year on.</li>
                 <li>She can&rsquo;t collect before you do: her payments only start once you&rsquo;ve started yours.</li>
+                <li>You must have been married at least 1 year (10 years for a divorced spouse).</li>
                 <li>Leave it off if she&rsquo;ll get her own Social Security from her own work. She can&rsquo;t collect both in full; she gets whichever is bigger.</li>
               </ul>
               <a
@@ -430,6 +457,7 @@ export function SsRecordSection({
       {importing ? (
         <SsImportModal
           currency={currency}
+          savedYears={rows.map((r) => r.year)}
           onClose={() => setImporting(false)}
           onSaved={() => setImporting(false)}
         />
@@ -441,8 +469,61 @@ export function SsRecordSection({
 /** A combined range on the statement, typed out year by year. */
 type RangeDraft = { from: number; to: number; cents: number; years: Record<number, string>; even: Record<number, string> };
 
-function SsImportModal({ currency, onClose, onSaved }: { currency: string; onClose: () => void; onSaved: () => void }) {
+/** A warning with Keep and the risky button side by side. Keep is first and
+ *  focused, so Enter keeps. */
+function ConfirmStrip({
+  message,
+  confirmLabel,
+  pending,
+  onConfirm,
+  onKeep,
+}: {
+  message: React.ReactNode;
+  confirmLabel: string;
+  pending: boolean;
+  onConfirm: () => void;
+  onKeep: () => void;
+}) {
+  return (
+    <div role="alertdialog" className="flex max-w-2xl flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-negative/10 px-3 py-2 ring-1 ring-negative/40">
+      <p className="min-w-0 flex-1 basis-64 text-sm font-semibold text-foreground">{message}</p>
+      <div className="flex shrink-0 gap-2">
+        <button
+          type="button"
+          autoFocus
+          onClick={onKeep}
+          className="rounded-md bg-surface px-3 py-1.5 text-sm font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+        >
+          Keep
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={onConfirm}
+          // Dark text in dark mode, where the red is light.
+          className="rounded-md bg-negative px-3 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60 dark:text-background"
+        >
+          {confirmLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SsImportModal({
+  currency,
+  savedYears,
+  onClose,
+  onSaved,
+}: {
+  currency: string;
+  savedYears: number[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const [parsed, setParsed] = useState<SsStatement | null>(null);
+  // Saved years the statement would write over, while asking first.
+  const [replacing, setReplacing] = useState<number[] | null>(null);
   const [ranges, setRanges] = useState<RangeDraft[]>([]);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -453,6 +534,7 @@ function SsImportModal({ currency, onClose, onSaved }: { currency: string; onClo
     if (!file) return;
     setError(null);
     setParsed(null);
+    setReplacing(null);
     setReading(true);
     try {
       const { readSsaStatementPdf } = await import("@/lib/ssa-statement-pdf");
@@ -483,7 +565,7 @@ function SsImportModal({ currency, onClose, onSaved }: { currency: string; onClo
   const rangeTotal = (r: RangeDraft) => Object.values(r.years).reduce((t, v) => t + displayToCents(v || "0"), 0);
   const rangesOk = ranges.every((r) => rangeTotal(r) === r.cents);
 
-  const save = () => {
+  const save = (confirmed = false) => {
     if (!parsed) return;
     const earnings = [
       ...parsed.earnings.filter((r) => r.to === r.from).map((r) => ({ year: r.from, cents: r.cents })),
@@ -493,6 +575,14 @@ function SsImportModal({ currency, onClose, onSaved }: { currency: string; onClo
         return Object.entries(r.years).map(([y, v]) => ({ year: Number(y), cents: displayToCents(v || "0"), split: !typed }));
       }),
     ].sort((a, b) => a.year - b.year);
+    // Saved years up to the statement's last one are replaced (later ones
+    // stay), so ask before writing over them.
+    const lastPosted = earnings.at(-1)?.year ?? 0;
+    const overwritten = savedYears.filter((y) => y <= lastPosted);
+    if (!confirmed && overwritten.length > 0) {
+      setReplacing(overwritten);
+      return;
+    }
     const statement: SsStatementFigures = {
       statementDate: parsed.statementDate,
       retirementByAge: Object.fromEntries(Object.entries(parsed.retirementByAge).map(([a, c]) => [String(a), c])),
@@ -514,6 +604,22 @@ function SsImportModal({ currency, onClose, onSaved }: { currency: string; onClo
       title="Import SSA statement"
       onClose={onClose}
       className="sm:max-w-2xl"
+      headerNotice={
+        replacing ? (
+          <ConfirmStrip
+            message={
+              <>
+                Replace your {replacing.length} saved years ({replacing[0]}–{replacing.at(-1)}) with this statement&rsquo;s?{" "}
+                Any you edited by hand are lost.
+              </>
+            }
+            confirmLabel={pending ? "Saving…" : "Replace"}
+            pending={pending}
+            onConfirm={() => save(true)}
+            onKeep={() => setReplacing(null)}
+          />
+        ) : undefined
+      }
       headerEnd={
         <>
           <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40">
@@ -521,8 +627,8 @@ function SsImportModal({ currency, onClose, onSaved }: { currency: string; onClo
           </button>
           <button
             type="button"
-            disabled={!parsed || !rangesOk || pending}
-            onClick={save}
+            disabled={!parsed || !rangesOk || pending || replacing != null}
+            onClick={() => save()}
             className="rounded-md bg-brand px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-50"
           >
             {pending ? "Saving…" : "Save record"}
