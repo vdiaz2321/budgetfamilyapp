@@ -425,6 +425,10 @@ export type IncomeLine = {
    *  in the same money as `monthlyCents`. Null: worked out from the start age. */
   piaCents?: number | null;
   taxable: boolean;
+  /** Social Security worked out from the earnings record (lib/ssa), not typed. */
+  fromRecord?: boolean;
+  /** A spouse's spousal benefit on the worker's record: it ends at his death. */
+  spousal?: boolean;
 };
 
 /** Income that arrives whether or not anyone works: it lowers the FI goal.
@@ -920,6 +924,9 @@ export type SsSurvivors = {
   children: PlanChild[];
   /** The year the spouse remarries; null = never. */
   remarryYear?: number | null;
+  /** The PIA and family maximum on a death in that year, worked out from
+   *  his earnings record (lib/ssa). Null, or no record: from his line. */
+  deathPia?: ((deathYear: number) => { piaCents: number; familyMaxCents: number } | null) | null;
 };
 
 /**
@@ -941,9 +948,14 @@ function ssSurvivorParts(
   cola: ColaPlan,
   when: ColaWhen,
 ): { name: string; halves: [number, number] }[] {
-  const pia = ssPiaCents(worker, when.birthYear);
-  // The PIA in this year's money: the same COLAs as the line.
-  const piaNow = lineIn({ ...worker, monthlyCents: pia }, year, cola, when);
+  // A death before 62 with the earnings record known: the PIA SSA works out
+  // for that death, which counts only the years worked so far; it gets its
+  // COLAs from the death. Else his line's PIA, with the line's COLAs.
+  const atDeath = survivors.deathPia?.(deathYear) ?? null;
+  const pia = atDeath?.piaCents ?? ssPiaCents(worker, when.birthYear);
+  const piaNow = atDeath
+    ? Math.round(pia * (cola.socialSecurity ? colaGrowth(cola, Math.max(when.thisYear, deathYear), year) : 1))
+    : lineIn({ ...worker, monthlyCents: pia }, year, cola, when);
   // What the widow(er) benefit is based on: his own benefit if he had
   // started it (at least 82.5% of the PIA), the PIA plus delayed credits if
   // he died past full retirement age without starting, else the PIA.
@@ -952,7 +964,7 @@ function ssSurvivorParts(
   const widowBase = claimed
     ? Math.max(lineIn(worker, year, cola, when), Math.round(piaNow * 0.825))
     : Math.round(piaNow * ssClaimFactor(Math.max(SS_FRA, Math.min(70, ageAtDeath))));
-  const familyMax = Math.round(ssFamilyMaxCents(pia) * (piaNow / Math.max(1, pia)));
+  const familyMax = Math.round((atDeath?.familyMaxCents ?? ssFamilyMaxCents(pia)) * (piaNow / Math.max(1, pia)));
   const kidAge = (c: PlanChild) => year - c.birthYear;
   const out = { caregiver: [0, 0] as [number, number], widow: [0, 0] as [number, number], kids: [0, 0] as [number, number], n: [0, 0] };
   for (const h of [0, 1] as const) {
@@ -1076,14 +1088,15 @@ export function survivorIncomeForYear(
       thirtySix("VGLI (36 monthly)", insurance.vgliCents);
     }
   }
-  const live = lines.filter((l) => active(year, l.startYear, l.endYear) && l.monthlyCents > 0);
+  // A spousal benefit stops at his death; she draws as his survivor instead.
+  const live = lines.filter((l) => !l.spousal && active(year, l.startYear, l.endYear) && l.monthlyCents > 0);
   const deathYear = insured?.deathYear ?? activeDuty?.deathYear ?? null;
   // His record: the Social Security line with the largest PIA, whether or
   // not it has started.
   const worker =
     survivors && deathYear != null
       ? lines
-          .filter((l) => l.kind === "social_security" && l.monthlyCents > 0)
+          .filter((l) => l.kind === "social_security" && !l.spousal && l.monthlyCents > 0)
           .reduce<IncomeLine | null>(
             (best, l) => (best == null || ssPiaCents(l, when.birthYear) > ssPiaCents(best, when.birthYear) ? l : best),
             null,

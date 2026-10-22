@@ -8,6 +8,7 @@ import { verifiedUser } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { unwrap } from "@/lib/supabase-result";
+import { applySsRecord, parseSsEarnings, toSsRecord, type SsStatementFigures } from "@/lib/ssa";
 import {
   estimatePension,
   healthcareForYear,
@@ -393,6 +394,7 @@ export async function saveRetirementPlan(formData: FormData) {
   const withdrawStart = num("withdrawStartYear");
   const spouseRetire = num("spouseRetireYear");
   const spouseBirthYear = num("spouseBirthYear");
+  const spouseClaimAge = num("spouseSsClaimAge");
   const withdrawal = num("withdrawalRatePct");
   const inflation = num("inflationPct");
   const cashReturn = num("cashReturnPct");
@@ -803,6 +805,9 @@ export async function saveRetirementPlan(formData: FormData) {
       withdraw_start_year: withdrawStart,
       spouse_retire_year: spouseRetire,
       spouse_birth_year: spouseBirthYear,
+      ...(formData.has("spouseSsClaimAge")
+        ? { spouse_ss_claim_age: spouseClaimAge != null && Number.isInteger(spouseClaimAge) && spouseClaimAge >= 62 && spouseClaimAge <= 70 ? spouseClaimAge : null }
+        : {}),
       // No box for it any more (withdrawals are set year by year); keep
       // what's stored rather than resetting it.
       ...(formData.has("withdrawalRatePct") ? { withdrawal_rate_pct: withdrawal ?? 4 } : {}),
@@ -987,7 +992,7 @@ async function recomputeRetirementIncome(
   householdId: string,
 ): Promise<boolean> {
   const thisYear = new Date().getFullYear();
-  const [planRes, linesRes, rowsRes, rentalsRes, acctRes, loanRes, groupInputs] = await Promise.all([
+  const [planRes, linesRes, rowsRes, rentalsRes, acctRes, loanRes, groupInputs, ssRes] = await Promise.all([
     supabase.from("retirement_plan").select("*").eq("household_id", householdId).maybeSingle(),
     supabase.from("retirement_income_lines").select("*").eq("household_id", householdId),
     supabase
@@ -1004,7 +1009,14 @@ async function recomputeRetirementIncome(
       .not("property_account_id", "is", null)
       .is("paid_off_at", null),
     loadGroupInputs(supabase, householdId),
+    supabase
+      .from("social_security_records")
+      .select("birth_month, earnings, statement")
+      .eq("household_id", householdId)
+      .eq("person", "self")
+      .maybeSingle(),
   ]);
+  if (ssRes.error) throw new Error(`Could not read the Social Security record: ${ssRes.error.message}`);
   if (loanRes.error) throw new Error(`Could not read the mortgages: ${loanRes.error.message}`);
   if (rentalsRes.error) throw new Error(`Could not read the rentals: ${rentalsRes.error.message}`);
   if (acctRes.error) throw new Error(`Could not read the accounts: ${acctRes.error.message}`);
@@ -1019,7 +1031,7 @@ async function recomputeRetirementIncome(
   const retireYear: number | null = plan.target_retire_year;
   const retireMonth: number | null = plan.target_retire_month ?? null;
   // A blank end means the line never stops (Victor, 2026-10-17).
-  const lines: IncomeLine[] = (linesRes.data ?? []).map((l) => ({
+  const typedLines: IncomeLine[] = (linesRes.data ?? []).map((l) => ({
       id: l.id,
       name: l.name,
       kind: l.kind,
@@ -1034,6 +1046,13 @@ async function recomputeRetirementIncome(
       piaCents: l.pia_cents == null ? null : Number(l.pia_cents),
       taxable: l.taxable,
     }));
+  // With an earnings record saved, Social Security is worked out from it.
+  const lines = applySsRecord(typedLines, toSsRecord(ssRes.data), {
+    birthYear: plan.birth_year ?? null,
+    spouseBirthYear: plan.spouse_birth_year ?? null,
+    spouseClaimAge: plan.spouse_ss_claim_age ?? null,
+    thisYear,
+  });
   const pension = estimatePension(
     {
       retireYear,
@@ -1907,4 +1926,104 @@ export async function setWithdrawalRate(pct: number) {
   }
   revalidatePath("/networth");
   return { ok: true };
+}
+
+// ---- Social Security earnings record (lib/ssa) --------------------------
+//
+// The statement PDF is read in the browser; only its numbers arrive here.
+// Each change re-runs the plan so the projection and the survivor card use
+// the record at once.
+
+const ssRow = (supabase: SupabaseClient, householdId: string) =>
+  supabase
+    .from("social_security_records")
+    .select("earnings")
+    .eq("household_id", householdId)
+    .eq("person", "self")
+    .maybeSingle();
+
+async function ssSaved(supabase: SupabaseClient, householdId: string) {
+  try {
+    await recomputeRetirementIncome(supabase, householdId);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Saved, but couldn't update the plan table." };
+  }
+  revalidatePath("/networth");
+  return { error: null };
+}
+
+/** Saves a read statement: its earnings replace the record, and its figures
+ *  are kept to compare against. Years after the statement typed earlier stay. */
+export async function importSsStatement(input: {
+  birthMonth: number | null;
+  statement: SsStatementFigures;
+  earnings: { year: number; cents: number; split?: boolean }[];
+}) {
+  const { supabase, householdId } = await requireHousehold();
+  const earnings = parseSsEarnings(input.earnings);
+  if (earnings.length === 0) return { error: "No earnings were found on that statement." };
+  const st = input.statement;
+  if (!st || !/^\d{4}-\d{2}-\d{2}$/.test(String(st.statementDate))) return { error: "The statement date couldn't be read." };
+  const { data: prior, error: readErr } = await ssRow(supabase, householdId);
+  if (readErr) return { error: `Couldn't read the record — ${readErr.message}` };
+  const lastPosted = earnings.at(-1)!.year;
+  const planned = parseSsEarnings(prior?.earnings).filter((r) => r.year > lastPosted);
+  const bm = input.birthMonth;
+  const { error } = await supabase.from("social_security_records").upsert(
+    {
+      household_id: householdId,
+      person: "self",
+      birth_month: bm != null && Number.isInteger(bm) && bm >= 1 && bm <= 12 ? bm : null,
+      statement_date: st.statementDate,
+      statement: st,
+      earnings: [...earnings, ...planned],
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "household_id,person" },
+  );
+  if (error) return { error: `Couldn't save the record — ${error.message}` };
+  return ssSaved(supabase, householdId);
+}
+
+/** Adds or replaces one year of earnings, typed by hand. */
+export async function saveSsYear(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const year = Number(String(formData.get("year") ?? "").trim());
+  const raw = String(formData.get("earnings") ?? "").trim();
+  if (!Number.isInteger(year) || year < 1937 || year > 2100) return { error: "Enter a four-digit year." };
+  if (!raw) return { error: "Enter the earnings for that year." };
+  const cents = Math.max(0, displayToCents(raw));
+  const { data: prior, error: readErr } = await ssRow(supabase, householdId);
+  if (readErr) return { error: `Couldn't read the record — ${readErr.message}` };
+  const earnings = [...parseSsEarnings(prior?.earnings).filter((r) => r.year !== year), { year, cents }].sort((a, b) => a.year - b.year);
+  const { error } = await supabase.from("social_security_records").upsert(
+    { household_id: householdId, person: "self", earnings, updated_at: new Date().toISOString() },
+    { onConflict: "household_id,person" },
+  );
+  if (error) return { error: `Couldn't save that year — ${error.message}` };
+  return ssSaved(supabase, householdId);
+}
+
+/** Removes one year from the record. */
+export async function deleteSsYear(year: number) {
+  const { supabase, householdId } = await requireHousehold();
+  const { data: prior, error: readErr } = await ssRow(supabase, householdId);
+  if (readErr) return { error: `Couldn't read the record — ${readErr.message}` };
+  if (!prior) return { error: null };
+  const earnings = parseSsEarnings(prior.earnings).filter((r) => r.year !== year);
+  const { error } = await supabase
+    .from("social_security_records")
+    .update({ earnings, updated_at: new Date().toISOString() })
+    .eq("household_id", householdId)
+    .eq("person", "self");
+  if (error) return { error: `Couldn't remove that year — ${error.message}` };
+  return ssSaved(supabase, householdId);
+}
+
+/** Deletes the whole record: Social Security goes back to the typed line. */
+export async function clearSsRecord() {
+  const { supabase, householdId } = await requireHousehold();
+  const { error } = await supabase.from("social_security_records").delete().eq("household_id", householdId).eq("person", "self");
+  if (error) return { error: `Couldn't remove the record — ${error.message}` };
+  return ssSaved(supabase, householdId);
 }

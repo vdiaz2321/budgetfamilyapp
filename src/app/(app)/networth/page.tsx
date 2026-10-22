@@ -1,3 +1,4 @@
+import { toSsRecord } from "@/lib/ssa";
 import { CASH_KINDS, inflatedSpending, parseChildren, parseColaByYear, parseDentalPlans, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
 import { withCurrentMonth, captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
@@ -94,6 +95,7 @@ export default async function NetworthPage() {
     { data: rentalRows, error: rentalError },
     { data: fiContribRows, error: fiContribError },
     { data: janContribRows, error: janContribError },
+    { data: ssRow, error: ssError },
   ] = await Promise.all([
     // Every snapshot ever taken — this page IS the history view, so none of
     // these can be date-bounded. They grow by one row per account/bucket/debt
@@ -162,7 +164,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, spouse_retire_year, spouse_birth_year, spouse_longevity_age, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security, children, sgli_cents, sgli_payout, vgli_enabled, vgli_cents, vgli_payout")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, spouse_retire_year, spouse_birth_year, spouse_longevity_age, spouse_ss_claim_age, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security, children, sgli_cents, sgli_payout, vgli_enabled, vgli_cents, vgli_payout")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -228,8 +230,16 @@ export default async function NetworthPage() {
       .select("account_id, bucket_id, net_contribution_cents")
       .eq("household_id", household.id)
       .eq("month", `${fiToMonth.slice(0, 4)}-01-01`),
+    // The Social Security earnings record (numbers only — the statement
+    // itself is read in the browser and never saved).
+    supabase
+      .from("social_security_records")
+      .select("birth_month, earnings, statement")
+      .eq("household_id", household.id)
+      .eq("person", "self")
+      .maybeSingle(),
   ]);
-  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError, incomeLines: incomeLineError, rentals: rentalError, fiContributions: fiContribError, janContributions: janContribError });
+  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError, incomeLines: incomeLineError, rentals: rentalError, fiContributions: fiContribError, janContributions: janContribError, ssRecord: ssError });
 
   // This month's rows as the capture started above writes them.
   const accSnaps = withCurrentMonth(
@@ -1113,6 +1123,8 @@ export default async function NetworthPage() {
         withdrawStartYear: planRow?.withdraw_start_year ?? null,
         spouseRetireYear: planRow?.spouse_retire_year ?? null,
         spouseBirthYear: planRow?.spouse_birth_year ?? null,
+        spouseSsClaimAge: planRow?.spouse_ss_claim_age ?? null,
+        ssRecord: toSsRecord(ssRow),
         withdrawalRatePct:
           planRow?.withdrawal_rate_pct == null ? 4 : Number(planRow.withdrawal_rate_pct),
         // A pension, VA, Social Security — income the portfolio never has to

@@ -57,6 +57,8 @@ import {
 } from "@/lib/account-groups";
 import type { GroupInputs } from "@/lib/account-groups-load";
 import { PctBox } from "@/components/pct-box";
+import { applySsRecord, benefitAtStartCents, recordDeathPia, recordRetirementPiaCents, type SsRecord } from "@/lib/ssa";
+import { SsRecordSection } from "./ss-record";
 
 export type FiPlan = {
   birthYear: number | null;
@@ -74,6 +76,10 @@ export type FiPlan = {
   spouseRetireYear: number | null;
   /** Spouse's birth year; null = no spouse on the plan (hides Spouse Age). */
   spouseBirthYear: number | null;
+  /** The age a spouse with no record of her own starts the spousal benefit; null = none. */
+  spouseSsClaimAge: number | null;
+  /** The Social Security earnings record; null = Social Security as typed on its line. */
+  ssRecord: SsRecord | null;
   /** Pension + VA + Social Security per year. */
   guaranteedIncomeCents: number | null;
   /** First year that income arrives; null means it already does. */
@@ -256,7 +262,18 @@ export function FiSection({
   const colaWhen = { thisYear, birthYear: plan.birthYear };
   // A blank end means the line never stops — no end is guessed from a
   // retirement year (Victor, 2026-10-17).
-  const modelLines = plan.incomeLines;
+  // With an earnings record saved, Social Security is worked out from it,
+  // and a spouse without a record of her own gets the spousal benefit.
+  const modelLines = useMemo(
+    () =>
+      applySsRecord(plan.incomeLines, plan.ssRecord, {
+        birthYear: plan.birthYear,
+        spouseBirthYear: plan.spouseBirthYear,
+        spouseClaimAge: plan.spouseSsClaimAge,
+        thisYear,
+      }),
+    [plan.incomeLines, plan.ssRecord, plan.birthYear, plan.spouseBirthYear, plan.spouseSsClaimAge, thisYear],
+  );
   // Income is gross: taxes are budgeted as spending.
   const incomeIn = (year: number) =>
     incomeForYear(year, pension, plan.targetRetireYear, modelLines, 0, plan.cola, colaWhen);
@@ -478,7 +495,16 @@ export function FiSection({
       activeDuty,
       { deathYear, insurance: pension ? plan.insurance : null },
       // Social Security on his record for the spouse and children.
-      { spouseBirthYear: plan.spouseBirthYear, children: plan.children, remarryYear },
+      {
+        spouseBirthYear: plan.spouseBirthYear,
+        children: plan.children,
+        remarryYear,
+        // SSA's PIA for a death that year: only the years worked by then.
+        deathPia:
+          plan.ssRecord && plan.birthYear != null
+            ? (y: number) => recordDeathPia(plan.ssRecord!, plan.birthYear!, y, thisYear)
+            : null,
+      },
     );
   const survivor = useMemo(() => {
     if (!usingGrid || untilYear == null) return null;
@@ -839,6 +865,19 @@ export function FiSection({
                             VA DIC rates
                           </a>
                         </>
+                      ) : part.kind === "social_security" && part.name === survivorYear.parts.find((p) => p.kind === "social_security")?.name ? (
+                        <>
+                          {part.name}
+                          <a
+                            href="https://www.ssa.gov/survivor/amount"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block w-fit text-xs font-semibold underline underline-offset-2 sm:text-sm"
+                            style={{ color: "var(--viz-savings)" }}
+                          >
+                            SSA rates
+                          </a>
+                        </>
                       ) : (
                         part.name
                       )
@@ -926,8 +965,7 @@ export function FiSection({
                 {militaryLumps.map((l) => (
                   <ValueRow
                     key={l.name}
-                    label={l.name}
-                    note="once, tax-free"
+                    label={`${l.name} (lump sum)`}
                     value={`+${formatMoneyWhole(l.cents, currency)}`}
                     tone="text-positive"
                   />
@@ -1955,6 +1993,24 @@ function PlanModal({
       },
     ]);
   const money = (v: string) => Math.round(Number(v.replace(/[$,]/g, "")) * 100) || 0;
+
+  // With a Social Security record, the largest Social Security line is the
+  // record's: its PIA and amount are worked out at the start typed, not typed.
+  const recordKey = plan.ssRecord
+    ? lines
+        .filter((l) => l.kind === "social_security")
+        .reduce<LineDraft | null>((best, l) => {
+          const m = (x: LineDraft) => money(x.monthly) / (x.per === "yr" ? 12 : 1);
+          return best == null || m(l) > m(best) ? l : best;
+        }, null)?.key ?? null
+    : null;
+  const fromRecord = (l: LineDraft): { pia: number; monthly: number } | null => {
+    const by = Number(birthYear) || plan.birthYear;
+    if (!plan.ssRecord || l.key !== recordKey || !by) return null;
+    const startYear = Number(l.startYear) || by + 67;
+    const pia = recordRetirementPiaCents(plan.ssRecord, by, startYear, thisYear);
+    return { pia, monthly: benefitAtStartCents(pia, by, plan.ssRecord.birthMonth ?? 1, startYear, Number(l.startMonth) || 1) };
+  };
   // Year-one numbers for a draft, so the card says what it means as it's typed.
   const rentalPreview = (r: RentalDraft) => {
     const owned = !!r.propertyAccountId;
@@ -2095,14 +2151,15 @@ function PlanModal({
           // A cleared name falls back to the type's.
           name: l.name.trim() || DEFAULT_LINE_NAME[l.kind],
           kind: l.kind,
-          monthly: l.monthly,
+          // A record's line saves the amount worked out from it.
+          monthly: fromRecord(l) ? (fromRecord(l)!.monthly / 100).toFixed(2) : l.monthly,
           startYear: l.startYear,
           startMonth: l.startMonth,
           endYear: l.endYear,
           endMonth: l.endMonth,
           raisePct: l.raisePct,
-          piaCents: l.kind === "social_security" ? l.pia : "",
-          per: l.per,
+          piaCents: fromRecord(l) ? (fromRecord(l)!.pia / 100).toFixed(2) : l.kind === "social_security" ? l.pia : "",
+          per: fromRecord(l) ? "mo" : l.per,
           taxable: l.taxable,
         })),
       ),
@@ -2332,13 +2389,15 @@ function PlanModal({
                 <span className="flex gap-1">
                   <input
                     inputMode="decimal"
-                    value={l.monthly}
+                    value={fromRecord(l) ? (fromRecord(l)!.monthly / 100).toFixed(2) : l.monthly}
                     onChange={(e) => updateLine(l.key, { monthly: e.target.value })}
+                    readOnly={!!fromRecord(l)}
                     placeholder="0.00"
                     className={`${lineInput} text-center`}
                   />
                   <select
-                    value={l.per}
+                    value={fromRecord(l) ? "mo" : l.per}
+                    disabled={!!fromRecord(l)}
                     onChange={(e) => updateLine(l.key, { per: e.target.value as "mo" | "yr" })}
                     aria-label="Per month or per year"
                     className="w-[4.25rem] shrink-0 cursor-pointer rounded-md bg-surface px-1.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
@@ -2399,7 +2458,15 @@ function PlanModal({
               {/* The PIA drives the survivor benefits on this record: the
                   children's, the caregiver's and the widow(er)'s. Blank
                   shows the one worked out from the start age. */}
-              {l.kind === "social_security" ? (
+              {fromRecord(l) ? (
+                <p className="col-span-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:col-span-7">
+                  <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Full retirement benefit (PIA)</span>
+                  <span className="text-sm font-semibold tabular-nums" style={{ color: "var(--viz-income)" }}>
+                    {formatMoneyWhole(fromRecord(l)!.pia, currency)}/mo
+                  </span>
+                  <span className="text-xs text-foreground sm:text-sm">From your Social Security record.</span>
+                </p>
+              ) : l.kind === "social_security" ? (
                 <label className="col-span-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:col-span-7">
                   <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Full retirement benefit (PIA)</span>
                   <span className="flex items-center gap-1">
@@ -2450,6 +2517,26 @@ function PlanModal({
             ))}
           </select>
         </div>
+        </div>
+
+        {/* Social Security worked out from the SSA earnings record instead
+            of one typed amount (Victor, 2026-10-22). */}
+        <SectionHead
+          id="fi-ss"
+          title="Social Security record"
+          note="Your SSA earnings, year by year."
+          open={isOpen("ss")}
+          onToggle={() => toggleSection("ss")}
+        />
+        <div className={isOpen("ss") ? "contents" : "hidden"}>
+          <SsRecordSection
+            record={plan.ssRecord}
+            birthYear={Number(birthYear) || plan.birthYear}
+            spouseBirthYear={plan.spouseBirthYear}
+            spouseClaimAge={plan.spouseSsClaimAge}
+            thisYear={thisYear}
+            currency={currency}
+          />
         </div>
 
         <SectionHead title="Return, Withdrawal, & Inflation Rates" open={isOpen("rates")} onToggle={() => toggleSection("rates")} />
@@ -2722,9 +2809,7 @@ function PlanModal({
           label="SGLI coverage"
           hint={
             <>
-              {sgliCents > 0
-                ? `${formatMoney(Math.round(sgliCents / 20000) + 100, currency)}/mo from pay. Ends 120 days after you retire.`
-                : "Declined: no SGLI payout."}
+              {sgliCents > 0 ? null : "Declined: no SGLI payout."}
               <a
                 href="https://www.va.gov/life-insurance/options-eligibility/sgli/"
                 target="_blank"
@@ -2780,7 +2865,7 @@ function PlanModal({
         ) : null}
         <p className="rounded-md bg-background px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
           <span className="block">
-            <span className="font-semibold">Death gratuity:</span> $100,000 once, tax-free.
+            <span className="font-semibold">Death gratuity:</span> $100,000 lump sum, tax-free.
           </span>
           <span className="block">
             <span className="font-semibold">SBP:</span> 55% of 75% of High-3, automatic, no cost

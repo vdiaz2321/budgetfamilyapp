@@ -8,12 +8,15 @@
     "start": "next start",
     "lint": "eslint",
     "test:payoff": "node --test tests/snowball.test.mjs",
-    "test:groups": "node --test tests/account-groups.test.mjs"
+    "test:groups": "node --test tests/account-groups.test.mjs",
+    "test:ssa-statement": "node --test tests/ssa-statement.test.mjs",
+    "test:ssa": "node --test tests/ssa.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.0",
     "next": "16.2.10",
+    "pdfjs-dist": "6.4.299",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
