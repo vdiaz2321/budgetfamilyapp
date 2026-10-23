@@ -1,11 +1,15 @@
-// Social Security worked out from the earnings record, the way SSA does it
-// (Social Security Act §215, ssa.gov/oact/cola/piaformula.html). Checked
-// against Victor's 2026-10-22 statement to the dollar (tests/ssa.test.mjs).
+// Social Security from the SSA statement. His retirement benefit is the
+// statement's own monthly figure at the age he starts — imported, then typed
+// over by him each year he reviews a new statement. The figures are in
+// today's dollars, so the plan raises them by every COLA from this year
+// (lineColaBase in lib/retirement). Nothing here projects
+// future pay: a calculated "your plan" figure from planned earnings was
+// rejected as a guess (Victor, 2026-10-23).
 //
-// Everything is in "today's dollars", like the SSA statement: the wage index
-// is frozen at the latest one SSA's current bend points use (this year − 2),
-// so a future PIA comes out at today's wage level. Future earnings are typed
-// in their own year's dollars and shrunk back to today's at SS_WAGE_GROWTH.
+// The earnings record still drives one thing: the survivor PIA for a death
+// before 62, from the years actually worked by then (Social Security Act
+// §215, ssa.gov/oact/cola/piaformula.html), in "today's dollars" — the wage
+// index frozen at the latest one SSA's current bend points use.
 //
 // Only a type import, so Node's test runner loads it directly.
 //
@@ -56,9 +60,6 @@ const TAXABLE_MAX: Record<number, number> = (() => {
   });
 })();
 
-/** Wage growth a year, %, that shrinks a future year's earnings to today's
- *  dollars (SSA Trustees' intermediate wage assumption, about 3.5%). */
-export const SS_WAGE_GROWTH = 3.5;
 
 /** Full retirement age, born 1960 or later. */
 const FRA = 67;
@@ -104,13 +105,17 @@ export function parseSsEarnings(raw: unknown): SsEarningsRow[] {
 export function toSsRecord(row: { birth_month?: number | null; earnings?: unknown; statement?: unknown } | null | undefined): SsRecord | null {
   if (!row) return null;
   const earnings = parseSsEarnings(row.earnings);
-  if (earnings.length === 0) return null;
   const st = row.statement as SsStatementFigures | null | undefined;
-  return {
-    birthMonth: row.birth_month ?? null,
-    earnings,
-    statement: st && typeof st === "object" && typeof st.statementDate === "string" ? st : null,
-  };
+  const statement = st && typeof st === "object" && typeof st.statementDate === "string" ? st : null;
+  if (earnings.length === 0 && !statement) return null;
+  return { birthMonth: row.birth_month ?? null, earnings, statement };
+}
+
+/** The monthly retirement benefit the statement shows for a start at `age`
+ *  (held to 62–70), as imported or as he last typed it; null if it has none. */
+export function statementBenefitCents(rec: SsRecord | null, age: number): number | null {
+  const v = rec?.statement?.retirementByAge?.[String(Math.min(70, Math.max(62, age)))];
+  return typeof v === "number" && v > 0 ? v : null;
 }
 
 // ---- the formula --------------------------------------------------------
@@ -163,33 +168,12 @@ function computePia(earnings: Map<number, number>, eligYear: number, compYears: 
 /** The index the statement freezes at this year. */
 const freezeFor = (thisYear: number) => Math.min(LATEST_AWI_YEAR, thisYear - 2);
 
-/** The record in today's dollars: past years as posted, years after this one
- *  shrunk by wage growth. `flatFrom`/`flatCents` replace every year from then
- *  on (the statement's "keeps earning $X until he claims"). */
-function earningsMap(rec: SsRecord, thisYear: number, flat?: { from: number; dollars: number }): Map<number, number> {
-  const m = new Map<number, number>();
-  for (const r of rec.earnings) {
-    if (flat && r.year >= flat.from) continue;
-    const dollars = r.cents / 100;
-    m.set(r.year, r.year > thisYear ? dollars / Math.pow(1 + SS_WAGE_GROWTH / 100, r.year - thisYear) : dollars);
-  }
-  if (flat) for (let y = flat.from; y <= 2100; y++) m.set(y, flat.dollars);
-  return m;
+/** The record in dollars by year: the finished years as posted. */
+function earningsMap(rec: SsRecord): Map<number, number> {
+  return new Map(rec.earnings.map((r) => [r.year, r.cents / 100]));
 }
 
 const toCents = (dollars: number) => Math.round(dollars * 100);
-
-/**
- * The retirement PIA in today's dollars when benefits start in `claimYear`:
- * earnings through the year before it (later ones arrive by recomputation),
- * the top 35 years, eligibility at 62.
- */
-export function recordRetirementPiaCents(rec: SsRecord, birthYear: number, claimYear: number, thisYear: number): number {
-  const freeze = freezeFor(thisYear);
-  const elig = birthYear + 62;
-  const r = computePia(earningsMap(rec, thisYear), elig, 35, Math.max(elig - 1, claimYear - 1), freeze);
-  return toCents(r.pia);
-}
 
 /**
  * The PIA and family maximum survivors draw on for a death in `deathYear`
@@ -205,17 +189,8 @@ export function recordDeathPia(
 ): { piaCents: number; familyMaxCents: number } | null {
   if (deathYear >= birthYear + 62) return null;
   const elapsed = Math.max(0, deathYear - (birthYear + 22));
-  const r = computePia(earningsMap(rec, thisYear), deathYear, elapsed - 5, deathYear, freezeFor(thisYear));
+  const r = computePia(earningsMap(rec), deathYear, elapsed - 5, deathYear, freezeFor(thisYear));
   return { piaCents: toCents(r.pia), familyMaxCents: toCents(r.familyMax) };
-}
-
-/** Share of the PIA a worker gets starting `monthsFromFra` from full
- *  retirement age: 5/9% a month off for the first 36 early, 5/12% before
- *  that; 2/3% a month added after it, to 70. */
-export function workerFactor(monthsFromFra: number): number {
-  if (monthsFromFra >= 0) return 1 + (Math.min(monthsFromFra, (70 - FRA) * 12) * 2) / 300;
-  const m = -monthsFromFra;
-  return 1 - (Math.min(m, 36) * 5) / 900 - (Math.max(0, m - 36) * 5) / 1200;
 }
 
 /** A spouse's share of HALF the worker's PIA: 25/36% a month off for the
@@ -223,18 +198,6 @@ export function workerFactor(monthsFromFra: number): number {
 export function spousalFactor(monthsEarly: number): number {
   const m = Math.max(0, monthsEarly);
   return 1 - (Math.min(m, 36) * 25) / 3600 - (Math.max(0, m - 36) * 5) / 1200;
-}
-
-/** Months from full retirement age to a start in `startYear`/`startMonth`.
- *  At 62 the first month is the one after the birthday month. */
-function monthsFromFra(birthYear: number, birthMonth: number, startYear: number, startMonth: number): number {
-  const ageMonths = (startYear - birthYear) * 12 + (startMonth - birthMonth);
-  return Math.max(ageMonths, 62 * 12 + 1) - FRA * 12;
-}
-
-/** The monthly benefit starting in `startYear`/`startMonth`, rounded down to the dollar. */
-export function benefitAtStartCents(piaCents: number, birthYear: number, birthMonth: number, startYear: number, startMonth: number): number {
-  return Math.floor((piaCents / 100) * workerFactor(monthsFromFra(birthYear, birthMonth, startYear, startMonth)) + 1e-7) * 100;
 }
 
 /** What the plan needs to put a record to work. */
@@ -254,38 +217,37 @@ export function recordLine(lines: IncomeLine[]): IncomeLine | null {
 }
 
 /**
- * The income lines with the record put to work:
- * - his Social Security line's PIA and amount come from the record at the
- *   start it already has (a full-retirement-age line is added if none);
- * - with a spouse claim age, a spousal line: half his PIA, cut for each
+ * The income lines with the statement put to work:
+ * - his Social Security line's amount is the statement's figure at the age
+ *   it starts (a full-retirement-age line is added if none), its PIA the
+ *   statement's age-67 figure;
+ * - with a spouse claim age, a spousal line: half that PIA, cut for each
  *   month she starts before 67, from that age or his start, whichever is later.
+ * No figure for his start age: the typed line stands.
  */
 export function applySsRecord(lines: IncomeLine[], rec: SsRecord | null, plan: SsRecordPlan): IncomeLine[] {
-  if (!rec || plan.birthYear == null || rec.earnings.length === 0) return lines;
+  if (!rec || plan.birthYear == null) return lines;
   const birthYear = plan.birthYear;
   const birthMonth = rec.birthMonth ?? 1;
   const own = recordLine(lines);
+  const startYear = own?.startYear ?? birthYear + FRA;
+  const startMonth = own?.startMonth ?? (own ? 1 : birthMonth);
+  const monthlyCents = statementBenefitCents(rec, startYear - birthYear);
+  if (monthlyCents == null) return lines;
+  const piaCents = statementBenefitCents(rec, FRA);
   const line: IncomeLine = own ?? {
     id: "ss-record",
     name: "Social Security",
     kind: "social_security",
     monthlyCents: 0,
-    startYear: birthYear + FRA,
-    startMonth: birthMonth,
+    startYear,
+    startMonth,
     endYear: null,
     taxable: true,
   };
-  const startYear = line.startYear ?? plan.thisYear;
-  const startMonth = line.startMonth ?? 1;
-  const piaCents = recordRetirementPiaCents(rec, birthYear, startYear, plan.thisYear);
-  const worked: IncomeLine = {
-    ...line,
-    piaCents,
-    monthlyCents: benefitAtStartCents(piaCents, birthYear, birthMonth, startYear, startMonth),
-    fromRecord: true,
-  };
+  const worked: IncomeLine = { ...line, monthlyCents, ...(piaCents != null ? { piaCents } : {}), fromRecord: true };
   const out = own ? lines.map((l) => (l === own ? worked : l)) : [...lines, worked];
-  if (plan.spouseClaimAge != null && plan.spouseBirthYear != null) {
+  if (piaCents != null && plan.spouseClaimAge != null && plan.spouseBirthYear != null) {
     const herAgeYear = plan.spouseBirthYear + plan.spouseClaimAge;
     const spStart = Math.max(herAgeYear, startYear);
     const spMonth = spStart === startYear ? startMonth : 1;
@@ -300,41 +262,10 @@ export function applySsRecord(lines: IncomeLine[], rec: SsRecord | null, plan: S
       endYear: null,
       taxable: line.taxable,
       spousal: true,
+      // Half a today's-dollars figure: its COLAs count from this year too.
+      fromRecord: true,
     });
   }
   return out;
 }
 
-/**
- * The calculator run on the statement's own assumptions — earnings at the
- * statement's figure every year from its year on, the wage index of its date
- * — to show it lands on the statement's numbers.
- */
-export function statementCheck(rec: SsRecord, birthYear: number) {
-  const s = rec.statement;
-  if (!s || s.assumedEarningsCents == null) return null;
-  const year = Number(s.statementDate.slice(0, 4));
-  const flat = { from: year, dollars: s.assumedEarningsCents / 100 };
-  const freeze = freezeFor(year);
-  const map = earningsMap(rec, year, flat);
-  const birthMonth = rec.birthMonth ?? 1;
-  const retire: Record<string, number> = {};
-  for (let age = 62; age <= 70; age++) {
-    const start = age === 62 ? (birthMonth === 12 ? [birthYear + 63, 1] : [birthYear + 62, birthMonth + 1]) : [birthYear + age, birthMonth];
-    const pia = computePia(map, birthYear + 62, 35, start[0] - 1, freeze).pia;
-    // A start after full retirement age is credited the next January, as the statement shows.
-    const credited = age > FRA && age < 70 ? (age - FRA - 1) * 12 + (13 - birthMonth) : null;
-    const f = credited != null ? workerFactor(credited) : workerFactor(monthsFromFra(birthYear, birthMonth, start[0], start[1]));
-    retire[age] = Math.floor(pia * f + 1e-7) * 100;
-  }
-  const elapsed = Math.max(0, year - (birthYear + 22));
-  const d = computePia(map, year, elapsed - 5, year, freeze);
-  return {
-    retirementByAge: retire,
-    survivors: {
-      childCents: Math.floor(d.pia * 0.75 + 1e-7) * 100,
-      spouseAtFraCents: Math.floor(d.pia + 1e-7) * 100,
-      familyMaxCents: Math.floor(d.familyMax + 1e-7) * 100,
-    },
-  };
-}

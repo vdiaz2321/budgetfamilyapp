@@ -4,7 +4,7 @@ import { EXPENSE_CATEGORIES } from "../travel/types";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
-// The Trip, Pays for, Points / Free night and Hotel credit columns on the
+// The Travel column (trip, pays for, points / free night, hotel credit) on the
 // desktop register. Points, the free night and hotel credit live on the
 // booking, not the payment, so every payment toward a booking shows the
 // booking's figures — the same ones its Travel Log row shows.

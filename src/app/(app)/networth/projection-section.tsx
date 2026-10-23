@@ -232,11 +232,12 @@ export function ProjectionSection({
 
   const current = years.find((y) => y.year === thisYear) ?? null;
 
-  // Today's money: each future year's NET WORTH shrunk by inflation back to
-  // this year, so 2071's figure reads as what it buys now (Victor,
-  // 2026-10-16). Income, spending and gains stay the dollars actually paid —
-  // retired pay reads $95,640, what the High-3 pays, not a shrunk figure.
-  // This year and earlier are already today's money.
+  // Today's money: each future year's figures shrunk by inflation back to
+  // this year, so 2071 reads as what it buys now. Net worth since
+  // 2026-10-16; income, spending, saved, contributed, withdrawn and gains
+  // too since 2026-10-23 (Victor: "I don't want future dollars"). Not
+  // Today's Money shows the dollars actually paid. This year and earlier
+  // are already today's money.
   const inToday = (year: number, cents: number) =>
     Math.round(cents / Math.pow(1 + inflationPct / 100, Math.max(0, year - thisYear)));
   const shown = (year: number, cents: number) => (todays ? inToday(year, cents) : cents);
@@ -541,7 +542,7 @@ export function ProjectionSection({
                       ) : null}
                       {/* Plan on top, what actually happened underneath. */}
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
-                        {formatMoneyWhole(y.incomeCents, currency)}
+                        {m(y.year, y.incomeCents, currency)}
                         {/* Before military retirement: the other income on top
                             of the typed pay. Income is gross — taxes are
                             budgeted as spending. */}
@@ -551,16 +552,16 @@ export function ProjectionSection({
                         y.incomeCents !== y.workIncomeCents &&
                         y.year === thisYear ? (
                           <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
-                            incl. {formatMoneyWhole(y.incomeCents - y.workIncomeCents, currency)} other
+                            incl. {m(y.year, y.incomeCents - y.workIncomeCents, currency)} other
                           </span>
                         ) : null}
                         <Actual cents={y.actualIncomeCents} currency={currency} row={y} thisYear={thisYear} />
                       </td>
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums text-negative">
-                        {formatMoneyWhole(y.spendingCents, currency)}
+                        {m(y.year, y.spendingCents, currency)}
                         {y.spendingCents - y.baseSpendingCents + y.debtFreedCents - y.withdrawalTaxCents > 0 ? (
                           <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
-                            incl. {formatMoneyWhole(y.spendingCents - y.baseSpendingCents + y.debtFreedCents - y.withdrawalTaxCents, currency)} health
+                            incl. {m(y.year, y.spendingCents - y.baseSpendingCents + y.debtFreedCents - y.withdrawalTaxCents, currency)} health
                           </span>
                         ) : null}
                         {/* Withdrawal tax stays in the figure; no "incl. … tax" line under it. */}
@@ -576,10 +577,7 @@ export function ProjectionSection({
                           className={y.incomeCents - y.spendingCents < 0 ? "text-negative" : undefined}
                           style={y.incomeCents - y.spendingCents < 0 ? undefined : { color: "var(--viz-savings)" }}
                         >
-                          {formatMoneyWhole(
-                            y.incomeCents - y.spendingCents,
-                            currency,
-                          )}
+                          {m(y.year, y.incomeCents - y.spendingCents, currency)}
                         </span>
                         {/* Logged income less logged spending — the same sum
                             as the column, so plan and actual compare like for
@@ -604,7 +602,7 @@ export function ProjectionSection({
                           <span className="text-foreground">—</span>
                         ) : (
                           <span className="text-foreground">
-                            {formatMoneyWhole((y.contributedCents ?? y.plannedAddCents)!, currency)}
+                            {m(y.year, (y.contributedCents ?? y.plannedAddCents)!, currency)}
                           </span>
                         )}
                         <Actual cents={y.actualInvestedCents} currency={currency} row={y} thisYear={thisYear} always />
@@ -614,7 +612,7 @@ export function ProjectionSection({
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {y.withdrawnCents ? (
                           <span style={{ color: "var(--viz-spending)" }}>
-                            {formatMoneyWhole(y.withdrawnCents, currency)}
+                            {m(y.year, y.withdrawnCents, currency)}
                           </span>
                         ) : (
                           <span className="text-foreground">—</span>
@@ -625,7 +623,7 @@ export function ProjectionSection({
                           measure so the running year isn't blank. */}
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         <span className={y.growthCents < 0 ? "text-negative" : "text-positive"}>
-                          {formatMoneyWhole(y.growthCents, currency)}
+                          {m(y.year, y.growthCents, currency)}
                         </span>
                         <Actual
                           cents={y.actualGainsCents ?? y.runningGainsCents}

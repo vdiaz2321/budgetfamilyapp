@@ -185,19 +185,13 @@ test("a Pay line stops at its end month; none means no income", async () => {
   assert.equal(incomeForYear(2034, null, null, [], 0).afterTaxCents, 0);
 });
 
-test("blank Pay end follows military retirement, else withdrawals start", async () => {
-  const { incomeForYear, payStop, withPayEnds } = await import("../src/lib/retirement.ts");
+// payStop/withPayEnds were removed on 2026-10-17: a blank end now means the
+// line never stops — no end is guessed from a retirement year.
+test("a blank Pay end never stops the line", async () => {
+  const { incomeForYear } = await import("../src/lib/retirement.ts");
   const pay = { id: "p", name: "Pay", kind: "pay", monthlyCents: 1_000_000, startYear: null, startMonth: null, endYear: null, endMonth: null, taxable: true };
-  assert.deepEqual(payStop(2033, 11, null), { endYear: 2033, endMonth: 10, why: "military" });
-  assert.deepEqual(payStop(2030, null, 2040), { endYear: 2029, endMonth: 12, why: "military" });
-  assert.deepEqual(payStop(null, null, 2034), { endYear: 2033, endMonth: 12, why: "withdrawals" });
-  assert.equal(payStop(null, null, null), null);
-  const lines = withPayEnds([pay], payStop(2033, 11, null));
-  assert.equal(incomeForYear(2033, null, null, lines, 0).afterTaxCents, 10_000_000);
-  assert.equal(incomeForYear(2034, null, null, lines, 0).afterTaxCents, 0);
-  // A typed end wins over the retirement date.
-  const typed = withPayEnds([{ ...pay, endYear: 2030, endMonth: 6 }], payStop(2033, 11, null));
-  assert.equal(typed[0].endYear, 2030);
+  assert.equal(incomeForYear(2034, null, 2033, [pay], 0).afterTaxCents, 12_000_000);
+  assert.equal(incomeForYear(2060, null, 2033, [pay], 0).afterTaxCents, 12_000_000);
 });
 
 test("Pay rises by its raise each January after this year", async () => {

@@ -43,13 +43,15 @@ const kindPillStyle = (kind: CategoryKind): React.CSSProperties => ({
 // needs 35px and 40px at 11px uppercase + tracking-wide. At 2rem (32px) that
 // label painted out of its own track and into the Amount column beside it.
 // lg: wider date/amount columns for the larger desktop text (rows are 18px there).
-// The four before the delete button are the travel columns (Trip, Pays for,
-// Points / Free night, Hotel credit). The lg minimums add up to the table's
-// min-width below, sized so all twelve fit beside the open sidebar on a
-// ~1470px screen; narrower scrolls sideways instead of squeezing. Wider
-// screens hand the extra room to the fr columns.
-const GRID ="gap-x-2 grid-cols-[5rem_3.25rem_6.5rem_5.75rem_minmax(7rem,1.2fr)_minmax(6rem,1fr)_minmax(6rem,1fr)_minmax(6rem,1fr)_minmax(7rem,1.3fr)_5.5rem_5rem_1.5rem] lg:gap-x-1.5 lg:grid-cols-[5.25rem_3.25rem_7rem_5.75rem_minmax(7rem,1.2fr)_minmax(6rem,1fr)_minmax(5.75rem,0.9fr)_minmax(5.75rem,1fr)_minmax(7rem,1.3fr)_5rem_4.75rem_1.5rem]";
-const TABLE_MIN_W = "min-w-[72rem] lg:min-w-[70.25rem]";
+// The one before the delete button is Travel: trip, what it pays for, and
+// the booking's points / free night / hotel credit in a single cell. It was
+// four columns, but most rows aren't travel, so they sat blank and squeezed
+// Category, Payee and Account into "Hannah's…" / "1175 Sapph…". The minimums
+// add up to the table's min-width below (tracks + gaps + px-4); narrower
+// scrolls sideways instead of squeezing. Wider screens hand the extra room
+// to the fr columns.
+const GRID ="gap-x-2 grid-cols-[5rem_3.25rem_6.5rem_5.75rem_minmax(8rem,1.3fr)_minmax(7rem,1.1fr)_minmax(6.5rem,1fr)_minmax(9rem,1.6fr)_1.5rem] lg:gap-x-1.5 lg:grid-cols-[5.25rem_3.25rem_7rem_5.75rem_minmax(8rem,1.3fr)_minmax(7rem,1.1fr)_minmax(6.5rem,1fr)_minmax(9rem,1.6fr)_1.5rem]";
+const TABLE_MIN_W = "min-w-[58.5rem] lg:min-w-[58.25rem]";
 
 // The columns the header can filter on, Excel-style.
 type ColKey = "type" | "category" | "payee" | "account" | "trip" | "paysFor" | "points" | "hotelCredit";
@@ -711,19 +713,16 @@ export function TransactionsTable({
               {headerFilter("category", "Category")}
               {headerFilter("payee", "Payee")}
               {headerFilter("account", "Account")}
-              {headerFilter("trip", "Trip")}
-              {headerFilter("paysFor", "Pays for")}
-              {headerFilter("points", "Points /\nFree night")}
-              {headerFilter("hotelCredit", "Hotel\ncredit")}
+              {headerFilter("trip", "Travel /\nRemarks")}
               <span />
               {/* Column dividers, header row only. An overlay on the same
                   grid puts each line mid-gap between two headers; a border
                   on the headers themselves would hug their text. */}
               <div aria-hidden className={`pointer-events-none absolute inset-0 grid ${GRID} px-4`}>
-                {Array.from({ length: 12 }, (_, i) => (
+                {Array.from({ length: 9 }, (_, i) => (
                   <span
                     key={i}
-                    className={i >= 1 && i <= 10 ? "relative before:absolute before:inset-y-0 before:-left-1 before:w-px before:bg-line lg:before:-left-[3.5px]" : ""}
+                    className={i >= 1 && i <= 7 ? "relative before:absolute before:inset-y-0 before:-left-1 before:w-px before:bg-line lg:before:-left-[3.5px]" : ""}
                   />
                 ))}
               </div>
@@ -1070,18 +1069,40 @@ function TxLine({
         {tx.payee ?? "—"}
       </button>
       <span className="truncate text-xs text-muted lg:text-sm">{accountName}</span>
-      {/* Travel columns — blank on a purchase not tagged to a trip, so the
-          travel rows stand out down the register. */}
-      <span className="truncate text-sm font-medium lg:text-base">{travel?.trip ?? ""}</span>
-      <span className={`truncate text-xs lg:text-sm ${travel?.paysFor === "Day-to-day spending" ? "text-muted" : "text-foreground"}`}>
-        {travel?.paysFor ?? ""}
-      </span>
-      <span className="flex min-w-0 flex-col items-center text-center text-sm font-semibold leading-tight tabular-nums">
-        {travel?.points ? <span style={{ color: "var(--viz-savings)" }}>{travel.points.toLocaleString("en-US")}</span> : null}
-        {travel?.freeNight ? <span className="text-xs" style={{ color: "var(--viz-bills)" }}>Free night</span> : null}
-      </span>
-      <span className="text-center text-sm font-semibold tabular-nums" style={{ color: "var(--viz-bills)" }}>
-        {travel?.hotelCreditCents ? formatMoney(travel.hotelCreditCents, currency) : ""}
+      {/* Travel / Remarks — one line: the trip, what it pays for, the
+          booking's points / free night / hotel credit, then the remark (the
+          transaction's note). Blank when a row has neither. The pays-for
+          text and the remark truncate first when the line runs long; the
+          trip name only once it alone is wider than the column. */}
+      <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden whitespace-nowrap">
+        {travel?.trip ? <span className="max-w-full shrink-0 truncate text-sm font-medium lg:text-base">{travel.trip}</span> : null}
+        {travel?.paysFor ? (
+          // "Spending · Groceries" → "Groceries": beside the trip name the
+          // prefix only costs room; a booking keeps "Stay · …" / "Flight · …".
+          <span className="min-w-0 truncate text-xs lg:text-sm">
+            {travel.trip ? "· " : ""}
+            {travel.paysFor.replace(/^Spending · /, "")}
+          </span>
+        ) : null}
+        {travel?.points ? (
+          <span className="shrink-0 text-xs font-semibold tabular-nums lg:text-sm" style={{ color: "var(--viz-savings)" }}>
+            {travel.points.toLocaleString("en-US")} pts
+          </span>
+        ) : null}
+        {travel?.freeNight ? (
+          <span className="shrink-0 text-xs font-semibold lg:text-sm" style={{ color: "var(--viz-bills)" }}>Free night</span>
+        ) : null}
+        {travel?.hotelCreditCents ? (
+          <span className="shrink-0 text-xs font-semibold tabular-nums lg:text-sm" style={{ color: "var(--viz-bills)" }}>
+            {formatMoney(travel.hotelCreditCents, currency)} credit
+          </span>
+        ) : null}
+        {tx.memo?.trim() ? (
+          <span className={`min-w-0 truncate ${travel ? "text-xs lg:text-sm" : "text-sm lg:text-base"}`}>
+            {travel ? "· " : ""}
+            {tx.memo.trim()}
+          </span>
+        ) : null}
       </span>
       <form
         action={(fd) => startDel(async () => { await deleteTransaction(fd); })}

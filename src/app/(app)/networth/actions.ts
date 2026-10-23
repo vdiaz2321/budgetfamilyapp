@@ -1953,7 +1953,9 @@ async function ssSaved(supabase: SupabaseClient, householdId: string) {
 }
 
 /** Saves a read statement: its earnings replace the record, and its figures
- *  are kept to compare against. Years after the statement typed earlier stay. */
+ *  are kept to compare against. Finished years typed after the statement's
+ *  last one stay; nothing for this year or later — no planned pay (Victor,
+ *  2026-10-23). */
 export async function importSsStatement(input: {
   birthMonth: number | null;
   statement: SsStatementFigures;
@@ -1967,7 +1969,8 @@ export async function importSsStatement(input: {
   const { data: prior, error: readErr } = await ssRow(supabase, householdId);
   if (readErr) return { error: `Couldn't read the record — ${readErr.message}` };
   const lastPosted = earnings.at(-1)!.year;
-  const planned = parseSsEarnings(prior?.earnings).filter((r) => r.year > lastPosted);
+  const thisYear = new Date().getFullYear();
+  const typedSince = parseSsEarnings(prior?.earnings).filter((r) => r.year > lastPosted && r.year < thisYear);
   const bm = input.birthMonth;
   const { error } = await supabase.from("social_security_records").upsert(
     {
@@ -1976,7 +1979,7 @@ export async function importSsStatement(input: {
       birth_month: bm != null && Number.isInteger(bm) && bm >= 1 && bm <= 12 ? bm : null,
       statement_date: st.statementDate,
       statement: st,
-      earnings: [...earnings, ...planned],
+      earnings: [...earnings, ...typedSince],
       updated_at: new Date().toISOString(),
     },
     { onConflict: "household_id,person" },
@@ -1985,12 +1988,14 @@ export async function importSsStatement(input: {
   return ssSaved(supabase, householdId);
 }
 
-/** Adds or replaces one year of earnings, typed by hand. */
+/** Adds or replaces one finished year of earnings, typed by hand — not this
+ *  year or later: the record holds what SSA posts, never planned pay. */
 export async function saveSsYear(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const year = Number(String(formData.get("year") ?? "").trim());
   const raw = String(formData.get("earnings") ?? "").trim();
   if (!Number.isInteger(year) || year < 1937 || year > 2100) return { error: "Enter a four-digit year." };
+  if (year >= new Date().getFullYear()) return { error: "Add a year once it's over and SSA has posted it." };
   if (!raw) return { error: "Enter the earnings for that year." };
   const cents = Math.max(0, displayToCents(raw));
   const { data: prior, error: readErr } = await ssRow(supabase, householdId);
@@ -2001,6 +2006,44 @@ export async function saveSsYear(formData: FormData) {
     { onConflict: "household_id,person" },
   );
   if (error) return { error: `Couldn't save that year — ${error.message}` };
+  return ssSaved(supabase, householdId);
+}
+
+/** The statement's monthly benefit at 62, 67 and 70, typed over by him when
+ *  he reviews a new statement (Victor, 2026-10-23). Blank keeps a figure;
+ *  the other ages the import read stay as they were. */
+export async function saveSsBenefits(input: Record<string, string>) {
+  const { supabase, householdId } = await requireHousehold();
+  const figures: Record<string, number> = {};
+  for (const age of ["62", "67", "70"]) {
+    const raw = String(input[age] ?? "").trim();
+    if (!raw) continue;
+    const cents = displayToCents(raw);
+    if (!(cents > 0)) return { error: `Enter the monthly benefit at ${age} as a dollar amount.` };
+    figures[age] = cents;
+  }
+  const { data: prior, error: readErr } = await supabase
+    .from("social_security_records")
+    .select("statement")
+    .eq("household_id", householdId)
+    .eq("person", "self")
+    .maybeSingle();
+  if (readErr) return { error: `Couldn't read the record — ${readErr.message}` };
+  if (!prior) return { error: "Import your SSA statement first." };
+  const st = (prior.statement as SsStatementFigures | null) ?? {
+    statementDate: new Date().toISOString().slice(0, 10),
+    retirementByAge: {},
+    disabilityCents: null,
+    survivors: null,
+    assumedEarningsCents: null,
+  };
+  const statement: SsStatementFigures = { ...st, retirementByAge: { ...st.retirementByAge, ...figures } };
+  const { error } = await supabase
+    .from("social_security_records")
+    .update({ statement, updated_at: new Date().toISOString() })
+    .eq("household_id", householdId)
+    .eq("person", "self");
+  if (error) return { error: `Couldn't save the benefits — ${error.message}` };
   return ssSaved(supabase, householdId);
 }
 

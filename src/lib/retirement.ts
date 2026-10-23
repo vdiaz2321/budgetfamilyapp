@@ -425,7 +425,8 @@ export type IncomeLine = {
    *  in the same money as `monthlyCents`. Null: worked out from the start age. */
   piaCents?: number | null;
   taxable: boolean;
-  /** Social Security worked out from the earnings record (lib/ssa), not typed. */
+  /** Social Security from the SSA statement (lib/ssa), not typed: its
+   *  amount is in today's dollars, so its COLAs count from this year. */
   fromRecord?: boolean;
   /** A spouse's spousal benefit on the worker's record: it ends at his death. */
   spousal?: boolean;
@@ -637,14 +638,19 @@ export type ColaWhen = { thisYear: number; birthYear: number | null };
  * before this year counts.
  * - VA disability: from the year it starts — a future VA line is typed at the
  *   rate it starts on.
- * - Social Security: from the year it starts, so the first raise is the
- *   January after — the amount is typed as the start-year payment. Victor
- *   dropped the age-62 rule on 2026-10-17: no COLA in the start year.
+ * - Social Security typed by hand: from the year it starts, so the first
+ *   raise is the January after — the amount is typed as the start-year
+ *   payment. Victor dropped the age-62 rule on 2026-10-17: no COLA in the
+ *   start year.
+ * - Social Security from the SSA statement (fromRecord): from this year. The
+ *   statement's figures are in today's dollars, so they rise with every COLA
+ *   from now on — treating them as start-year dollars showed $3,126 as about
+ *   $1,816 in Today's Money (Victor, 2026-10-23).
  */
 export function lineColaBase(line: IncomeLine, cola: ColaPlan, when: ColaWhen): number | null {
   const start = line.startYear ?? when.thisYear;
   if (line.kind === "va") return cola.va ? Math.max(when.thisYear, start) : null;
-  if (line.kind === "social_security" && cola.socialSecurity) return Math.max(when.thisYear, start);
+  if (line.kind === "social_security" && cola.socialSecurity) return line.fromRecord ? when.thisYear : Math.max(when.thisYear, start);
   return null;
 }
 

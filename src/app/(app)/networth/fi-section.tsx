@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { usePersistentCollapse, useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, formatMoney, formatMoneyWhole } from "@/lib/money";
@@ -57,7 +56,7 @@ import {
 } from "@/lib/account-groups";
 import type { GroupInputs } from "@/lib/account-groups-load";
 import { PctBox } from "@/components/pct-box";
-import { applySsRecord, benefitAtStartCents, recordDeathPia, recordRetirementPiaCents, type SsRecord } from "@/lib/ssa";
+import { applySsRecord, recordDeathPia, statementBenefitCents, type SsRecord } from "@/lib/ssa";
 import { SsRecordSection } from "./ss-record";
 
 export type FiPlan = {
@@ -573,8 +572,8 @@ export function FiSection({
     (_, i) => firstFullRetiredYear + i,
   );
 
-  // The chart's net worth in the chosen money; income, spending and gains
-  // stay the dollars actually paid, like the table.
+  // The chart in the chosen money — net worth, and income and spending for
+  // its Income & spending bars and year readout — like the table.
   const fiShown = {
     ...fi,
     years: fi.years.map((y) => ({
@@ -588,6 +587,8 @@ export function FiSection({
     ...p,
     eoyCents: sh(p.year, p.eoyCents),
     actualCents: p.actualCents == null ? p.actualCents : sh(p.year, p.actualCents),
+    incomeCents: sh(p.year, p.incomeCents),
+    spendingCents: sh(p.year, p.spendingCents),
   }));
 
   // The button that opens the rates that rebuild the table, above it.
@@ -1547,7 +1548,6 @@ function PctInput({
   label: string;
   save: (pct: number) => Promise<{ error?: string; ok?: boolean }>;
 }) {
-  const router = useRouter();
   const [draft, setDraft] = useState(String(pct));
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -1564,8 +1564,10 @@ function PctInput({
         setError(result.error ?? "Couldn't save the rate.");
         setDraft(String(pct));
       } else {
+        // No router.refresh(): the action's revalidatePath already sends the
+        // re-rendered page back with its response (Next's single-roundtrip
+        // model); a refresh fetched it a second time.
         setError(null);
-        router.refresh();
       }
     });
   };
@@ -1728,7 +1730,6 @@ function PlanModal({
   suggestPayCents?: number | null;
   onClose: () => void;
 }) {
-  const router = useRouter();
   const focusSbp = focus === "sbp";
   useEffect(() => {
     if (focus === "sbp") {
@@ -1995,7 +1996,8 @@ function PlanModal({
   const money = (v: string) => Math.round(Number(v.replace(/[$,]/g, "")) * 100) || 0;
 
   // With a Social Security record, the largest Social Security line is the
-  // record's: its PIA and amount are worked out at the start typed, not typed.
+  // record's: its amount is the statement's figure at the age it starts, its
+  // PIA the age-67 figure — read off the statement, not worked out.
   const recordKey = plan.ssRecord
     ? lines
         .filter((l) => l.kind === "social_security")
@@ -2008,8 +2010,9 @@ function PlanModal({
     const by = Number(birthYear) || plan.birthYear;
     if (!plan.ssRecord || l.key !== recordKey || !by) return null;
     const startYear = Number(l.startYear) || by + 67;
-    const pia = recordRetirementPiaCents(plan.ssRecord, by, startYear, thisYear);
-    return { pia, monthly: benefitAtStartCents(pia, by, plan.ssRecord.birthMonth ?? 1, startYear, Number(l.startMonth) || 1) };
+    const monthly = statementBenefitCents(plan.ssRecord, startYear - by);
+    if (monthly == null) return null;
+    return { pia: statementBenefitCents(plan.ssRecord, 67) ?? monthly, monthly };
   };
   // Year-one numbers for a draft, so the card says what it means as it's typed.
   const rentalPreview = (r: RentalDraft) => {
@@ -2049,7 +2052,7 @@ function PlanModal({
   const colaAll = { pct: 0, byYear: {}, military: true, va: true, socialSecurity: true };
   const firstColaOf = (l: LineDraft) => {
     const base = lineColaBase(
-      { id: l.key, name: l.name, kind: l.kind, monthlyCents: 1, startYear: toYear(l.startYear), startMonth: null, endYear: null, taxable: false },
+      { id: l.key, name: l.name, kind: l.kind, monthlyCents: 1, startYear: toYear(l.startYear), startMonth: null, endYear: null, taxable: false, fromRecord: !!fromRecord(l) },
       colaAll,
       colaWhen,
     );
@@ -2194,7 +2197,8 @@ function PlanModal({
       if (result?.error) setError(result.error);
       else {
         setError(null);
-        router.refresh();
+        // No router.refresh(): saveRetirementPlan's revalidatePath already
+        // returns the re-rendered page — the refresh was a second ~2s load.
         setJustSaved(true);
         window.setTimeout(() => setJustSaved(false), 2000);
       }
@@ -2473,11 +2477,13 @@ function PlanModal({
                   shows the one worked out from the start age. */}
               {fromRecord(l) ? (
                 <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-                  <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Full retirement benefit (PIA)</span>
+                  {/* Says what it's for: it read as if it should follow the
+                      start year, which only moves the amount (Victor, 2026-10-23). */}
+                  <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Full benefit at 67 (PIA)</span>
                   <span className="text-sm font-semibold tabular-nums" style={{ color: "var(--viz-income)" }}>
                     {formatMoneyWhole(fromRecord(l)!.pia, currency)}/mo
                   </span>
-                  <span className="text-xs text-foreground sm:text-sm">From your Social Security record.</span>
+                  <span className="text-xs text-foreground sm:text-sm">— used for spousal and survivor benefits</span>
                 </p>
               ) : l.kind === "social_security" ? (
                 <label className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
@@ -2504,8 +2510,14 @@ function PlanModal({
                   <span className="text-xs text-foreground sm:text-sm">Blank: worked out from the start age.</span>
                 </label>
               ) : null}
-              {/* A year's worth. */}
-              {money(l.monthly) > 0 ? (
+              {/* A year's worth. A record line's amount is the record's, not
+                  the draft typed before it — the draft left this at an old
+                  $3,126/mo while the box showed $2,741 (Victor, 2026-10-23). */}
+              {fromRecord(l) ? (
+                <p className="text-center text-xs sm:text-sm text-foreground">
+                  {`Estimated Yearly Income: ${formatMoneyWhole(fromRecord(l)!.monthly * 12, currency)}`}
+                </p>
+              ) : money(l.monthly) > 0 ? (
                 <p className="text-center text-xs sm:text-sm text-foreground">
                   {/* The same amount the other way round. */}
                   {l.per === "yr"
@@ -2548,6 +2560,7 @@ function PlanModal({
             spouseBirthYear={plan.spouseBirthYear}
             spouseClaimAge={plan.spouseSsClaimAge}
             thisYear={thisYear}
+            startYear={toYear(lines.find((l) => l.key === recordKey)?.startYear ?? "")}
             currency={currency}
           />
         </div>
@@ -3258,6 +3271,7 @@ function PlanModal({
               ? {
                   colaFrom: colaStarts.socialSecurity,
                   paidFrom: toYear(ssLineDraft.startYear)!,
+                  fromStatement: !!fromRecord(ssLineDraft),
                 }
               : null
           }
@@ -3414,7 +3428,7 @@ function ColaWhy({
 }: {
   retire: { year: number; month: number } | null;
   /** Social Security's first raise and first payment. */
-  ss: { colaFrom: number; paidFrom: number } | null;
+  ss: { colaFrom: number; paidFrom: number; fromStatement: boolean } | null;
   onClose: () => void;
 }) {
   const share = retire ? firstColaShare(retire.month) : 0;
@@ -3450,8 +3464,10 @@ function ColaWhy({
         ) : null}
         {ss ? (
           <p>
-            <span className="font-semibold">Social Security from {ss.colaFrom}:</span> payments start in {ss.paidFrom},
-            so the first raise is January {ss.colaFrom}.
+            <span className="font-semibold">Social Security from {ss.colaFrom}:</span>{" "}
+            {ss.fromStatement
+              ? `your SSA statement is in today's dollars, so it rises with every COLA from now; payments start in ${ss.paidFrom}.`
+              : `payments start in ${ss.paidFrom}, so the first raise is January ${ss.colaFrom}.`}
           </p>
         ) : null}
       </div>

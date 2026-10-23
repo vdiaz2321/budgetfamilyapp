@@ -8,27 +8,15 @@
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { ModalShell } from "@/components/modal-shell";
 import { displayToCents, formatMoneyWhole } from "@/lib/money";
-import {
-  benefitAtStartCents,
-  recordRetirementPiaCents,
-  spousalFactor,
-  statementCheck,
-  type SsRecord,
-  type SsStatementFigures,
-} from "@/lib/ssa";
+import { spousalFactor, statementBenefitCents, type SsRecord, type SsStatementFigures } from "@/lib/ssa";
+import { ssFamilyMaxCents } from "@/lib/retirement";
 import { earningsByYear, parseSsaStatementText, type SsStatement } from "@/lib/ssa-statement";
-import { clearSsRecord, deleteSsYear, importSsStatement, saveSsYear } from "./actions";
+import { clearSsRecord, deleteSsYear, importSsStatement, saveSsBenefits, saveSsYear } from "./actions";
 
 const box = "rounded-md bg-surface px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 const label = "block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground";
 const chip = "rounded-md px-3 py-1.5 text-sm font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/** The first month a claim at `age` can be paid: at 62, the month after the birthday. */
-function claimStart(birthYear: number, birthMonth: number, age: number): [number, number] {
-  if (age !== 62) return [birthYear + age, birthMonth];
-  return birthMonth === 12 ? [birthYear + 63, 1] : [birthYear + 62, birthMonth + 1];
-}
 
 export function SsRecordSection({
   record,
@@ -36,6 +24,7 @@ export function SsRecordSection({
   spouseBirthYear,
   spouseClaimAge,
   thisYear,
+  startYear,
   currency,
 }: {
   record: SsRecord | null;
@@ -43,6 +32,8 @@ export function SsRecordSection({
   spouseBirthYear: number | null;
   spouseClaimAge: number | null;
   thisYear: number;
+  /** The year his Social Security line starts, as typed in the plan form. */
+  startYear: number | null;
   currency: string;
 }) {
   const [importing, setImporting] = useState(false);
@@ -52,44 +43,83 @@ export function SsRecordSection({
   const [editAmount, setEditAmount] = useState("");
   const [adding, setAdding] = useState(false);
   const [why, setWhy] = useState(false);
+  const [survivorWhy, setSurvivorWhy] = useState(false);
   const [claimAge, setClaimAge] = useState(spouseClaimAge == null ? "" : String(spouseClaimAge));
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   const money = (c: number) => formatMoneyWhole(c, currency);
-  const birthMonth = record?.birthMonth ?? 1;
 
-  // His benefit at 62, 67 and 70 from the record as it stands.
-  const atAge = useMemo(() => {
-    if (!record || birthYear == null) return null;
-    return [62, 67, 70].map((age) => {
-      const [y, m] = claimStart(birthYear, birthMonth, age);
-      const pia = recordRetirementPiaCents(record, birthYear, y, thisYear);
-      return { age, cents: benefitAtStartCents(pia, birthYear, birthMonth, y, m) };
+  // His benefit at 62, 67 and 70: the statement's own figures, as imported
+  // or as he last typed them. Nothing is worked out from planned pay — that
+  // was rejected as a guess (Victor, 2026-10-23).
+  const AGES = [62, 67, 70] as const;
+  // What was just saved, shown until the refreshed record arrives — the plan
+  // re-run behind a save takes seconds, and the old figures sat there
+  // meanwhile, as if the save hadn't taken.
+  const [justSaved, setJustSaved] = useState<Record<string, number> | null>(null);
+  const [recordSeen, setRecordSeen] = useState(record);
+  if (record !== recordSeen) {
+    setRecordSeen(record);
+    setJustSaved(null);
+  }
+  const atAge = AGES.map((age) => ({ age, cents: justSaved?.[age] ?? statementBenefitCents(record, age) }));
+  const [editingBenefits, setEditingBenefits] = useState(false);
+  const [benefitDraft, setBenefitDraft] = useState<Record<string, string>>({});
+  const openBenefits = () => {
+    setBenefitDraft(Object.fromEntries(atAge.map((a) => [String(a.age), a.cents == null ? "" : String(a.cents / 100)])));
+    setEditingBenefits(true);
+  };
+  // Shown and closed at once; the save re-runs the whole plan behind it,
+  // which took ~2s plus the page refresh — the row sat waiting meanwhile
+  // (Victor, 2026-10-23). A rejected save puts the old figures back.
+  const saveBenefits = () => {
+    const draft = benefitDraft;
+    const typed = Object.entries(draft).filter(([, v]) => v.trim() && displayToCents(v) > 0);
+    setJustSaved(Object.fromEntries(typed.map(([age, v]) => [age, displayToCents(v)])));
+    setEditingBenefits(false);
+    start(async () => {
+      const r = await saveSsBenefits(draft);
+      setError(r.error);
+      if (r.error) setJustSaved(null);
     });
-  }, [record, birthYear, birthMonth, thisYear]);
+  };
+  const statementDate = record?.statement?.statementDate;
+  // "CAO: 22 Oct 2026" — the statement's as-of date, day first (Victor, 2026-10-23).
+  const statementLabel = statementDate
+    ? `${Number(statementDate.slice(8, 10))} ${MONTHS[Number(statementDate.slice(5, 7)) - 1]} ${statementDate.slice(0, 4)}`
+    : null;
 
-  // The calculator on the statement's own assumptions: does it land on the statement?
-  const check = useMemo(() => {
-    if (!record?.statement || birthYear == null) return null;
-    const c = statementCheck(record, birthYear);
-    if (!c) return null;
-    const off = Object.entries(record.statement.retirementByAge).reduce(
-      (worst, [age, cents]) => Math.max(worst, Math.abs((c.retirementByAge[age] ?? 0) - cents)),
-      0,
-    );
-    return { off };
-  }, [record, birthYear]);
+  // The survivor explanation's figures, from the statement's age-67 figure
+  // and his start age — the same rules the plan's survivor card uses.
+  const survivor = (() => {
+    const pia = statementBenefitCents(record, 67);
+    if (pia == null) return null;
+    // Rounded the way the survivor card rounds, so the two show the same dollars.
+    const dollars = (c: number) => Math.round(c);
+    const startAge = startYear != null && birthYear != null ? startYear - birthYear : null;
+    const own = startAge != null ? statementBenefitCents(record, startAge) : null;
+    const base = startAge != null && startAge < 67 ? Math.max(own ?? 0, dollars(pia * 0.825)) : own ?? pia;
+    return {
+      pia,
+      half: dollars(pia / 2),
+      threeQuarters: dollars(pia * 0.75),
+      at60: dollars(pia * 0.715),
+      familyMax: dollars(ssFamilyMaxCents(pia)),
+      startAge,
+      base,
+    };
+  })();
 
+  // Half his age-67 figure, cut for each month she starts before 67.
   const spousal = useMemo(() => {
     const age = Number(claimAge);
-    if (!record || birthYear == null || spouseBirthYear == null || !age) return null;
-    const [y] = claimStart(birthYear, birthMonth, 67);
-    const pia = recordRetirementPiaCents(record, birthYear, y, thisYear);
+    const pia = statementBenefitCents(record, 67);
+    if (pia == null || spouseBirthYear == null || !age) return null;
     const early = Math.max(0, (67 - age) * 12);
     return Math.floor((pia / 200) * spousalFactor(early) + 1e-7) * 100;
-  }, [record, birthYear, birthMonth, spouseBirthYear, claimAge, thisYear]);
+  }, [record, spouseBirthYear, claimAge]);
 
   const saveEdit = () => {
     if (editing == null || !editAmount.trim()) return;
@@ -149,7 +179,7 @@ export function SsRecordSection({
           className="text-sm font-semibold underline underline-offset-2"
           style={{ color: "var(--viz-savings)" }}
         >
-          Get it at my Social Security
+          SSA Website
         </a>
         {record && !confirmRemove ? (
           <button
@@ -168,7 +198,6 @@ export function SsRecordSection({
         <ConfirmStrip
           message={
             <>
-              {/* The years shown in the table; later planned years go too. */}
               Delete all {past.length} years of earnings{past.length ? ` (${past[0].year}–${past.at(-1)!.year})` : ""} and the statement?{" "}
               This can&rsquo;t be undone; you&rsquo;d have to import the PDF again.
             </>
@@ -180,57 +209,126 @@ export function SsRecordSection({
         />
       ) : null}
 
-      {record && atAge ? (
+      {record ? (
         <div className="max-w-2xl overflow-x-auto rounded-lg ring-1 ring-line">
-          <table className="w-full text-sm tabular-nums">
+          {/* Fixed column widths, so opening the edit boxes doesn't shift
+              the columns (Victor, 2026-10-23). */}
+          <table className="w-full table-fixed text-sm tabular-nums">
+            <colgroup>
+              <col />
+              {AGES.map((age) => (
+                <col key={age} className="w-[4.75rem] sm:w-32" />
+              ))}
+            </colgroup>
             <thead>
               <tr className="bg-sky-50 dark:bg-sky-950/40">
-                <th className="px-3 py-1.5 text-left font-bold">Monthly benefit</th>
-                {atAge.map((a) => (
-                  <th key={a.age} className="px-3 py-1.5 text-center font-bold">At {a.age}</th>
+                <th className="px-2 py-1.5 text-left font-bold sm:px-3">Monthly benefit</th>
+                {/* The year each age lands in, "2048:" over "Age 67" — two
+                    lines everywhere, which leaves the label column room for
+                    its line (Victor, 2026-10-23). */}
+                {AGES.map((age) => (
+                  <th key={age} className="px-1.5 py-1.5 text-center font-bold sm:px-3">
+                    {birthYear != null ? (
+                      <>
+                        <span className="block whitespace-nowrap">{birthYear + age}:</span>
+                        <span className="block whitespace-nowrap">Age {age}</span>
+                      </>
+                    ) : (
+                      `Age ${age}`
+                    )}
+                  </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-line">
-              <tr>
-                <td className="px-3 py-1.5 font-semibold">
-                  Your plan
-                  {/* Planned years run to retirement; none after (Victor, 2026-10-22). */}
-                  {rows.length ? (
-                    <span className="block text-xs font-normal sm:text-sm">Earnings stop after {rows.at(-1)!.year}</span>
-                  ) : null}
-                </td>
-                {atAge.map((a) => (
-                  <td key={a.age} className="px-3 py-1.5 text-center font-semibold" style={{ color: "var(--viz-income)" }}>
-                    {money(a.cents)}
-                  </td>
-                ))}
-              </tr>
-              {record.statement ? (
-                <tr>
-                  <td className="px-3 py-1.5">
-                    SSA statement
-                    {/* SSA's own estimate keeps you working at last year's pay
-                        right up to the claim age — why it runs higher. */}
-                    {record.statement.assumedEarningsCents ? (
-                      <span className="block text-xs sm:text-sm">
-                        If you earn {money(record.statement.assumedEarningsCents)}/yr until you claim
+            <tbody>
+              {editingBenefits ? (
+                <>
+                  <tr className="bg-sky-50 dark:bg-sky-950/40">
+                    <td className="px-2 py-1.5 font-semibold sm:px-3">
+                      From Annual SSA Statement
+                      <span className="block text-xs font-normal sm:text-sm">
+                        {statementLabel ? `CAO: ${statementLabel}` : "Type the figures it shows"}
                       </span>
-                    ) : null}
+                    </td>
+                    {AGES.map((age) => (
+                      <td key={age} className="px-1 py-1.5 sm:px-2">
+                        <input
+                          autoFocus={age === 62}
+                          value={benefitDraft[String(age)] ?? ""}
+                          onChange={(e) => setBenefitDraft((d) => ({ ...d, [String(age)]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              saveBenefits();
+                            } else if (e.key === "Escape") {
+                              e.stopPropagation();
+                              setEditingBenefits(false);
+                            }
+                          }}
+                          inputMode="decimal"
+                          aria-label={`Monthly benefit at ${age}`}
+                          className={`${box} mx-auto block w-full py-1 text-center`}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="bg-sky-50 dark:bg-sky-950/40">
+                    <td />
+                    <td colSpan={3} className="px-1 pb-1.5 sm:px-2">
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={saveBenefits}
+                          className="rounded-md bg-brand px-2.5 py-1 text-sm font-semibold text-white transition hover:bg-brand-strong"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingBenefits(false)}
+                          className="rounded-md px-2.5 py-1 text-sm font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </>
+              ) : (
+                // One row, the statement's figures. Click it to type in the
+                // new ones after the yearly statement review (Victor, 2026-10-23).
+                <tr onClick={openBenefits} className="cursor-pointer transition hover:bg-sky-50 dark:hover:bg-sky-950/40">
+                  <td className="px-2 py-1.5 font-semibold sm:px-3">
+                    From Annual SSA Statement
+                    <span className="block text-xs font-normal sm:text-sm">
+                      {/* "click to update" never splits across lines. */}
+                      {statementLabel ? <span className="sm:whitespace-nowrap">CAO: {statementLabel} · </span> : null}
+                      <span className="whitespace-nowrap">click to update</span>
+                    </span>
                   </td>
                   {atAge.map((a) => (
-                    <td key={a.age} className="px-3 py-1.5 text-center">
-                      {record.statement!.retirementByAge[String(a.age)] != null ? money(record.statement!.retirementByAge[String(a.age)]) : "—"}
+                    <td key={a.age} className="px-1.5 py-1.5 text-center font-semibold sm:px-3" style={{ color: "var(--viz-income)" }}>
+                      {a.cents == null ? "—" : money(a.cents)}
                     </td>
                   ))}
                 </tr>
-              ) : null}
+              )}
+              {/* A year's worth of each, the monthly figure × 12 (Victor,
+                  2026-10-23). Read-only: it follows the row above. */}
+              <tr className="border-t border-line">
+                <td className="px-2 py-1.5 font-semibold sm:px-3">
+                  Annual total
+                  <span className="block text-xs font-normal sm:text-sm">Monthly benefit × 12</span>
+                </td>
+                {atAge.map((a) => (
+                  <td key={a.age} className="px-1.5 py-1.5 text-center font-semibold sm:px-3" style={{ color: "var(--viz-income)" }}>
+                    {a.cents == null ? "—" : money(a.cents * 12)}
+                  </td>
+                ))}
+              </tr>
             </tbody>
           </table>
         </div>
-      ) : null}
-      {check && check.off > 200 ? (
-        <p className="text-xs text-negative sm:text-sm">Calculator is off from the statement by up to {money(check.off)}/mo.</p>
       ) : null}
 
       {record ? (
@@ -253,7 +351,7 @@ export function SsRecordSection({
                       <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Earnings</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-line">
+                  <tbody className="divide-y divide-line font-semibold">
                     {part.map((r) =>
                       editing === r.year ? (
                         <Fragment key={r.year}>
@@ -336,8 +434,7 @@ export function SsRecordSection({
       ) : null}
 
       {/* Total · add year · spousal benefit — one row, the two buttons side
-          by side (Victor, 2026-10-22). The tighter gap keeps the longer
-          "Spousal Benefit Explanation" link on the same line. */}
+          by side (Victor, 2026-10-22). */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
         {record ? (
           <p className="text-sm font-semibold">
@@ -354,16 +451,33 @@ export function SsRecordSection({
             Add Spousal Benefit
           </button>
         ) : null}
-        {spouseOk ? (
-          <button
-            type="button"
-            aria-expanded={why}
-            onClick={() => setWhy((v) => !v)}
-            className="text-sm font-semibold underline underline-offset-2"
-            style={{ color: "var(--viz-savings)" }}
-          >
-            Spousal Benefit Explanation
-          </button>
+        {/* The two explanation links side by side on their own line under
+            the buttons, spousal first (Victor, 2026-10-23). */}
+        {spouseOk || survivor ? (
+          <div className="flex basis-full flex-wrap items-center gap-x-4 gap-y-1">
+          {spouseOk ? (
+            <button
+              type="button"
+              aria-expanded={why}
+              onClick={() => setWhy((v) => !v)}
+              className="text-sm font-semibold underline underline-offset-2"
+              style={{ color: "var(--viz-savings)" }}
+            >
+              Spousal Benefit Explanation
+            </button>
+          ) : null}
+          {survivor ? (
+            <button
+              type="button"
+              aria-expanded={survivorWhy}
+              onClick={() => setSurvivorWhy((v) => !v)}
+              className="text-sm font-semibold underline underline-offset-2"
+              style={{ color: "var(--viz-savings)" }}
+            >
+              Survivor Benefit Explanation
+            </button>
+          ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -451,6 +565,70 @@ export function SsRecordSection({
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {/* How the "If you die first" card's Social Security lines are worked
+          out, in his own numbers — the card shows the dollars but not the
+          rules (Victor, 2026-10-23). Same rules as ssSurvivorParts in
+          lib/retirement. */}
+      {survivor && survivorWhy ? (
+        <div className="max-w-2xl space-y-2">
+          {/* A table, not paragraphs: the bulleted version read as a wall of
+              words (Victor, 2026-10-23). Same rules as the plan's survivor card. */}
+          <div className="overflow-hidden rounded-lg ring-1 ring-line">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-sky-50 dark:bg-sky-950/40">
+                  <th className="px-2 py-1.5 text-left font-bold sm:px-3">Situation</th>
+                  <th className="px-2 py-1.5 text-left font-bold sm:px-3">What she gets on your record</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {[
+                  ["You're alive (spousal)", `Half: ${money(survivor.half)}/mo at 67`],
+                  ["You die (widow)", `100%: ${money(survivor.pia)}/mo at 67 · 71.5%: ${money(survivor.at60)}/mo at 60`],
+                  ["Caring for your child under 16", `75%: ${money(survivor.threeQuarters)}/mo, any age`],
+                  ["Each child under 18", `75%: ${money(survivor.threeQuarters)}/mo each`],
+                  ["Family maximum", `${money(survivor.familyMax)}/mo for everyone together`],
+                ].map(([who, what]) => (
+                  <tr key={who}>
+                    <td className="px-2 py-1.5 font-semibold sm:px-3">{who}</td>
+                    <td className="px-2 py-1.5 font-semibold tabular-nums sm:px-3" style={{ color: "var(--viz-income)" }}>
+                      {what}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ul className="list-disc space-y-0.5 pl-5 text-sm">
+            {survivor.startAge != null && survivor.startAge < 67 ? (
+              <li>
+                You start at {survivor.startAge}: die after starting and her base drops to {money(survivor.base)}/mo.
+              </li>
+            ) : survivor.startAge != null && survivor.startAge > 67 ? (
+              <li>
+                You start at {survivor.startAge}: once you&rsquo;ve started, her base rises to {money(survivor.base)}/mo.
+              </li>
+            ) : survivor.startAge === 67 ? (
+              <li>You start at 67: her base is {money(survivor.pia)}/mo either way.</li>
+            ) : null}
+            <li>Die before 62: worked out from your earnings table, so lower.</li>
+            <li>Above the family maximum, every share is cut the same %.</li>
+          </ul>
+          <p className="text-sm">
+            Dollars by year: <span className="font-semibold">If you die first</span>, under Retirement details.{" "}
+            <a
+              href="https://www.ssa.gov/survivor"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold underline underline-offset-2"
+              style={{ color: "var(--viz-savings)" }}
+            >
+              SSA.gov
+            </a>
+          </p>
+        </div>
       ) : null}
 
       {error ? <p className="text-sm font-medium text-negative">{error}</p> : null}

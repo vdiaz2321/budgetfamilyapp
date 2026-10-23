@@ -1167,11 +1167,11 @@ function TransactionModalForm({
               </div>
             ) : null}
 
-            {/* Note */}
+            {/* Remarks — the memo; the register and CSV call it Remarks too */}
             <input
               name="memo"
               type="text"
-              placeholder="Add a note (optional)"
+              placeholder="Add Remarks (optional)"
               defaultValue={editTx?.memo ?? initialMemo ?? ""}
               className="w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             />
