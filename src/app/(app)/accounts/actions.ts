@@ -1279,15 +1279,30 @@ export async function payCard(formData: FormData) {
   // VentureJ carried a live $1,968 debt row while its details flags said it
   // wasn't a payoff debt, so paying it here moved money out of the bank and
   // left the debt untouched.
+  //
+  // Or the Pay form named a balance transfer on this card (`transferSubId`):
+  // then the payment goes to that transfer's debt instead. It is still paid to
+  // the card, but v_card_balances leaves it out of the card's owed figure —
+  // the transfer was never in it.
+  const transferSubId = String(formData.get("transferSubId") ?? "").trim();
   const linkedDebt = unwrap(
-    await supabase
-      .from("debts")
-      .select("subcategory_id, subcategories(category_id)")
-      .eq("household_id", householdId)
-      .eq("account_id", cardId)
-      .maybeSingle(),
+    transferSubId
+      ? await supabase
+          .from("debts")
+          .select("subcategory_id, subcategories(category_id)")
+          .eq("household_id", householdId)
+          .eq("subcategory_id", transferSubId)
+          .eq("bt_card_account_id", cardId)
+          .maybeSingle()
+      : await supabase
+          .from("debts")
+          .select("subcategory_id, subcategories(category_id)")
+          .eq("household_id", householdId)
+          .eq("account_id", cardId)
+          .maybeSingle(),
     "debts",
   ) as { subcategory_id: string; subcategories: { category_id: string } | null } | null;
+  if (transferSubId && !linkedDebt) return { error: "That balance transfer is no longer on this card." };
 
   // Insert one transaction: account_id = source (debit), paid_to_account_id =
   // card (reduces owed). On an ordinary card subcategory_id stays null — the
@@ -1599,7 +1614,7 @@ export async function updatePayment(formData: FormData) {
   const tx = unwrap(
     await supabase
       .from("transactions")
-      .select("id, split_group_id, occurred_on, amount_cents, reimbursed_cents, account_id, bucket_id, paid_to_account_id, movement_type")
+      .select("id, split_group_id, occurred_on, amount_cents, reimbursed_cents, account_id, bucket_id, paid_to_account_id, movement_type, subcategory_id")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle(),
@@ -1628,7 +1643,12 @@ export async function updatePayment(formData: FormData) {
       if (error) return { error: `Couldn't change the amount — ${error.message}` };
       if (tx.bucket_id) await adjustBucketBalance(supabase, householdId, tx.bucket_id, -delta);
       else if (tx.account_id) await adjustAccountLedger(supabase, householdId, tx.account_id, -delta);
-      if (tx.paid_to_account_id) {
+      // The debt the payment was made to rides on the row (a balance transfer,
+      // or the card's own payoff debt); older rows without it fall back to the
+      // card's own debt.
+      if (tx.subcategory_id) {
+        await adjustDebtBalance(supabase, householdId, tx.subcategory_id, -delta);
+      } else if (tx.paid_to_account_id) {
         const linkedDebt = unwrap(
           await supabase
             .from("debts")

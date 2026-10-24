@@ -421,6 +421,17 @@ export default async function AccountsPage() {
     transferCents: (debtRows ?? [])
       .filter((d) => d.bt_card_account_id === a.id && d.tracking_enabled !== false)
       .reduce((sum, d) => sum + Math.max(0, d.current_balance_cents ?? 0), 0),
+    // The same transfers one by one, so the Pay form can pay one of them.
+    transfers: (debtRows ?? [])
+      .filter((d) => d.bt_card_account_id === a.id && d.tracking_enabled !== false && (d.current_balance_cents ?? 0) > 0)
+      .map((d) => ({
+        subId: d.subcategory_id as string,
+        name: subName.get(d.subcategory_id) ?? "Balance transfer",
+        balanceCents: d.current_balance_cents ?? 0,
+        plannedCents: debtMonth.get(d.subcategory_id)?.plannedCents ?? 0,
+        paidCents: debtMonth.get(d.subcategory_id)?.paidCents ?? 0,
+        minCents: d.min_payment_cents ?? 0,
+      })),
     monthSpendCents: cardMonthSpend.get(a.id) ?? 0,
     prevMonthCents: acctHistory.get(`${a.id}:${prevMonth}`) ?? null,
     prev2MonthCents: acctHistory.get(`${a.id}:${prev2Month}`) ?? null,
@@ -573,9 +584,10 @@ export default async function AccountsPage() {
     editedAt: editedAtOf(t),
     fromAccountId: t.account_id ?? null,
     memo: t.memo ?? null,
-    // A Pay Card row on a debt card refunds like a card payment.
+    // A Pay Card row on a debt card refunds like a card payment. Its debt is
+    // the one the row names (a balance transfer, or the card's own debt).
     undo: t.paid_to_account_id
-      ? undoOf(t.account_id, t.bucket_id, debtByCard.get(t.paid_to_account_id))
+      ? undoOf(t.account_id, t.bucket_id, debtBySub.get(t.subcategory_id) ?? debtByCard.get(t.paid_to_account_id))
       : undoOf(t.account_id, null, debtBySub.get(t.subcategory_id)),
   }));
   // Every debt's name (paid-off ones too, so their old payments still read

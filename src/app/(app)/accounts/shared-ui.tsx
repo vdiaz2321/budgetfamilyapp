@@ -219,14 +219,28 @@ export function PayCardModal({
   // zeroes it) — what it owes is the debt row, so show and prefill from that.
   const details = card.cardDetails;
   const debtBalanceCents = details?.isRevolvingDebt ? Math.max(0, details.payoffBalanceCents) : 0;
-  // Prefill this month's Budget plan for the debt; with no plan, the minimum.
+  // Prefill what's left of this month's Budget plan for the debt; with no
+  // plan, the minimum. Once the plan is paid it stays empty — prefilling the
+  // full plan again made a second payment one click away.
   const debtPlanCents = details?.debtMonthPlannedCents ?? 0;
   const debtPaidCents = details?.debtMonthPaidCents ?? 0;
+  const debtPlanLeftCents = Math.max(0, debtPlanCents - debtPaidCents);
   const debtPrefillCents = debtBalanceCents > 0
-    ? Math.min(debtBalanceCents, debtPlanCents || details?.payoffMinimumCents || debtBalanceCents)
+    ? Math.min(debtBalanceCents, debtPlanCents > 0 ? debtPlanLeftCents : details?.payoffMinimumCents || debtBalanceCents)
     : 0;
   const owedCents = card.owedCents ?? 0;
-  const prefillCents = owedCents > 0 ? owedCents : debtPrefillCents;
+  // A balance transfer on this card is its own debt, not in owed: the payment
+  // can go to it instead ("" = the card's own balance).
+  const transfers = card.transfers ?? [];
+  // Starts on the transfer when the card itself has nothing to pay.
+  const [transferSubId, setTransferSubId] = useState(
+    owedCents <= 0 && debtBalanceCents === 0 ? transfers[0]?.subId ?? "" : "",
+  );
+  const transfer = transfers.find((t) => t.subId === transferSubId) ?? null;
+  const transferPrefillCents = transfer
+    ? Math.min(transfer.balanceCents, Math.max(0, transfer.plannedCents - transfer.paidCents) || transfer.minCents || transfer.balanceCents)
+    : 0;
+  const prefillCents = transfer ? transferPrefillCents : owedCents > 0 ? owedCents : debtPrefillCents;
 
   return (
     <div
@@ -294,7 +308,33 @@ export function PayCardModal({
           className="space-y-2"
         >
           <input type="hidden" name="cardId" value={card.id} />
+          <input type="hidden" name="transferSubId" value={transferSubId} />
+          {transfers.length > 0 ? (
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                Pay toward
+              </span>
+              <select
+                value={transferSubId}
+                onChange={(e) => {
+                  setTransferSubId(e.target.value);
+                  // Points only pay the card's own balance.
+                  if (e.target.value && payingWithPoints) setSourceId(nonCardAccounts[0]?.id ?? "");
+                }}
+                className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Card balance</option>
+                {transfers.map((t) => (
+                  <option key={t.subId} value={t.subId}>
+                    {t.name} · {formatMoney(t.balanceCents, currency)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {/* Keyed on the target so switching it refills the amount. */}
           <LabeledInput
+            key={`amount-${transferSubId}`}
             label="Payment amount"
             name="amount"
             type="number"
@@ -304,13 +344,19 @@ export function PayCardModal({
             required
             autoFocus
           />
-          {owedCents > 0 ? (
+          {transfer ? (
+            <p className="text-[10px] text-muted">
+              Balance transfer: lowers {transfer.name}, not Card owed.
+            </p>
+          ) : owedCents > 0 ? (
             <p className="text-[10px] text-muted">
               Full balance — pays the card to {formatMoney(0, currency)}.
             </p>
           ) : debtBalanceCents > 0 ? (
             <p className="text-[10px] text-muted">
-              {`${debtPlanCents > 0 ? "This month\u2019s Budget plan" : "Minimum payment"} — counts toward Budget.`}
+              {debtPlanCents > 0 && debtPlanLeftCents === 0
+                ? "This month\u2019s Budget plan is paid."
+                : `${debtPlanCents > 0 ? "Left of this month\u2019s Budget plan" : "Minimum payment"} — counts toward Budget.`}
             </p>
           ) : null}
           <LabeledInput label="Date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
@@ -331,7 +377,7 @@ export function PayCardModal({
               {nonCardAccounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
-              {pointsAvailable > 0 ? (
+              {pointsAvailable > 0 && !transfer ? (
                 <option value={POINTS_SOURCE}>Points (statement credit)</option>
               ) : null}
             </select>
@@ -369,10 +415,10 @@ export function PayCardModal({
             </label>
           ) : null}
           <LabeledInput
-            key={payingWithPoints ? "points" : "bank"}
+            key={payingWithPoints ? "points" : `bank-${transferSubId}`}
             label="Notes"
             name="notes"
-            defaultValue={payingWithPoints ? "" : `Payment to ${card.name}`}
+            defaultValue={payingWithPoints ? "" : `Payment to ${transfer?.name ?? card.name}`}
           />
           {errorMsg ? <p className="text-xs text-negative">{errorMsg}</p> : null}
           <div className="flex items-center justify-end gap-2 pt-1">
@@ -392,7 +438,7 @@ export function PayCardModal({
             </button>
           </div>
         </form>
-        {debtBalanceCents === 0 && !details?.isRevolvingDebt ? (
+        {debtBalanceCents === 0 && !details?.isRevolvingDebt && !transfer ? (
           <MatchStatement cardId={card.id} onDone={onClose} />
         ) : null}
       </div>

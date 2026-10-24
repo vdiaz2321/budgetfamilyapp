@@ -25,3 +25,9 @@ export function attachSplitParts<
   }
   return txs;
 }
+
+/** The whole charge a split row belongs to, or null for a row that isn't split. */
+export function splitTotalCents(tx: { splitParts?: SplitPart[] }): number | null {
+  if (!tx.splitParts || tx.splitParts.length < 2) return null;
+  return tx.splitParts.reduce((sum, p) => sum + Math.abs(p.amountCents), 0);
+}

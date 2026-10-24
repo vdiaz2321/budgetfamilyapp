@@ -471,7 +471,8 @@ function DebtCard({ row, color, selected, focus, classic, payoff, months, curren
           <CardRow label="Balance" value={formatMoney(row.balanceCents, currency)} />
           <CardRow label="Paid so far" value={formatMoney(row.paidCents, currency)} />
           <CardRow label="Minimum" value={formatMoney(row.minCents, currency)} />
-          <CardRow label="APR" value={row.apr ? `${row.apr}%` : "—"} />
+          {/* A 0% promo says 0% — a dash hid that the rate is the deal. */}
+          <CardRow label="APR" value={row.apr || row.promoEndsOn ? `${row.apr}%` : "—"} />
           {row.promoEndsOn ? <CardRow label="Promo ends" value={formatShortDate(row.promoEndsOn)} /> : null}
           {row.btFromName ? <CardRow label="From" value={row.btFromName} /> : null}
           {row.btCardName ? <CardRow label="Fee" value={formatMoney(row.btFeeCents, currency)} /> : null}

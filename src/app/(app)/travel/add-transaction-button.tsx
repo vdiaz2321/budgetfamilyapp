@@ -56,7 +56,13 @@ export function AddTransactionButton({
   const openForm = async () => {
     setError(null);
     setOpen(true);
-    if (options) return;
+    // Already loaded: open on the lists in hand, then refresh them — a card
+    // payment or transfer made elsewhere on the page since then moved the
+    // owed and balance figures the account picker shows.
+    if (options) {
+      void load().catch(() => {});
+      return;
+    }
     setLoading(true);
     try {
       await load();

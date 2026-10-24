@@ -42,6 +42,8 @@ const HEADER_TINT: Record<CategoryKind, string> = {
   expenses: "bg-surface",
   debt: "bg-surface",
 };
+// The Budget Item picker's group order (see BudgetItemPicker).
+const PICKER_KIND_ORDER: CategoryKind[] = ["expenses", "bills", "debt", "savings", "income"];
 const BTN_COLOR: Record<CategoryKind, string> = {
   income: "bg-emerald-200 hover:bg-emerald-300 dark:bg-emerald-800/70 dark:hover:bg-emerald-700",
   savings: "bg-sky-600 hover:bg-sky-700",
@@ -233,11 +235,15 @@ function TransactionModalForm({
     if (item.subcategoryId) {
       const kind = subOptions.find((s) => s.id === item.subcategoryId)?.kind;
       if (kind) setTxType(kind);
-      setSplits([{ subId: item.subcategoryId, amountCents: item.amountCents ?? totalCents }]);
+      setSplits([{ subId: item.subcategoryId, amountCents: totalCents }]);
     }
-    if (item.amountCents != null && amountRef.current) {
-      amountRef.current.value = centsToDisplay(item.amountCents);
+    // A subscription's price fills an empty amount — never one already typed.
+    // Through forcedCents: the box keeps its own copy of the text, so writing
+    // to the input directly was wiped on the next render.
+    if (item.amountCents != null && item.amountCents > 0 && totalCents === 0) {
+      setConvertedCents(item.amountCents);
       setTotalCents(item.amountCents);
+      if (item.subcategoryId) setSplits([{ subId: item.subcategoryId, amountCents: item.amountCents }]);
     }
   }
 
@@ -290,6 +296,14 @@ function TransactionModalForm({
     autoFilledSubId.current = null;
     setPickerOpen(false);
     clearErrors();
+    // The save button names what's being added ("Add Bill", "Add Savings").
+    // Picking from this list never told it, so a bill or a savings deposit
+    // still read "Add Expense". Items of mixed kinds keep the tab's word.
+    const kinds = new Set(selectedIds.map((id) => subOptions.find((s) => s.id === id)?.kind).filter(Boolean));
+    if (kinds.size === 1) {
+      const kind = [...kinds][0] as CategoryKind;
+      if ((kind === "income") === (txType === "income")) setTxType(kind);
+    }
     setSplits((prev) => {
       const kept = prev.filter((sp) => selectedIds.includes(sp.subId));
       const keptIds = new Set(kept.map((sp) => sp.subId));
@@ -1809,7 +1823,12 @@ function BudgetItemPicker({
   const selectedItems = options.filter((o) => checked.has(o.id));
   const unselectedFiltered = filtered.filter((o) => !checked.has(o.id));
   const multiKind = new Set(unselectedFiltered.map((o) => o.kind)).size > 1;
-  const visibleKinds = CATEGORY_KINDS.filter(({ kind }) => unselectedFiltered.some((o) => o.kind === kind));
+  // Most-used first: everyday spending, then bills, debt, savings. In the
+  // Budget's own order the Expense tab opened on Invest/Savings, and
+  // Groceries meant scrolling past every investment account.
+  const visibleKinds = PICKER_KIND_ORDER
+    .map((kind) => CATEGORY_KINDS.find((c) => c.kind === kind)!)
+    .filter(({ kind }) => unselectedFiltered.some((o) => o.kind === kind));
   const ordered = [
     ...selectedItems,
     ...visibleKinds.flatMap(({ kind }) => unselectedFiltered.filter((o) => o.kind === kind)),

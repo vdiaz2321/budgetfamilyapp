@@ -137,6 +137,8 @@ export type AccountData = {
   /** Credit cards: balance transfers sitting on this card (their own debts,
    *  not in owedCents). */
   transferCents?: number;
+  /** The same transfers one by one (with a balance left), for the Pay form. */
+  transfers?: { subId: string; name: string; balanceCents: number; plannedCents: number; paidCents: number; minCents: number }[];
   monthSpendCents?: number;
   // Prior-month account_snapshots (null = never recorded yet for that month).
   // For bucketed accounts these are derived server-side from bucket_snapshots.

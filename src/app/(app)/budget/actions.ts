@@ -950,6 +950,15 @@ export async function moveSubcategoryToGroup(formData: FormData): Promise<{ erro
   if (error?.code === "23505") return { error: "That group already has an item with this name." };
   if (error) return { error: "The item could not be moved." };
 
+  // Its transactions carry the group too. Left behind, Taxes and Insurance
+  // payments kept reading "Bills" after those items moved out of it.
+  const { error: txError } = await supabase
+    .from("transactions")
+    .update({ category_id: targetCategoryId })
+    .eq("household_id", householdId)
+    .eq("subcategory_id", subcategoryId);
+  if (txError) return { error: "The item moved, but its transactions could not follow it." };
+
   revalidatePath("/budget");
   revalidatePath("/annual");
   revalidatePath("/insights");
@@ -2513,6 +2522,7 @@ async function reverseMovementTransaction(
     paid_to_account_id: string | null;
     paid_to_bucket_id?: string | null;
     movement_type: string | null;
+    subcategory_id: string | null;
   },
 ) {
   const amount = tx.amount_cents;
@@ -2526,8 +2536,12 @@ async function reverseMovementTransaction(
       await adjustAccountLedger(supabase, householdId, tx.account_id, amount);
     }
     // payCard also paid down any debt tracked against the card. Deleting the
-    // payment puts that balance back on the debt.
-    if (tx.paid_to_account_id) {
+    // payment puts that balance back on the debt. The row names that debt
+    // when it has one (a balance transfer, or the card's own payoff debt);
+    // older rows without it fall back to the card's own debt.
+    if (tx.subcategory_id) {
+      await adjustDebtBalance(supabase, householdId, tx.subcategory_id, amount);
+    } else if (tx.paid_to_account_id) {
       const linkedDebt = unwrap(
         await supabase
           .from("debts")

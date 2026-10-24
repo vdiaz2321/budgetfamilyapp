@@ -13,6 +13,8 @@ import { DOT as KIND_DOT } from "../budget/category-icons";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 import { usePrefetchTripTagging } from "../budget/trip-tagging-cache";
 import { useScrollLock } from "@/lib/use-scroll-lock";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
+import { splitTotalCents } from "@/lib/split-parts";
 import type { TravelCells } from "./travel-cells";
 
 const KIND_LABEL: Record<CategoryKind, string> = {
@@ -931,6 +933,7 @@ function TxLine({
   const [amountPending, startAmountSave] = useTransition();
   const isIncome = tx.kind === "income";
   const canEdit = !tx.isCardPayment;
+  const splitTotal = splitTotalCents(tx);
 
   const saveAmount = () => {
     const normalized = Number(amountValue.replace(",", "."));
@@ -1064,6 +1067,13 @@ function TxLine({
       <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
         {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
         <span className="truncate text-sm lg:text-[1.125rem]">{tx.subName}</span>
+        {/* One purchase split over items shows as one row per item; this
+            says which rows belong together, and what the whole charge was. */}
+        {splitTotal ? (
+          <span className="shrink-0 whitespace-nowrap rounded-full bg-sky-100 px-1.5 py-0.5 text-xs font-semibold text-foreground dark:bg-sky-900/50">
+            Split of {formatMoney(splitTotal, currency)}
+          </span>
+        ) : null}
       </button>
       <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default lg:text-[1.125rem]">
         {tx.payee ?? "—"}
@@ -1104,23 +1114,22 @@ function TxLine({
           </span>
         ) : null}
       </span>
-      <form
-        action={(fd) => startDel(async () => { await deleteTransaction(fd); })}
-        onClick={(e) => e.stopPropagation()}
-        className="justify-self-end"
-      >
-        <input type="hidden" name="id" value={tx.id} />
-        <button
-          type="submit"
+      <span className="justify-self-end" onClick={(e) => e.stopPropagation()}>
+        <ConfirmDeleteButton
           disabled={delPending}
-          aria-label="Delete transaction"
+          parts={tx.splitParts?.length ?? 1}
+          onConfirm={() => {
+            const fd = new FormData();
+            fd.set("id", tx.id);
+            startDel(async () => { await deleteTransaction(fd); });
+          }}
           className="flex h-5 w-5 items-center justify-center rounded-full text-muted opacity-0 transition hover:bg-negative/10 hover:text-negative group-hover:opacity-100 disabled:opacity-40"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
-        </button>
-      </form>
+        </ConfirmDeleteButton>
+      </span>
     </li>
   );
 }
@@ -1289,6 +1298,7 @@ function TxCard({
                   ? `${tx.subName} · ${accountName}`
                   : tx.subName
                 : accountName}
+              {splitTotalCents(tx) ? ` · split of ${formatMoney(splitTotalCents(tx)!, currency)}` : ""}
             </span>
             <span className="shrink-0 whitespace-nowrap text-xs font-medium text-muted tabular-nums">
               {dateStr}
@@ -1367,7 +1377,15 @@ function ColumnFilter({
   const q = search.trim().toLowerCase();
   const visible = q ? values.filter((v) => v.value.toLowerCase().includes(q)) : values;
   const isChecked = (v: string) => !selected || selected.has(v);
-  const allVisibleChecked = visible.length > 0 && visible.every((v) => isChecked(v.value));
+  // While searching, "Select all results" reads ticked only when the filter
+  // keeps just the matches. Unfiltered, every row is ticked — so the box
+  // came up already ticked and keeping only "Groceries" took an untick then
+  // a tick. Now one click (or Enter) does it.
+  const onlyVisibleKept =
+    selected !== undefined && visible.length > 0 && selected.size === visible.length && visible.every((v) => selected.has(v.value));
+  const allVisibleChecked = q
+    ? onlyVisibleKept
+    : visible.length > 0 && visible.every((v) => isChecked(v.value));
   // A set holding every value listed means "not filtered".
   const commit = (next: Set<string>) =>
     onChange(values.every((v) => next.has(v.value)) ? undefined : next);
@@ -1381,14 +1399,10 @@ function ColumnFilter({
       onChange(allVisibleChecked ? new Set() : undefined);
       return;
     }
-    // Searching, as in Excel: ticking "Select all" keeps just the matches.
-    if (allVisibleChecked) {
-      const next = new Set(selected ?? values.map((x) => x.value));
-      for (const v of visible) next.delete(v.value);
-      commit(next);
-    } else {
-      commit(new Set(visible.map((v) => v.value)));
-    }
+    // Searching, as in Excel: ticking "Select all" keeps just the matches;
+    // unticking it again clears the filter.
+    if (allVisibleChecked) onChange(undefined);
+    else commit(new Set(visible.map((v) => v.value)));
   };
 
   return (
@@ -1428,6 +1442,14 @@ function ColumnFilter({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            // Enter keeps just the matches and closes the list.
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && q && visible.length > 0) {
+                e.preventDefault();
+                commit(new Set(visible.map((v) => v.value)));
+                setPos(null);
+              }
+            }}
             placeholder={`Search ${name.toLowerCase()}`}
             className="w-full rounded-lg bg-sky-50 dark:bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />

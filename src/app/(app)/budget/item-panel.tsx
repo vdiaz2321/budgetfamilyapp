@@ -21,6 +21,7 @@ import {
 import type { AccountOption, BucketOption, RowData, SubOption, TxData, TxPrefill } from "./types";
 import { DEBT_KINDS } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
   income: "bg-positive",
@@ -736,11 +737,10 @@ function TxRow({
           {formatMoney(t.amountCents, currency)}
         </span>
       </button>
-      <button
-        type="button"
-        aria-label="Delete transaction"
+      <ConfirmDeleteButton
         disabled={delPending}
-        onClick={() => {
+        parts={t.splitParts?.length ?? 1}
+        onConfirm={() => {
           const fd = new FormData();
           fd.append("id", t.id);
           startDel(async () => { await deleteTransaction(fd); });
@@ -748,7 +748,7 @@ function TxRow({
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-sm font-bold text-negative opacity-0 transition group-hover:opacity-100 hover:bg-negative/10 disabled:opacity-40"
       >
         ×
-      </button>
+      </ConfirmDeleteButton>
     </li>
   );
 }

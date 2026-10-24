@@ -7,6 +7,8 @@ import type { CategoryKind } from "@/lib/categories";
 import { deleteTransaction } from "./actions";
 import { TransactionModal } from "./transaction-modal";
 import { DOT } from "./category-icons";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
+import { splitTotalCents } from "@/lib/split-parts";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "./types";
 
 const KIND_LABEL: Record<CategoryKind, string> = {
@@ -321,7 +323,13 @@ function TxRow({
   const title = tx.payee ?? tx.subName;
   // "Fidelity (Taxable) · Savings" — the payee's category, or (without a payee)
   // the memo, followed by the category name.
-  const desc = [tx.payee ? tx.subName : tx.memo || null, kind ? KIND_LABEL[kind] : null]
+  const splitTotal = splitTotalCents(tx);
+  const desc = [
+    tx.payee ? tx.subName : tx.memo || null,
+    kind ? KIND_LABEL[kind] : null,
+    // A split purchase lists one row per item; this ties them together.
+    splitTotal ? `split of ${formatMoney(splitTotal, currency)}` : null,
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -357,19 +365,20 @@ function TxRow({
               <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
             </svg>
           </button>
-          <form action={(fd) => start(async () => { await deleteTransaction(fd); })}>
-            <input type="hidden" name="id" value={tx.id} />
-            <button
-              type="submit"
-              disabled={pending}
-              aria-label="Delete transaction"
-              className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-negative/10 hover:text-negative disabled:opacity-40"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </form>
+          <ConfirmDeleteButton
+            disabled={pending}
+            parts={tx.splitParts?.length ?? 1}
+            onConfirm={() => {
+              const fd = new FormData();
+              fd.set("id", tx.id);
+              start(async () => { await deleteTransaction(fd); });
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-negative/10 hover:text-negative disabled:opacity-40"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </ConfirmDeleteButton>
         </div>
         <span className={`text-sm font-semibold tabular-nums ${amountColor}`}>
           {isIncome ? "+" : "−"}

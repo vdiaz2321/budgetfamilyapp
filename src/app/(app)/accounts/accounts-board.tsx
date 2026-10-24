@@ -1573,7 +1573,13 @@ function PickCardModal({
   onClose: () => void;
 }) {
   useScrollLock();
-  const ordered = [...cards.filter((a) => (a.owedCents ?? 0) > 0), ...cards.filter((a) => (a.owedCents ?? 0) <= 0)];
+  // What each card needs paying: its owed figure, or — for a card carried as
+  // a payoff debt, which owes $0 on the register — that debt, plus any
+  // balance transfer on it. Only owed figures showed before, so the cards
+  // with the most to pay read as owing nothing.
+  const debtOf = (a: AccountData) => (a.cardDetails?.isRevolvingDebt ? Math.max(0, a.cardDetails.payoffBalanceCents) : 0);
+  const due = (a: AccountData) => (a.owedCents ?? 0) > 0 || debtOf(a) > 0 || (a.transferCents ?? 0) > 0;
+  const ordered = [...cards.filter(due), ...cards.filter((a) => !due(a))];
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
@@ -1603,15 +1609,25 @@ function PickCardModal({
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left ring-1 ring-line transition hover:bg-sky-50 hover:ring-sky-400 dark:hover:bg-sky-950/40"
               >
                 <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
-                {(a.owedCents ?? 0) > 0 ? (
-                  <span className="shrink-0 text-sm font-semibold tabular-nums text-negative">
-                    {formatMoney(a.owedCents ?? 0, currency)}
-                  </span>
-                ) : (a.owedCents ?? 0) < 0 ? (
-                  <span className="shrink-0 text-sm font-semibold">
-                    Credit: <span className="tabular-nums text-positive">{formatMoney(a.owedCents ?? 0, currency)}</span>
-                  </span>
-                ) : null}
+                <span className="flex shrink-0 flex-col items-end text-sm font-semibold">
+                  {(a.owedCents ?? 0) > 0 ? (
+                    <span className="tabular-nums text-negative">{formatMoney(a.owedCents ?? 0, currency)}</span>
+                  ) : (a.owedCents ?? 0) < 0 ? (
+                    <span>
+                      Credit: <span className="tabular-nums text-positive">{formatMoney(a.owedCents ?? 0, currency)}</span>
+                    </span>
+                  ) : null}
+                  {debtOf(a) > 0 ? (
+                    <span>
+                      Debt: <span className="tabular-nums text-negative">{formatMoney(debtOf(a), currency)}</span>
+                    </span>
+                  ) : null}
+                  {(a.transferCents ?? 0) > 0 ? (
+                    <span>
+                      Transfer: <span className="tabular-nums text-negative">{formatMoney(a.transferCents ?? 0, currency)}</span>
+                    </span>
+                  ) : null}
+                </span>
               </button>
             </li>
           ))}
