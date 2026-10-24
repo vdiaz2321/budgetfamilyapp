@@ -10,6 +10,9 @@ import { saveTripExpenses } from "./expense-actions";
 import { MiscModal } from "./misc-modal";
 import { StayModal } from "./stay-modal";
 import { useTripChoice } from "./trip-picker";
+import { useAddPayment } from "./linked-payments";
+import type { PaymentPrefill } from "./payment-due";
+import { formatMoney } from "@/lib/money";
 import type { TravelBrand, TravelCar, TravelCard, TravelFlight, TravelStay, TravelTrip, Traveller, TripExpense } from "./types";
 
 type Kind = "stay" | "misc" | "flight" | "car";
@@ -72,6 +75,11 @@ export function AddTravelLogModal({
   const [saved, setSaved] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  // Bookings just saved as booked with cash to pay: once everything has
+  // saved, the popup lists them so each payment is logged straight away.
+  const owed = useRef<PaymentPrefill[]>([]);
+  const [payments, setPayments] = useState<{ prefill: PaymentPrefill; added: boolean }[] | null>(null);
+  const pay = useAddPayment();
   // What is typed in the trip box. It matches a saved trip by name (the way
   // the server would anyway), so adding to one is the same as naming it.
   const [tripName, setTripName] = useState("");
@@ -137,7 +145,10 @@ export function AddTravelLogModal({
       for (const u of toSave) {
         const result = await u.handle!.save();
         if (result.error) failed[u.id] = result.error;
-        else done.push(u.id);
+        else {
+          done.push(u.id);
+          owed.current.push(...(result.payments ?? []).filter((p) => p.due));
+        }
       }
       // The header's dates, written straight onto the trip. Skipped when the
       // Spending section just saved — it carries the same two values. Last in
@@ -150,7 +161,8 @@ export function AddTravelLogModal({
       }
       router.refresh();
       if (Object.keys(failed).length === 0) {
-        onClose();
+        if (owed.current.length) setPayments(owed.current.map((prefill) => ({ prefill, added: false })));
+        else onClose();
         return;
       }
       setSaved((s) => [...s, ...done]);
@@ -247,7 +259,48 @@ export function AddTravelLogModal({
       onClose={requestClose}
       className="sm:max-w-4xl"
     >
-
+      {payments ? (
+        <div className="space-y-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
+          <p className="text-sm font-bold">Saved — now add the payments</p>
+          <ul className="space-y-2">
+            {payments.map((row, i) => (
+              <li key={row.prefill.bookingRef} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md px-3 py-2 ring-1 ring-line">
+                <span className="min-w-0 text-sm">
+                  <span className="font-semibold">{KIND_OF_REF[row.prefill.bookingRef.split(":")[0]] ?? "Booking"} · {row.prefill.label}</span>
+                  {row.prefill.amountCents ? <span className="tabular-nums"> · planned {formatMoney(row.prefill.amountCents, currency)}</span> : null}
+                </span>
+                {row.added ? (
+                  <span className="text-xs font-semibold text-positive">Transaction added</span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={pay.opening}
+                    onClick={() =>
+                      void pay.open(row.prefill, (added) => {
+                        router.refresh();
+                        if (added) setPayments((all) => all && all.map((r, j) => (j === i ? { ...r, added: true } : r)));
+                      })
+                    }
+                    className="rounded-md bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-sky-300 transition hover:bg-sky-200 disabled:opacity-60 dark:bg-sky-900/50 dark:ring-sky-700 dark:hover:bg-sky-800/60"
+                  >
+                    {pay.opening ? "Opening…" : "Add transaction"}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+          {pay.error ? <p className="text-xs text-negative">{pay.error}</p> : null}
+          {pay.overlay}
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800"
+          >
+            Done
+          </button>
+        </div>
+      ) : (
+      <>
       {SECTIONS.map(({ kind, label: name }) => {
         const isSaved =
           kind === "stay" ? rooms.every((r) => saved.includes(`stay:${r.id}`)) : saved.includes(kind);
@@ -410,6 +463,10 @@ export function AddTravelLogModal({
           </button>
         </div>
       </div>
+      </>
+      )}
     </ModalShell>
   );
 }
+
+const KIND_OF_REF: Record<string, string> = { stay: "Stay", flight: "Flight", car: "Rental" };

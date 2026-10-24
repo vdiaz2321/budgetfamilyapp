@@ -14,7 +14,8 @@ import {
   setTravelFlightCancelled,
 } from "./flight-actions";
 import { CurrencySelect, Field, MoreDetailsToggle, OpenLinkedButton, PILL_CONTROL, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, openableClass, outsideTripNote, spentMissingError } from "./travel-form";
-import { useLinkedPayments } from "./linked-payments";
+import { PaymentPrompt, useAddPayment, useLinkedPayments } from "./linked-payments";
+import { spentTypedByHand, type PaymentPrefill } from "./payment-due";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
@@ -192,7 +193,7 @@ export function FlightModal({
     if (slot !== "plannedForeign" && slot !== "fareEur") return updatePassenger(key, { [slot]: value });
     const usd = toUsd(value, slot);
     // Spent $ follows the linked payments; a foreign figure doesn't change it.
-    const locked = slot === "fareEur" && flight?.paidCents != null;
+    const locked = slot === "fareEur" && spentLinked;
     updatePassenger(key, usd == null || locked ? { [slot]: value } : { [slot]: value, [FX_PAIR[slot]]: usd });
   }
   function loadRatesFor(key: number, slot: FareSlot) {
@@ -206,7 +207,7 @@ export function FlightModal({
       setPassengers((all) =>
         all.map((p) => {
           if (p.key !== key || !p[slot].trim() || p[FX_PAIR[slot]].trim()) return p;
-          if (slot === "fareEur" && flight?.paidCents != null) return p;
+          if (slot === "fareEur" && spentLinked) return p;
           const usd = toUsd(p[slot], slot);
           return usd ? { ...p, [FX_PAIR[slot]]: usd } : p;
         }),
@@ -215,8 +216,15 @@ export function FlightModal({
   }
 
   // Payments linked from the Budget fill each passenger's Spent $ — their
-  // share of the payments — so those boxes can't be typed over here.
-  const spentLinked = flight?.paidCents != null;
+  // share of the payments — so those boxes can't be typed over here. With
+  // none linked they stay empty: Spent is the linked transactions only,
+  // except on a sheet import or a flight booked before the app.
+  const hasPaid = flight?.paidCents != null;
+  const typedSpent = spentTypedByHand(flight ? !flight.movesCardPoints : false, reservedOn);
+  const spentLinked = hasPaid || !typedSpent;
+  // A fare typed before the lock is no payment: shown and counted as empty.
+  const shownFare = (p: PassengerDraft, slot: "fare" | "fareEur") => (spentLinked && !hasPaid ? "" : p[slot]);
+  const pay = useAddPayment();
   // Clicking a locked Spent box opens the payment behind it.
   const linked = useLinkedPayments(flight?.payments, currency);
   const PAX_GRID = showFx ? PAX_GRID_FX : PAX_GRID_USD;
@@ -226,12 +234,12 @@ export function FlightModal({
 
   const passengerPoints = (p: PassengerDraft) => (p.pointsUsed ? Number(p.points.replace(/,/g, "")) || 0 : 0);
   // Bought once a Spent fare or the booking date is in; a plan until then.
-  const isEstimate = isPlannedOnly(passengers.some((p) => p.fare.trim() || p.fareEur.trim()), reservedOn);
+  const isEstimate = isPlannedOnly(passengers.some((p) => shownFare(p, "fare").trim() || shownFare(p, "fareEur").trim()), reservedOn);
   const total = (slot: FareSlot) => passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(p[slot])), 0);
   // What the seat costs now: the plan until it is bought. A bought points
   // seat's cost is its Planned fare (what the points stood in for); its
   // Spent boxes are the cash paid on top of the points.
-  const effective = (p: PassengerDraft) => (isEstimate || passengerPoints(p) > 0 ? p.planned : p.fare);
+  const effective = (p: PassengerDraft) => (isEstimate || passengerPoints(p) > 0 ? p.planned : shownFare(p, "fare"));
 
   const card = cards.find((c) => c.id === accountId) ?? null;
   const fareCents = passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(effective(p))), 0);
@@ -360,17 +368,21 @@ export function FlightModal({
   // payments explain the empty Spent.
   const spentError = spentMissingError({
     reservedOn,
-    spentTyped: passengers.some((p) => p.fare.trim() || p.fareEur.trim()),
+    spentTyped: passengers.some((p) => shownFare(p, "fare").trim() || shownFare(p, "fareEur").trim()),
     exempt: passengers.some((p) => p.pointsUsed) || spentLinked,
     dateLabel: "Booking Made",
   });
 
+  // What the saved flights' payment forms need — this one's first, then
+  // any one-way booking added under it.
+  const savedPayments = useRef<PaymentPrefill[]>([]);
   async function saveAll(): Promise<string | null> {
     if (!ownSaved.current && !(embed && ownEmpty())) {
       if (spentError) return spentError;
       const result = await saveTravelFlight(payload());
       if (result?.error) return result.error;
       if (!flight) ownSaved.current = true;
+      savedPayments.current = result.payment ? [result.payment] : [];
     }
     const failed: string[] = [];
     for (const [i, x] of extras.entries()) {
@@ -378,7 +390,10 @@ export function FlightModal({
       if (!handle || handle.isEmpty()) continue;
       const result = await handle.save();
       if (result.error) failed.push(`Flight #${i + 2}: ${result.error}`);
-      else setExtras((all) => all.filter((e) => e.id !== x.id));
+      else {
+        setExtras((all) => all.filter((e) => e.id !== x.id));
+        savedPayments.current = [...savedPayments.current, ...(result.payments ?? [])];
+      }
     }
     return failed.length ? failed.join(" · ") : null;
   }
@@ -403,7 +418,7 @@ export function FlightModal({
     if (!embed) return;
     embed.register({
       isEmpty: () => ownEmpty() && extras.every((x) => extraHandles.current[x.id]?.isEmpty() ?? true),
-      save: async () => ({ error: await saveAll() }),
+      save: async () => ({ error: await saveAll(), payments: savedPayments.current }),
     });
   });
 
@@ -414,6 +429,24 @@ export function FlightModal({
       router.refresh();
       if (failure) setError(failure);
       else onClose();
+    });
+  }
+
+  // "Save & add transaction": the flight saves, then its payment form opens
+  // on top, filled in from it. Done either way, the flight form closes —
+  // what it showed is out of date.
+  function saveAndPay() {
+    start(async () => {
+      setError(null);
+      const failure = await saveAll();
+      router.refresh();
+      if (failure) return setError(failure);
+      const payment = savedPayments.current.find((p) => p.bookingRef === `flight:${flight?.id}`) ?? savedPayments.current[0];
+      if (!payment) return setError("Put the flight on a trip first — its payment is linked through the trip.");
+      await pay.open(payment, () => {
+        router.refresh();
+        onClose();
+      });
     });
   }
 
@@ -785,7 +818,7 @@ export function FlightModal({
                     readOnly={spentLinked && spent}
                     tabIndex={spentLinked && spent ? -1 : undefined}
                     aria-label={`Passenger ${i + 1} ${spent ? "spent" : "planned"} ${slot.endsWith("Foreign") || slot === "fareEur" ? foreignCurrency : currency}`}
-                    value={p[slot]}
+                    value={spent ? shownFare(p, slot as "fare" | "fareEur") : p[slot]}
                     onChange={(e) => typeFare(p.key, slot, e.target.value)}
                     onClick={spentLinked && spent ? linked.open : undefined}
                     onFocus={() => {
@@ -794,7 +827,7 @@ export function FlightModal({
                     }}
                     // On a points seat the Spent boxes take the cash paid on
                     // top of the points (taxes, fees, a points + cash fare).
-                    placeholder={p.pointsUsed && spent ? "Cash paid" : undefined}
+                    placeholder={spent ? (spentLinked && !hasPaid ? "—" : p.pointsUsed ? "Cash paid" : undefined) : undefined}
                     inputMode="decimal"
                     className={`${inputClass} text-center ${n === 0 ? "col-start-2 sm:col-start-auto" : ""} ${spentLinked && spent ? "opacity-70" : ""} ${spentLinked && spent && linked.canOpen ? openableClass : ""}`}
                   />
@@ -896,11 +929,25 @@ export function FlightModal({
               onClick={linked.canOpen ? linked.open : undefined}
               className={`${inputClass} opacity-70 ${linked.canOpen ? openableClass : ""}`}
             />
-            <PaidNote linked={flight?.paidCents != null} onOpen={linked.canOpen ? linked.open : undefined} />
+            {/* Nothing linked on a locked flight: the button below says it. */}
+            {hasPaid || typedSpent ? <PaidNote linked={hasPaid} onOpen={linked.canOpen ? linked.open : undefined} /> : null}
             {linked.error ? <span className="mt-0.5 block text-[11px] text-negative">{linked.error}</span> : null}
             {linked.overlay}
           </Field>
         </div>
+        {/* Nothing linked yet: log the payment from here. Inside the Add
+            Trip popup it is offered once the popup has saved. */}
+        {/* Not when every seat is on points — nothing is owed. */}
+        {spentLinked && !hasPaid && !embed && !flight?.cancelledAt && passengers.some((p) => !p.pointsUsed) ? (
+          <PaymentPrompt
+            due={!isEstimate && passengers.some((p) => !p.pointsUsed)}
+            busy={pending || pay.opening}
+            error={pay.error}
+            onAdd={saveAndPay}
+            className="mt-3"
+          />
+        ) : null}
+        {pay.overlay}
 
         <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-3 sm:flex-nowrap">
           <Field label="Remarks" className="min-w-0 basis-full sm:flex-1 sm:basis-auto">

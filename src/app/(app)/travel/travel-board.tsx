@@ -12,6 +12,8 @@ import { StayModal } from "./stay-modal";
 import { FlightModal } from "./flight-modal";
 import { CarModal } from "./car-modal";
 import { FlightsList } from "./flights-panel";
+import { NoTransactionChip } from "./linked-payments";
+import { stayPaymentDue } from "./payment-due";
 import { CarsList } from "./cars-panel";
 import { TripCards } from "./trip-cards";
 import { TripLogPanel } from "./trip-log-panel";
@@ -27,6 +29,7 @@ import {
   effectivePointsValueMicros,
   pointsValueCents,
   savedCents,
+  hotelCents,
   stayYear,
   type TravelBrand,
   type TravelCar,
@@ -369,7 +372,7 @@ export function TravelBoard({
     for (const s of bought) {
       const key = stayYear(s);
       const row = map.get(key) ?? { hotel: 0, pocket: 0, stays: 0, points: 0 };
-      row.hotel += s.hotelCostCents;
+      row.hotel += hotelCents(s);
       row.pocket += s.pocketCostCents;
       row.points += spentPoints(s);
       row.stays += 1;
@@ -463,14 +466,6 @@ export function TravelBoard({
     () => bought.filter((s) => inYears(tallyYear, stayYear(s))),
     [bought, tallyYear],
   );
-  const tallyTotals = useMemo(() => {
-    let spent = 0, saved = 0;
-    for (const s of tallyStays) {
-      spent += s.pocketCostCents;
-      saved += savedCents(s);
-    }
-    return { spent, saved };
-  }, [tallyStays]);
   const tallyPeriod = (value: string[], onChange: (v: string[]) => void, label: string) => (
     <YearPicker years={years} value={value} onChange={onChange} label={label} />
   );
@@ -511,7 +506,7 @@ export function TravelBoard({
     for (const s of filtered) {
       if (s.cancelledAt) { cancelled += 1; continue; }
       if (s.isEstimate) continue;
-      hotel += s.hotelCostCents;
+      hotel += hotelCents(s);
       pocket += s.pocketCostCents;
       points += spentPoints(s);
       pointsValue += spentPointsValue(s);
@@ -675,6 +670,7 @@ export function TravelBoard({
                               Planned
                             </span>
                           ) : null}
+                          {stayPaymentDue(s) ? <NoTransactionChip /> : null}
                         </td>
                         {/* Grey and bracketed when the points were never spent:
                             the figure is what the room would have cost on
@@ -761,6 +757,7 @@ export function TravelBoard({
                               Planned
                             </span>
                           ) : null}
+                          {stayPaymentDue(s) ? <NoTransactionChip /> : null}
                         </span>
                         <span className="shrink-0 text-sm font-bold tabular-nums text-negative">
                           {s.pocketCostCents > 0 ? (
@@ -1290,7 +1287,7 @@ export function TravelBoard({
       if (!matches(s)) continue;
       const key = stayYear(s);
       const row = map.get(key) ?? { hotel: 0, pocket: 0, stays: 0, points: 0 };
-      row.hotel += s.hotelCostCents;
+      row.hotel += hotelCents(s);
       row.pocket += s.pocketCostCents;
       row.points += spentPoints(s);
       row.stays += 1;
@@ -1422,11 +1419,9 @@ export function TravelBoard({
             title="Stays History"
             titleClassName={HEAD_TITLE_COL}
             meta={
-              <HeaderTotals
+              <TallyTotals
                 countLabel={tallyBy === "brands" ? "Total brands" : "Total cards"}
-                count={tallyBy === "brands" ? brandTally.length : cardTally.length}
-                spent={tallyTotals.spent}
-                saved={tallyTotals.saved}
+                rows={tallyBy === "brands" ? brandTally : cardTally}
                 currency={currency}
                 figureClassNames={HEAD_FIGURE_COLS}
               />
@@ -1525,9 +1520,9 @@ export function TravelBoard({
             <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
               {tallySwitch(false)}
               {tallyBy === "brands" ? (
-                <HeaderTotals countLabel="Total brands" count={brandTally.length} spent={tallyTotals.spent} saved={tallyTotals.saved} currency={currency} />
+                <TallyTotals countLabel="Total brands" rows={brandTally} currency={currency} />
               ) : (
-                <HeaderTotals countLabel="Total cards" count={cardTally.length} spent={tallyTotals.spent} saved={tallyTotals.saved} currency={currency} />
+                <TallyTotals countLabel="Total cards" rows={cardTally} currency={currency} />
               )}
               {tallyPeriod(tallyYear, setTallyYear, "Stays history year")}
             </span>
@@ -1794,6 +1789,42 @@ function HeaderTotals({
       <Figure label={countLabel} value={String(count)} tone="" className={figureClassNames?.[0]} />
       <Figure label="Total spent" value={formatMoneyWhole(spent, currency)} tone="text-negative" className={figureClassNames?.[1]} />
       <Figure label="Total cash saved" value={formatMoneyWhole(saved, currency)} tone="text-positive" className={figureClassNames?.[2]} />
+    </>
+  );
+}
+
+// Stays History's own header figures. Its spent and saved totals were the
+// Hotels Log's, word for word (Victor, 2026-10-24); it says instead which
+// brand or card led — by stays and by cash saved.
+function TallyTotals({
+  countLabel,
+  rows,
+  currency,
+  figureClassNames,
+}: {
+  countLabel: string;
+  rows: [string, { stays: number; saved: number }][];
+  currency: string;
+  figureClassNames?: readonly string[];
+}) {
+  // Rows come sorted by stays; "Not linked" stays out of the running.
+  const named = rows.filter(([name]) => name !== "Not linked" && name !== "Unbranded");
+  const mostStays = named[0] ?? null;
+  const mostSaved = named.reduce<(typeof named)[number] | null>((best, r) => (!best || r[1].saved > best[1].saved ? r : best), null);
+  return (
+    <>
+      <Figure label={countLabel} value={String(rows.length)} tone="" className={figureClassNames?.[0]} />
+      {mostStays ? (
+        <Figure label="Most stays" value={`${mostStays[0]} (${mostStays[1].stays})`} tone="" className={figureClassNames?.[1]} />
+      ) : null}
+      {mostSaved && mostSaved[1].saved > 0 ? (
+        <Figure
+          label="Most saved"
+          value={`${mostSaved[0]} ${formatMoneyWhole(mostSaved[1].saved, currency)}`}
+          tone="text-positive"
+          className={figureClassNames?.[2]}
+        />
+      ) : null}
     </>
   );
 }

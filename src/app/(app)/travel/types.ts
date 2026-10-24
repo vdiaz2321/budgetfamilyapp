@@ -94,10 +94,17 @@ export type TravelCard = {
   freeNightCategoryMax: number | null;
 };
 
+// What the room cost. Left blank on a stay paid in cash at the going rate
+// (Premier Inn, 2026-10-24), it is what was paid — not $0, which counted the
+// whole payment as negative savings in every total.
+export function hotelCents(stay: TravelStay): number {
+  return stay.hotelCostCents || stay.pocketCostCents;
+}
+
 // What the room would have cost minus what actually left the wallet. This is
 // the sheet's "Total Saved" column and it reproduces every year in it.
 export function savedCents(stay: TravelStay): number {
-  return stay.hotelCostCents - stay.pocketCostCents;
+  return hotelCents(stay) - stay.pocketCostCents;
 }
 
 /**

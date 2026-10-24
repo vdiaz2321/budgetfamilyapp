@@ -13,7 +13,8 @@ import { TripPicker, useTripChoice } from "./trip-picker";
 import type { Embed } from "./embedded-section";
 import type { TravelCard, TravelCar, TravelTrip } from "./types";
 import { formatCentsPerPoint, microsToCentsField } from "./points-value";
-import { useLinkedPayments } from "./linked-payments";
+import { PaymentPrompt, useAddPayment, useLinkedPayments } from "./linked-payments";
+import { spentTypedByHand, type PaymentPrefill } from "./payment-due";
 
 const rateDisplay = (micros: number) => microsToCentsField(micros);
 
@@ -82,18 +83,26 @@ export function CarModal({
     return car.pointsValueMicros !== implied ? rateDisplay(car.pointsValueMicros) : "";
   });
   const [remarks, setRemarks] = useState(car?.remarks ?? "");
+  // Spent is the linked transactions only, except on a sheet import or a
+  // rental booked before the app — see payment-due. Locked, it shows the
+  // payments, or nothing until one is linked.
+  const hasPaid = car?.paidCents != null;
+  const typedSpent = spentTypedByHand(car ? !car.movesCardPoints : false, reservedOn);
+  const spentLocked = hasPaid || !typedSpent;
+  const shownFig = spentLocked ? { ...fig, spent: hasPaid ? centsToDisplay(car!.paidCents!) : "" } : fig;
   // Booked once a Spent figure or the booking date is in; a plan until then.
-  const isEstimate = isPlannedOnly(Boolean(fig.spent.trim() || fig.spentForeign.trim()), reservedOn);
+  const isEstimate = isPlannedOnly(Boolean(shownFig.spent.trim() || (typedSpent && shownFig.spentForeign.trim())), reservedOn);
+  const pay = useAddPayment();
   const pointsTyped = Number(points.replace(/,/g, "")) || 0;
   const onPoints = pointsUsed && pointsTyped > 0;
   // What the rental costs now: the plan until it is booked. Booked on points
   // it is the Planned figure — Spent is then the cash paid on top.
-  const cost = isEstimate || onPoints ? fig.planned : fig.spent;
+  const cost = isEstimate || onPoints ? fig.planned : shownFig.spent;
   const tripNote = outsideTripNote(trips, trip.tripId, [pickupOn, returnOn]);
   const spentError = spentMissingError({
     reservedOn,
     spentTyped: Boolean(fig.spent.trim() || fig.spentForeign.trim()),
-    exempt: onPoints || car?.paidCents != null,
+    exempt: onPoints || spentLocked,
     dateLabel: "Booking Made",
   });
 
@@ -139,10 +148,28 @@ export function CarModal({
       save: async () => {
         if (spentError) return { error: spentError };
         const result = await saveTravelCar(payload());
-        return { error: result?.error ?? null };
+        return { error: result?.error ?? null, payments: result?.payment ? [result.payment] : [] };
       },
     });
   });
+
+  // "Save & add transaction": the rental saves, then its payment form opens
+  // on top, filled in from it. Done either way, the rental form closes —
+  // what it showed is out of date.
+  function saveAndPay() {
+    if (spentError) return setError(spentError);
+    start(async () => {
+      setError(null);
+      const result: { error: string | null; payment?: PaymentPrefill | null } = await saveTravelCar(payload());
+      if (result.error) return setError(result.error);
+      router.refresh();
+      if (!result.payment) return setError("Put the rental on a trip first — its payment is linked through the trip.");
+      await pay.open(result.payment, () => {
+        router.refresh();
+        onClose();
+      });
+    });
+  }
 
   function finish(result: { error: string | null }) {
     if (result?.error) setError(result.error);
@@ -281,14 +308,24 @@ export function CarModal({
               showing, like the flight form's. */}
           <PlanSpentFields
             picker={<CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />}
-            value={fig}
+            value={shownFig}
             onChange={setFig}
             currency={currency}
             foreignCurrency={foreignCurrency}
             spentRateDate={isEstimate ? undefined : reservedOn}
             spentOnPoints={onPoints}
+            spentLocked={spentLocked}
+            onOpenSpent={linked.canOpen ? linked.open : undefined}
+            spentNote={hasPaid ? undefined : null}
             showForeign={Boolean(foreignCurrency)}
           />
+          {/* Nothing linked yet: log the payment from here. Inside the Add
+              Trip popup it is offered once the popup has saved. */}
+          {/* Not on a rental paid with points — nothing is owed. */}
+          {spentLocked && !hasPaid && !embed && !car?.cancelledAt && !onPoints ? (
+            <PaymentPrompt due={!isEstimate && !onPoints} busy={pending || pay.opening} error={pay.error} onAdd={saveAndPay} className="mt-2" />
+          ) : null}
+          {pay.overlay}
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Card used">
               <select value={accountId} onChange={(e) => pickCard(e.target.value)} className={inputClass}>
@@ -344,7 +381,8 @@ export function CarModal({
                 onClick={linked.canOpen ? linked.open : undefined}
                 className={`${inputClass} opacity-70 ${linked.canOpen ? openableClass : ""}`}
               />
-              <PaidNote linked={car?.paidCents != null} onOpen={linked.canOpen ? linked.open : undefined} />
+              {/* Nothing linked on a locked rental: the button above says it. */}
+              {hasPaid || typedSpent ? <PaidNote linked={hasPaid} onOpen={linked.canOpen ? linked.open : undefined} /> : null}
               {linked.error ? <span className="mt-0.5 block text-[11px] text-negative">{linked.error}</span> : null}
               {linked.overlay}
             </Field>

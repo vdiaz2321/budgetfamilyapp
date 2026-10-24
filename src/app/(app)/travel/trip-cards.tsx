@@ -256,7 +256,10 @@ export function TripCards({
                         style={{ width: `${paidPct}%`, ...(fullyPaid ? { backgroundColor: "var(--positive)" } : overPlan ? { backgroundColor: "var(--negative)" } : {}) }}
                       />
                     </span>
-                    <span className="mt-2 flex items-baseline justify-between gap-2">
+                    {/* Wraps when the card is narrow (three across on a
+                        laptop): Planned drops under, right-aligned, instead of
+                        running past the card's edge. */}
+                    <span className="mt-2 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
                       <span className="flex items-baseline gap-1.5">
                         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Spent</span>
                         <span className="text-sm font-semibold tabular-nums">{formatMoneyWhole(t.spent, currency)}</span>
@@ -265,7 +268,7 @@ export function TripCards({
                         className={`hidden whitespace-nowrap text-sm font-semibold tabular-nums min-[400px]:inline ${fullyPaid || overPlan ? "" : TEAL_TEXT}`}
                         style={overPlan ? { color: "var(--negative)" } : fullyPaid ? { color: "var(--positive)" } : undefined}
                       >{overPlan ? "Over plan" : t.spent > 0 && planned > 0 ? `${paidPct}% paid` : ""}</span>
-                      <span className="flex items-baseline gap-1.5">
+                      <span className="ml-auto flex items-baseline gap-1.5">
                         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned</span>
                         <span className="text-sm font-semibold tabular-nums">{formatMoneyWhole(planned, currency)}</span>
                       </span>

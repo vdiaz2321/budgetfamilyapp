@@ -32,14 +32,15 @@ import {
 } from "./types";
 
 // One transaction, already filtered to real flows (no card payments, savings
-// withdrawals or kids money) and sorted largest amount first — "Largest
-// purchases" takes the first five it meets.
+// withdrawals or kids money).
 export type InsightsTx = {
   id: string;
   occurred_on: string;
   amount_cents: number;
   subcategory_id: string | null;
   payee_id: string | null;
+  // Parts of one split purchase share this; null for a plain transaction.
+  split_group_id: string | null;
 };
 
 export type InsightsRaw = {
@@ -48,20 +49,22 @@ export type InsightsRaw = {
   // cut-off key off this, so the server render and the browser agree.
   today: string;
   tx: InsightsTx[];
-  subs: Record<string, { name: string; kind: CategoryKind | null }>;
+  // `kids`: the item pays into a kids account (a 529) — Kids funding.
+  subs: Record<string, { name: string; kind: CategoryKind | null; kids?: boolean }>;
   payees: Record<string, string>;
   annualRows: { year: number; kind: string; line_label: string; amount_cents: number }[];
 };
 
 const OUTFLOW_ORDER: OutflowKind[] = [
-  "savings", "bills", "expenses", "debt", "uncategorized",
+  "savings", "kids", "bills", "expenses", "debt", "uncategorized",
 ];
 
 // Add an amount to a flows bucket by category kind. Investment folds into
 // savings; uncategorized outflow folds into expenses so no money is dropped.
-function addFlow(f: Flows, kind: CategoryKind | "uncategorized" | "investment", amount: number) {
+function addFlow(f: Flows, kind: CategoryKind | "uncategorized" | "investment" | "kids", amount: number) {
   switch (kind) {
     case "income": f.income += amount; break;
+    case "kids": f.kids += amount; break;
     case "savings": f.savings += amount; break;
     case "investment": f.savings += amount; break;
     case "bills": f.bills += amount; break;
@@ -120,7 +123,9 @@ export function computeInsights(
 
   const kindOf = (subId: string | null): CategoryKind | null =>
     subId ? raw.subs[subId]?.kind ?? null : null;
+  const isKids = (subId: string | null) => Boolean(subId && raw.subs[subId]?.kids);
   const outflowKindOf = (subId: string | null): OutflowKind => {
+    if (isKids(subId)) return "kids";
     const k = kindOf(subId);
     return k && k !== "income" ? k : "uncategorized";
   };
@@ -182,14 +187,17 @@ export function computeInsights(
   const kindTotals = new Map<OutflowKind, number>();
   const subTotals = new Map<string, number>();
   const subTotalsPrior = new Map<string, number>();
-  const merchantAgg = new Map<string, { total: number; count: number }>();
-  const purchases: PurchaseRow[] = [];
+  // A split purchase is one purchase however many items it was split
+  // across: merchants count it once and "Largest purchases" shows its whole
+  // amount (it listed the biggest part, and counted every part).
+  const merchantAgg = new Map<string, { total: number; buys: Set<string> }>();
+  const buys = new Map<string, { id: string; date: string; payee: string; amount: number; parts: { sub: string; kind: OutflowKind; amount: number }[] }>();
 
   for (const t of raw.tx) {
     // (Card payments, savings withdrawals and kids money were already
     // dropped on the server — see page.tsx.)
     const kind = kindOf(t.subcategory_id);
-    const flowKind: CategoryKind | "uncategorized" = kind ?? "uncategorized";
+    const flowKind: CategoryKind | "uncategorized" | "kids" = isKids(t.subcategory_id) ? "kids" : kind ?? "uncategorized";
     const amount = t.amount_cents;
 
     const bi = bucketIdx.get(keyOfDate(granularity, t.occurred_on));
@@ -214,23 +222,34 @@ export function computeInsights(
       subTotals.set(t.subcategory_id, (subTotals.get(t.subcategory_id) ?? 0) + amount);
     }
     const merchant = t.payee_id ? raw.payees[t.payee_id] ?? null : null;
+    const buyKey = t.split_group_id ?? t.id;
     if (merchant) {
-      const m = merchantAgg.get(merchant) ?? { total: 0, count: 0 };
+      const m = merchantAgg.get(merchant) ?? { total: 0, buys: new Set<string>() };
       m.total += amount;
-      m.count += 1;
+      m.buys.add(buyKey);
       merchantAgg.set(merchant, m);
     }
-    if (purchases.length < 5) {
-      purchases.push({
-        id: t.id,
-        date: t.occurred_on,
-        payee: merchant ?? "Uncategorized",
-        sub: t.subcategory_id ? raw.subs[t.subcategory_id]?.name ?? "—" : "Uncategorized",
-        kind: ok,
-        amount,
-      });
-    }
+    const buy = buys.get(buyKey) ?? { id: t.id, date: t.occurred_on, payee: merchant ?? "Uncategorized", amount: 0, parts: [] };
+    buy.amount += amount;
+    buy.parts.push({ sub: t.subcategory_id ? raw.subs[t.subcategory_id]?.name ?? "—" : "Uncategorized", kind: ok, amount });
+    buys.set(buyKey, buy);
   }
+
+  // Largest five purchases; a split one is named by its biggest item.
+  const purchases: PurchaseRow[] = [...buys.values()]
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5)
+    .map((b) => {
+      const top = [...b.parts].sort((x, y) => y.amount - x.amount)[0];
+      return {
+        id: b.id,
+        date: b.date,
+        payee: b.payee,
+        sub: b.parts.length > 1 ? `${top.sub} + ${b.parts.length - 1} more` : top.sub,
+        kind: top.kind,
+        amount: b.amount,
+      };
+    });
 
   // For yearly buckets that have imported annual data, that data wins over the
   // sparse transaction rows for the same year.
@@ -244,6 +263,7 @@ export function computeInsights(
       spending: spendingOf(f),
       savings: f.savings,
       debt: f.debt,
+      kids: f.kids,
       selected: keys.includes(k),
     };
   });
@@ -256,7 +276,7 @@ export function computeInsights(
   let firstKeep = 0;
   for (let i = 0; i < rawBuckets.length; i++) {
     const b = rawBuckets[i];
-    const hasFlow = b.income > 0 || b.spending > 0 || b.savings > 0 || b.debt > 0;
+    const hasFlow = b.income > 0 || b.spending > 0 || b.savings > 0 || b.debt > 0 || b.kids > 0;
     if (hasFlow || keys.includes(b.key) || b.key === currentKey) {
       firstKeep = i;
       break;
@@ -273,6 +293,7 @@ export function computeInsights(
     annualSum.expenses += f.expenses;
     annualSum.debt += f.debt;
     annualSum.savings += f.savings;
+    annualSum.kids += f.kids;
   }
   const totals: Flows = {
     income: annualSum.income + txSel.income,
@@ -280,6 +301,7 @@ export function computeInsights(
     expenses: annualSum.expenses + txSel.expenses,
     debt: annualSum.debt + txSel.debt,
     savings: annualSum.savings + txSel.savings,
+    kids: annualSum.kids + txSel.kids,
   };
   const priAnnual = multi ? null : annualForKey(prior);
   const priorFlows = multi ? emptyFlows() : priAnnual ?? txPri;
@@ -293,6 +315,7 @@ export function computeInsights(
       : k === "bills" ? annualSum.bills
       : k === "expenses" ? annualSum.expenses
       : k === "debt" ? annualSum.debt
+      : k === "kids" ? annualSum.kids
       : 0;
   const kinds: KindSlice[] = OUTFLOW_ORDER.map((k) => ({
     kind: k,
@@ -355,7 +378,7 @@ export function computeInsights(
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 8);
     merchants = [...merchantAgg.entries()]
-      .map(([name, m]) => ({ name, count: m.count, total: m.total, avg: Math.round(m.total / m.count) }))
+      .map(([name, m]) => ({ name, count: m.buys.size, total: m.total, avg: Math.round(m.total / m.buys.size) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 6);
   }

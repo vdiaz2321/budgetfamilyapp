@@ -21,25 +21,27 @@ export default async function InsightsPage() {
     { data: subs, error: subsError },
     { data: payees, error: payeesError },
     { data: accounts, error: accountsError },
+    { data: buckets, error: bucketsError },
     txRows,
     { data: annualRows, error: annualRowsError },
   ] = await Promise.all([
     ensureCategories(supabase, household.id),
-    supabase.from("subcategories").select("id, name, category_id").eq("household_id", household.id),
+    supabase.from("subcategories").select("id, name, category_id, linked_account_id, linked_bucket_id").eq("household_id", household.id),
     supabase.from("payees").select("id, name").eq("household_id", household.id),
     supabase.from("accounts").select("id, is_kids_account").eq("household_id", household.id),
+    supabase.from("buckets").select("id, account_id").eq("household_id", household.id),
     // All of it: every period and granularity is sliced from this one set.
     // Past PostgREST's 1000-row cap, so paged on a stable key.
     fetchAllRows<{
       id: string; occurred_on: string; amount_cents: number;
       subcategory_id: string | null; payee_id: string | null;
       account_id: string | null; paid_to_account_id: string | null;
-      is_withdrawal: boolean | null;
+      is_withdrawal: boolean | null; split_group_id: string | null;
     }>((from, to) =>
       supabase
         .from("transactions")
         .select(
-          "id, occurred_on, amount_cents, subcategory_id, payee_id, account_id, paid_to_account_id, is_withdrawal",
+          "id, occurred_on, amount_cents, subcategory_id, payee_id, account_id, paid_to_account_id, is_withdrawal, split_group_id",
         )
         .eq("household_id", household.id)
         .order("id")
@@ -51,12 +53,20 @@ export default async function InsightsPage() {
       .select("year, kind, line_label, amount_cents")
       .eq("household_id", household.id),
   ]);
-  throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, annualRows: annualRowsError });
+  throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, annualRows: annualRowsError });
 
   const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
   const kidsAccounts = new Set(
     (accounts ?? []).filter((a) => a.is_kids_account).map((a) => a.id),
   );
+
+  // The 529 items: Budget subs paying into a kids account, directly or
+  // through one of its buckets — Kids funding, as on the Annual Overview.
+  const accountByBucket = new Map((buckets ?? []).map((b) => [b.id, b.account_id]));
+  const kidsSub = (s: { linked_account_id: string | null; linked_bucket_id: string | null }) => {
+    const accountId = s.linked_bucket_id ? accountByBucket.get(s.linked_bucket_id) : s.linked_account_id;
+    return Boolean(accountId && kidsAccounts.has(accountId));
+  };
 
   const raw: InsightsRaw = {
     currency: household.currency,
@@ -72,17 +82,16 @@ export default async function InsightsPage() {
           !t.is_withdrawal && // savings withdrawal (transfer)
           !(t.account_id && kidsAccounts.has(t.account_id)), // kids money
       )
-      // Largest first — "Largest purchases" takes the first five it meets.
-      .sort((a, b) => b.amount_cents - a.amount_cents)
       .map((t) => ({
         id: t.id,
         occurred_on: t.occurred_on,
         amount_cents: t.amount_cents,
         subcategory_id: t.subcategory_id,
         payee_id: t.payee_id,
+        split_group_id: t.split_group_id,
       })),
     subs: Object.fromEntries(
-      (subs ?? []).map((s) => [s.id, { name: s.name, kind: kindByCat.get(s.category_id) ?? null }]),
+      (subs ?? []).map((s) => [s.id, { name: s.name, kind: kindByCat.get(s.category_id) ?? null, kids: kidsSub(s) }]),
     ),
     payees: Object.fromEntries((payees ?? []).map((p) => [p.id, p.name])),
     annualRows: annualRows ?? [],

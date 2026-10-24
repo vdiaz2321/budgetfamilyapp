@@ -152,12 +152,14 @@ export function formatMoney(cents: number, currency = "$"): string {
 /** Whole units in any ISO currency — "€700", "CHF700", "Kč700". */
 export function formatForeignWhole(cents: number, code: string): string {
   const units = Math.round(Math.abs(cents) / 100);
-  return `${cents < 0 ? MINUS : ""}${foreignSymbol(code)}${units.toLocaleString("en-US")}`;
+  // No sign on a figure that rounds to nothing: −24¢ is "€0", not "−€0".
+  return `${cents < 0 && units > 0 ? MINUS : ""}${foreignSymbol(code)}${units.toLocaleString("en-US")}`;
 }
 
 export function formatMoneyWhole(cents: number, currency = "$"): string {
   const symbol = currencySymbol(currency);
   const dollars = Math.round(Math.abs(cents) / 100);
   const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${cents < 0 ? MINUS : ""}${symbol}${withCommas}`;
+  // No sign on a figure that rounds to nothing: −24¢ is "$0", not "−$0".
+  return `${cents < 0 && dollars > 0 ? MINUS : ""}${symbol}${withCommas}`;
 }

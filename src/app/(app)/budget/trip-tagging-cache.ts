@@ -30,6 +30,12 @@ export function refreshTripTagging(): Promise<void> {
   return inFlight;
 }
 
+/** A refresh that starts after a save: one already running may predate it. */
+export async function refreshTripTaggingAfterSave(): Promise<void> {
+  if (inFlight) await inFlight;
+  return refreshTripTagging();
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => {

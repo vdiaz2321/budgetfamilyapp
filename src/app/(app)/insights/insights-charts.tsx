@@ -9,6 +9,8 @@ import type { ChartBucket, OutflowKind } from "./types";
 // label + percentage, so color is never the only cue.
 export const KIND_COLOR: Record<OutflowKind, string> = {
   savings: "var(--viz-savings)",
+  // The Annual Overview's Kids Funding colour.
+  kids: "var(--foreground)",
   bills: "var(--viz-bills)",
   expenses: "var(--viz-expenses)",
   debt: "var(--viz-debt)",
@@ -17,6 +19,7 @@ export const KIND_COLOR: Record<OutflowKind, string> = {
 
 export const KIND_LABEL: Record<OutflowKind, string> = {
   savings: "Savings",
+  kids: "Kids funding",
   bills: "Bills",
   expenses: "Expenses",
   debt: "Debt",
@@ -147,11 +150,12 @@ export function TrendChart({
                     <TooltipRow color="var(--viz-spending)" label="Bills & Expenses" amount={b.spending} currency={currency} />
                     <TooltipRow color="var(--viz-savings)" label="Savings" amount={b.savings} currency={currency} />
                     <TooltipRow color="var(--viz-debt)" label="Debt paid" amount={b.debt} currency={currency} />
+                    {b.kids ? <TooltipRow color="var(--foreground)" label="Kids funding" amount={b.kids} currency={currency} /> : null}
                     <div className="mt-1 flex items-center justify-between gap-4 border-t border-line pt-1 font-semibold">
                       <span>Net</span>
                       <span className="tabular-nums">
                         {formatMoney(
-                          b.income - b.spending - b.savings - b.debt,
+                          b.income - b.spending - b.savings - b.debt - b.kids,
                           currency,
                         )}
                       </span>

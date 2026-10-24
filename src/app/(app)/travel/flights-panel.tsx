@@ -3,6 +3,8 @@
 import { formatMoneyWhole } from "@/lib/money";
 import { sheetDateRange } from "./trip-summary";
 import type { TravelFlight } from "./types";
+import { NoTransactionChip } from "./linked-payments";
+import { flightPaymentDue } from "./payment-due";
 
 // "Stuttgart → Málaga → Stuttgart": each place once, in flying order. A gap
 // between legs (landing in one city, leaving from another) shows both.
@@ -70,6 +72,7 @@ export function FlightsList({
                         Cancelled
                       </span>
                     ) : null}
+                    {flightPaymentDue(f) ? <NoTransactionChip /> : null}
                   </span>
                 </span>
                 <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted sm:contents sm:text-sm">

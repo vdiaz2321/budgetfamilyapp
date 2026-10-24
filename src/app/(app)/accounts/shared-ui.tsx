@@ -241,6 +241,10 @@ export function PayCardModal({
     ? Math.min(transfer.balanceCents, Math.max(0, transfer.plannedCents - transfer.paidCents) || transfer.minCents || transfer.balanceCents)
     : 0;
   const prefillCents = transfer ? transferPrefillCents : owedCents > 0 ? owedCents : debtPrefillCents;
+  // The amount as typed, so the line under it describes this payment — it
+  // said "Full balance" even with $1 typed. Reset when the target switches.
+  const [typed, setTyped] = useState<{ key: string; cents: number } | null>(null);
+  const amountCents = typed && typed.key === transferSubId ? typed.cents : prefillCents;
 
   return (
     <div
@@ -341,6 +345,7 @@ export function PayCardModal({
             step="0.01"
             min="0"
             defaultValue={prefillCents > 0 ? centsToDisplay(prefillCents) : ""}
+            onChange={(e) => setTyped({ key: transferSubId, cents: Math.round((Number(e.target.value) || 0) * 100) })}
             required
             autoFocus
           />
@@ -349,9 +354,15 @@ export function PayCardModal({
               Balance transfer: lowers {transfer.name}, not Card owed.
             </p>
           ) : owedCents > 0 ? (
-            <p className="text-[10px] text-muted">
-              Full balance — pays the card to {formatMoney(0, currency)}.
-            </p>
+            amountCents <= 0 ? null : (
+              <p className="text-[10px] text-foreground">
+                {amountCents === owedCents
+                  ? `Full balance — pays the card to ${formatMoney(0, currency)}.`
+                  : amountCents < owedCents
+                    ? `Leaves ${formatMoney(owedCents - amountCents, currency)} owed.`
+                    : `${formatMoney(amountCents - owedCents, currency)} over the balance — leaves a credit.`}
+              </p>
+            )
           ) : debtBalanceCents > 0 ? (
             <p className="text-[10px] text-muted">
               {debtPlanCents > 0 && debtPlanLeftCents === 0

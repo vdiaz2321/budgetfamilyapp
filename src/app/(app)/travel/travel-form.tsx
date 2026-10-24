@@ -115,6 +115,7 @@ export function PlanSpentFields({
   showForeign = true,
   spentRateDate,
   picker,
+  spentNote,
 }: {
   value: PlanSpent;
   onChange: (next: PlanSpent) => void;
@@ -140,6 +141,9 @@ export function PlanSpentFields({
   /** The currency picker. Dollars only, it shares the row with the two
    *  boxes instead of taking a line of its own above two half-width boxes. */
   picker?: React.ReactNode;
+  /** Shown under a locked Spent box in place of where its figure comes
+   *  from — null for none, when the form says it beside the boxes. */
+  spentNote?: React.ReactNode;
 }) {
   const usd = currencySymbol(currency);
   // Typing in a foreign box fills the dollar box beside it, the way the
@@ -212,10 +216,11 @@ export function PlanSpentFields({
           onClick={locked ? onOpenSpent : undefined}
           readOnly={locked}
           tabIndex={locked ? -1 : undefined}
+          placeholder={locked ? "—" : undefined}
           inputMode="decimal"
           className={`${inputClass} text-center ${locked ? "opacity-70" : ""} ${locked && onOpenSpent ? openableClass : ""}`}
         />
-        {locked ? <PaidNote linked onOpen={onOpenSpent} /> : null}
+        {locked ? (spentNote !== undefined ? spentNote : <PaidNote linked onOpen={onOpenSpent} />) : null}
       </Field>
     );
   };

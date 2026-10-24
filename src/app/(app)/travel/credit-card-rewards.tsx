@@ -2225,10 +2225,14 @@ function CreditCardPanel({
   // The cents-per-point typed in Edit — the same figure, under the same
   // name, as the Value per pt column in Points/Value Historical Data.
   const valuePerPt = statedCentsPerPoint(d?.pointsValueMicros);
-  const hasMetrics = Boolean(
-    valuePerPt != null || (d && (d.currentPoints > 0 || d.freeNightCreditCents || d.freeNightPointsLimit || d.freeNightCategoryMax
-      || d.freeNightExpiresOn || d.benefitUsedOn || d.benefitBookedOn || d.charging)),
+  const hasRewards = Boolean(
+    d && (d.currentPoints > 0 || d.freeNightCreditCents || d.freeNightPointsLimit || d.freeNightCategoryMax
+      || d.freeNightExpiresOn || d.benefitUsedOn || d.benefitBookedOn || d.charging),
   );
+  // A card being paid off with nothing on it but a value per point (the
+  // Ventures) was a full row of dashes; it keeps the single identity line —
+  // name, Debt and owed (Victor, 2026-10-24).
+  const hasMetrics = hasRewards || (valuePerPt != null && !carryingDebt);
 
   // Anniversary passed since the card was last touched. Nothing may need
   // changing — Mark updated says so and clears the warning. Shown under the

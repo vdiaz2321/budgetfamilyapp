@@ -6,16 +6,19 @@ export type { Granularity };
 // A spending "kind" for Insights is the four outflow category kinds plus a
 // synthetic "uncategorized" for transactions with no subcategory. Income is
 // tracked separately (it's an inflow), so it never appears in the donut.
-export type OutflowKind = Exclude<CategoryKind, "income"> | "uncategorized";
+export type OutflowKind = Exclude<CategoryKind, "income"> | "kids" | "uncategorized";
 
 // Per-period money flows. `savings` folds in investment contributions;
-// spending is derived as bills + expenses.
+// spending is derived as bills + expenses. `kids` is the 529 deposits (Budget
+// items linked to a kids account): money out, but never "saved" — the same
+// split the Annual Overview makes (Victor, 2026-09-28).
 export type Flows = {
   income: number;
   bills: number;
   expenses: number;
   debt: number;
   savings: number;
+  kids: number;
 };
 
 export const emptyFlows = (): Flows => ({
@@ -24,10 +27,11 @@ export const emptyFlows = (): Flows => ({
   expenses: 0,
   debt: 0,
   savings: 0,
+  kids: 0,
 });
 
 export const spendingOf = (f: Flows): number => f.bills + f.expenses;
-export const outflowOf = (f: Flows): number => f.bills + f.expenses + f.debt + f.savings;
+export const outflowOf = (f: Flows): number => f.bills + f.expenses + f.debt + f.savings + f.kids;
 
 // One bar group in the trend chart. `selected` is the period the summary
 // below reflects (highlighted in the chart, clickable to change).
@@ -38,6 +42,7 @@ export type ChartBucket = {
   spending: number;
   savings: number;
   debt: number;
+  kids: number;
   selected: boolean;
 };
 

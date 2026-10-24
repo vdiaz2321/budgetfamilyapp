@@ -8,6 +8,7 @@ import { centsPerPointToMicros } from "./points-value";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { syncRewardLedger } from "./reward-ledger";
 import { linkedPaidCents } from "./booking-payments";
+import { paymentDue, spentTypedByHand, type PaymentPrefill } from "./payment-due";
 import type { CarKind } from "./types";
 
 function revalidate() {
@@ -53,7 +54,7 @@ export type CarPayload = {
 const carNote = (company: string | null, bookingCode: string | null) =>
   [company ?? "Car rental", bookingCode].filter(Boolean).join(" ");
 
-export async function saveTravelCar(payload: CarPayload) {
+export async function saveTravelCar(payload: CarPayload): Promise<{ error: string | null; payment?: PaymentPrefill | null }> {
   const { supabase, household } = await getSessionContext();
   // None picked: dollars only, so no second-currency figure is kept.
   const foreignCurrency = /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : null;
@@ -83,10 +84,21 @@ export async function saveTravelCar(payload: CarPayload) {
   const cents = (v: string) => (v.trim() ? Math.max(0, displayToCents(v)) : null);
   // Booked once a Spent figure or the booking date is in (isPlannedOnly in
   // travel-form); the family car is always a real drive.
-  const isEstimate = rental && !payload.spent.trim() && !payload.spentForeign.trim() && !reservedOn;
   // Linked transactions set the pocket cost and mark it booked; a form save
   // keeps both rather than undoing what the payments did.
-  const paid = payload.id ? await linkedPaidCents(supabase, householdId, "car", payload.id) : null;
+  const [paid, stored] = await Promise.all([
+    payload.id ? linkedPaidCents(supabase, householdId, "car", payload.id) : null,
+    payload.id
+      ? supabase.from("travel_cars").select("moves_card_points, cancelled_at").eq("id", payload.id).eq("household_id", householdId).maybeSingle()
+      : null,
+  ]);
+  if (stored?.error) return { error: `Couldn't load that car — ${stored.error.message}` };
+  // A sheet import keeps its typed Spent; any other rental's Spent is its
+  // linked transactions only, so a figure posted from the form is ignored.
+  const imported = stored?.data ? !stored.data.moves_card_points : false;
+  const typedSpent = !rental || spentTypedByHand(imported, reservedOn);
+  const spent = typedSpent ? payload.spent : "";
+  const isEstimate = rental && !spent.trim() && !(typedSpent && payload.spentForeign.trim()) && !reservedOn;
   // The family car isn't paid for with points.
   const points = rental ? Math.max(0, Math.trunc(Number(payload.points.replace(/,/g, "")) || 0)) : 0;
   const pointsUsed = rental && payload.pointsUsed && points > 0;
@@ -94,13 +106,13 @@ export async function saveTravelCar(payload: CarPayload) {
   // so every total that reads them is unchanged. Booked on points, its cost
   // is the Planned figure (what the points stood in for) and Spent is the
   // cash paid on top of the points.
-  const cost = (isEstimate || pointsUsed ? cents(payload.planned) : cents(payload.spent)) ?? 0;
+  const cost = (isEstimate || pointsUsed ? cents(payload.planned) : cents(spent)) ?? 0;
   const costForeign = isEstimate ? cents(payload.plannedForeign) : cents(payload.spentForeign);
   // Nothing leaves a card until a planned rental is booked.
   const drawPoints = pointsUsed && (!isEstimate || paid != null) ? points : 0;
   // What left the wallet: the cost, or on points only the cash paid on top.
   // Linked transactions replace it (see `paid`).
-  const pocketCost = pointsUsed ? (isEstimate ? 0 : cents(payload.spent) ?? 0) : cost;
+  const pocketCost = pointsUsed ? (isEstimate ? 0 : cents(spent) ?? 0) : cost;
   const pointsValueMicros =
     centsPerPointToMicros(payload.pointsValueCents) ?? (points > 0 && cost > 0 ? Math.round((cost / points) * 10_000) : null);
 
@@ -147,6 +159,7 @@ export async function saveTravelCar(payload: CarPayload) {
   };
   const meta = { occurredOn: reservedOn || pickupOn, bookedOn: null, note: carNote(company, bookingCode) };
 
+  let carId: string | null = null;
   if (payload.id) {
     const prev = unwrap(
       await supabase
@@ -177,6 +190,7 @@ export async function saveTravelCar(payload: CarPayload) {
       .eq("id", payload.id)
       .eq("household_id", householdId);
     if (error) return fail(`Couldn't save that car — ${error.message}`);
+    carId = payload.id;
   } else {
     const sync = await syncRewardLedger(
       supabase,
@@ -188,12 +202,35 @@ export async function saveTravelCar(payload: CarPayload) {
       "car_booking",
     );
     if (sync.error) return fail(sync.error);
-    const { error } = await supabase.from("travel_cars").insert({ ...row, reward_activity_id: sync.activityId });
+    const { data, error } = await supabase.from("travel_cars").insert({ ...row, reward_activity_id: sync.activityId }).select("id").single();
     if (error) return fail(`Couldn't save that car — ${error.message}`);
+    carId = data.id;
   }
 
   revalidate();
-  return { error: null };
+  // What the transaction form needs to log this rental's payment — only for
+  // a rental on a trip whose Spent comes from transactions and has none yet.
+  const payment: PaymentPrefill | null =
+    typedSpent || paid != null || !trip.tripId || !carId
+      ? null
+      : {
+          bookingRef: `car:${carId}`,
+          tripId: trip.tripId,
+          label: company ?? "Car rental",
+          accountId,
+          amountCents: pointsUsed ? null : row.planned_cost_cents,
+          payee: company ?? "",
+          date: reservedOn,
+          due: paymentDue({
+            isEstimate,
+            cancelledAt: stored?.data?.cancelled_at ?? null,
+            paid: false,
+            imported,
+            reservedOn,
+            cashToPay: !pointsUsed,
+          }),
+        };
+  return { error: null, payment };
 }
 
 async function loadCar(id: string) {
@@ -254,7 +291,14 @@ export async function setTravelCarCancelled(id: string, cancelled: boolean) {
   }
   const { error } = await supabase
     .from("travel_cars")
-    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId, payment_restore: null })
+    // Payments still linked keep what unlinking them would restore, the
+    // same as a form save — wiping it left a deleted payment's amount
+    // behind as Spent with no transaction.
+    .update({
+      cancelled_at: cancelled ? new Date().toISOString() : null,
+      reward_activity_id: activityId,
+      ...((await linkedPaidCents(supabase, householdId, "car", id)) == null ? { payment_restore: null } : {}),
+    })
     .eq("id", id)
     .eq("household_id", householdId);
   if (error) return { error: `Couldn't update that booking — ${error.message}` };

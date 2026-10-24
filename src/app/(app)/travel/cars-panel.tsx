@@ -3,6 +3,8 @@
 import { formatMoneyWhole } from "@/lib/money";
 import { sheetDateRange } from "./trip-summary";
 import type { TravelCar } from "./types";
+import { NoTransactionChip } from "./linked-payments";
+import { carPaymentDue } from "./payment-due";
 
 /** Car rentals and family-car drives, newest first — one line each. */
 export function CarsList({
@@ -60,6 +62,7 @@ export function CarsList({
                         Cancelled
                       </span>
                     ) : null}
+                    {carPaymentDue(c) ? <NoTransactionChip /> : null}
                   </span>
                 </span>
                 <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted sm:contents sm:text-sm">

@@ -119,6 +119,9 @@ function TransactionModalForm({
   initialIsRefund = false,
   initialMemo,
   restrictToInitialKind = false,
+  initialTripId,
+  initialBookingRef,
+  onSaved,
   onAddRefund,
   onClose,
 }: {
@@ -143,6 +146,13 @@ function TransactionModalForm({
   initialIsRefund?: boolean;
   initialMemo?: string;
   restrictToInitialKind?: boolean;
+  // Opened from a booking on the Travel Log: its trip and the booking the
+  // payment is for, picked already — the booking's own trip, never a guess.
+  initialTripId?: string;
+  initialBookingRef?: string;
+  // Told once a new transaction has been saved (Travel Log: the booking
+  // form behind it closes too).
+  onSaved?: () => void;
   // Set by the wrapper below: swaps this form for a new refund of the
   // saved purchase being edited.
   onAddRefund?: (tx: TxData) => void;
@@ -324,7 +334,7 @@ function TransactionModalForm({
   // picked by hand, never guessed from the date.
   const { trips, bookingsByTrip, spendingRowsByTrip } = useTripTagging();
   const [dateValue, setDateValue] = useState(defaultDate);
-  const [tripId, setTripId] = useState(editTx?.tripId ?? "");
+  const [tripId, setTripId] = useState(editTx?.tripId ?? initialTripId ?? "");
   // The dropdown lists trips still running this year or ahead — plus
   // whichever trip is selected, however old, so an edit never loses it.
   const thisYearStart = `${new Date().getFullYear()}-01-01`;
@@ -340,7 +350,7 @@ function TransactionModalForm({
   // Stays: free night / hotel credit set on the payment ("" = the stay's own).
   const [bookingFreeNight, setBookingFreeNight] = useState<"" | "on" | "off">("");
   const [bookingCredit, setBookingCredit] = useState("");
-  const [bookingRef, setBookingRef] = useState(editTx?.bookingRef ?? "");
+  const [bookingRef, setBookingRef] = useState(editTx?.bookingRef ?? initialBookingRef ?? "");
   const bookingOk = bookings.some((b) => b.ref === bookingRef);
   // Which Travel Log column a trip purchase lands in when it's on one of the
   // two trip items: the catch-all (Traveling/Trips, own column Other) or the
@@ -669,6 +679,7 @@ function TransactionModalForm({
           fd.set("amount", (splits[0].amountCents / 100).toFixed(2));
           note(await addTransaction(fd));
         }
+        onSaved?.();
         if (warnings.length) return setSavedWarning(warnings.join(" "));
         if (fd.get("createAnother") === "on") {
           formRef.current?.reset();

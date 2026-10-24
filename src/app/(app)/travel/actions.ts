@@ -9,6 +9,7 @@ import { centsPerPointToMicros } from "./points-value";
 import { syncFreeNightStamp, syncRewardLedger, type RewardDraw } from "./reward-ledger";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { linkedPaidCents } from "./booking-payments";
+import { paymentDue, spentTypedByHand, stayCashToPay, type PaymentPrefill } from "./payment-due";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -42,7 +43,7 @@ const int = (formData: FormData, key: string) =>
 
 
 
-export async function saveTravelStay(formData: FormData) {
+export async function saveTravelStay(formData: FormData): Promise<{ error: string | null; payment?: PaymentPrefill | null }> {
   const { supabase, householdId } = await requireHousehold();
 
   const id = String(formData.get("id") ?? "").trim() || null;
@@ -70,8 +71,19 @@ export async function saveTravelStay(formData: FormData) {
   // credit or certificate — off a card.
   // Linked transactions set the pocket cost and mark it booked; a form save
   // keeps both rather than undoing what the payments did.
-  const paid = id ? await linkedPaidCents(supabase, householdId, "stay", id) : null;
-  const isEstimate = money("pocketCost") == null && money("spentForeign") == null && !reservedOn && paid == null;
+  // A sheet import keeps its typed Spent; any other stay's Spent is its
+  // linked transactions only, so a figure posted from the form is ignored.
+  const [paid, stored] = await Promise.all([
+    id ? linkedPaidCents(supabase, householdId, "stay", id) : null,
+    id
+      ? supabase.from("travel_stays").select("moves_card_points, trip_id, cancelled_at").eq("id", id).eq("household_id", householdId).maybeSingle()
+      : null,
+  ]);
+  if (stored?.error) return { error: `Couldn't load that stay — ${stored.error.message}` };
+  const imported = stored?.data ? !stored.data.moves_card_points : false;
+  const typedSpent = spentTypedByHand(imported, reservedOn || null);
+  const spentTyped = typedSpent ? money("pocketCost") : null;
+  const isEstimate = spentTyped == null && (!typedSpent || money("spentForeign") == null) && !reservedOn && paid == null;
   const plannedCost = money("plannedCost");
   const pointsDrawn = pointsUsed && !isEstimate ? pointsCost : 0;
   const hotelCredit = Math.max(0, displayToCents(String(formData.get("hotelCredit") ?? "0")));
@@ -79,7 +91,7 @@ export async function saveTravelStay(formData: FormData) {
   const certificateUsed = freeNightUsed && !isEstimate;
   // The pocket column holds what the stay costs now — the plan until it is
   // booked — so every total that reads it is unchanged.
-  const pocketCost = paid ?? (isEstimate ? plannedCost : money("pocketCost")) ?? 0;
+  const pocketCost = paid ?? (isEstimate ? plannedCost : spentTyped) ?? 0;
   // Sent by the stay form; blank is None (dollars only). A form that doesn't
   // offer it leaves the stay's own currency alone.
   const currencySent = formData.has("foreignCurrency");
@@ -163,6 +175,31 @@ export async function saveTravelStay(formData: FormData) {
     updated_at: new Date().toISOString(),
   };
 
+  // What the transaction form needs to log this stay's payment — only for a
+  // stay on a trip whose Spent comes from transactions and has none yet.
+  const payAtProperty = formData.has("payAtPropertySent") && formData.get("payAtProperty") === "on";
+  const paymentTripId = tripField ? trip.tripId : stored?.data?.trip_id ?? null;
+  const payment = (stayId: string): PaymentPrefill | null =>
+    typedSpent || paid != null || !paymentTripId
+      ? null
+      : {
+          bookingRef: `stay:${stayId}`,
+          tripId: paymentTripId,
+          label: propertyName,
+          accountId,
+          amountCents: pointsUsed || freeNightUsed ? null : plannedCost,
+          payee: propertyName,
+          date: reservedOn || null,
+          due: paymentDue({
+            isEstimate,
+            cancelledAt: stored?.data?.cancelled_at ?? null,
+            paid: false,
+            imported,
+            reservedOn: reservedOn || null,
+            cashToPay: stayCashToPay({ pointsUsed, freeNightUsed, payAtProperty, checkIn }),
+          }),
+        };
+
   // ---- Editing an existing stay. Points, hotel credit and the card can all
   // change now; the ledger is handed the difference so the card's balance
   // follows the edit instead of drifting away from it.
@@ -196,7 +233,9 @@ export async function saveTravelStay(formData: FormData) {
         supabase,
         householdId,
         before,
-        { accountId, points: pointsDrawn, credit: creditDrawn },
+        // A cancelled stay draws nothing until it is restored — the restore
+        // takes its points then. Drawing here took them twice.
+        prev.cancelled_at ? { accountId, points: 0, credit: 0 } : { accountId, points: pointsDrawn, credit: creditDrawn },
         { occurredOn: reservedOn || checkIn, bookedOn: checkIn, note: propertyName },
         prev.reward_activity_id,
       );
@@ -225,7 +264,7 @@ export async function saveTravelStay(formData: FormData) {
     );
     if (stampError) return fail(stampError);
     revalidate();
-    return { error: null };
+    return { error: null, payment: payment(id) };
   }
 
   // ---- New stay. Points and hotel credit come off the card through the same
@@ -239,9 +278,11 @@ export async function saveTravelStay(formData: FormData) {
   );
   if (sync.error) return fail(sync.error);
 
-  const { error } = await supabase
+  const { data: inserted, error } = await supabase
     .from("travel_stays")
-    .insert({ ...row, reward_activity_id: sync.activityId ?? null, moves_card_points: true });
+    .insert({ ...row, reward_activity_id: sync.activityId ?? null, moves_card_points: true })
+    .select("id")
+    .single();
   if (error) {
     console.error("[saveTravelStay:insert]", error);
     return fail(`Couldn't save that stay — ${error.message}`);
@@ -251,7 +292,7 @@ export async function saveTravelStay(formData: FormData) {
     if (stampError) return fail(stampError);
   }
   revalidate();
-  return { error: null };
+  return { error: null, payment: payment(inserted.id) };
 }
 
 // Removes the reservation from the log entirely, and hands back whatever it
@@ -413,7 +454,14 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
 
   const { error } = await supabase
     .from("travel_stays")
-    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId, payment_restore: null })
+    // Payments still linked keep what unlinking them would restore, the
+    // same as a form save — wiping it left a deleted payment's amount
+    // behind as Spent with no transaction.
+    .update({
+      cancelled_at: cancelled ? new Date().toISOString() : null,
+      reward_activity_id: activityId,
+      ...((await linkedPaidCents(supabase, householdId, "stay", id)) == null ? { payment_restore: null } : {}),
+    })
     .eq("id", id)
     .eq("household_id", householdId);
   if (error) {

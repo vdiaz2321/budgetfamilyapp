@@ -247,7 +247,7 @@ export function InsightsBoard({ raw }: { raw: InsightsRaw }) {
                         <span className="min-w-0">
                           <span className="block truncate font-medium">{m.name}</span>
                           <span className="text-xs text-muted">
-                            {m.count} {m.count === 1 ? "transaction" : "transactions"}
+                            {m.count} {m.count === 1 ? "purchase" : "purchases"}
                           </span>
                         </span>
                         <span className="ml-2 shrink-0 font-semibold tabular-nums">
@@ -369,6 +369,15 @@ function priorForKind(kind: OutflowKind, prior: Flows): number | null {
   return prior[kind];
 }
 
+// Change colour, the hero cards' rule: spending down is good (green), up is
+// bad (red) — but Savings is the other way round; less saved is not good news.
+// "flat" and "—" stay plain so they never masquerade as feedback.
+function changeTone(changePct: number | null, kind: OutflowKind): string {
+  if (changePct == null || Math.abs(changePct) < 0.5) return "text-muted";
+  const good = kind === "savings" ? changePct > 0 : changePct < 0;
+  return good ? "font-semibold text-positive" : "font-semibold text-negative";
+}
+
 function KindTableRow({
   slice,
   priorAmount,
@@ -394,12 +403,7 @@ function KindTableRow({
       : Math.abs(changePct) < 0.5
       ? "flat"
       : changeWords(changePct);
-  const changeClass =
-    changePct == null || Math.abs(changePct) < 0.5
-      ? "text-muted"
-      : changePct < 0
-      ? "font-semibold text-positive"
-      : "font-semibold text-negative";
+  const changeClass = changeTone(changePct, slice.kind);
 
   return (
     <tr className="text-sm">
@@ -453,14 +457,7 @@ function CategoryTableRow({
       : Math.abs(changePct) < 0.5
       ? "flat"
       : changeWords(changePct);
-  // Category spending: a drop is good (green), a rise is bad (red). "flat" and
-  // "—" stay muted so they never masquerade as feedback.
-  const changeClass =
-    changePct == null || Math.abs(changePct) < 0.5
-      ? "text-muted"
-      : changePct < 0
-      ? "font-semibold text-positive"
-      : "font-semibold text-negative";
+  const changeClass = changeTone(changePct, row.kind);
 
   return (
     <tr className="text-sm">

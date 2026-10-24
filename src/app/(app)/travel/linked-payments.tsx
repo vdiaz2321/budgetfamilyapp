@@ -7,7 +7,9 @@ import { formatMoney } from "@/lib/money";
 import { TransactionModal } from "../budget/transaction-modal";
 import { listPayees } from "../budget/actions";
 import { loadTransactionForEdit, loadTxFormOptions } from "../budget/tx-form-options";
+import { refreshTripTaggingAfterSave } from "../budget/trip-tagging-cache";
 import type { TxData } from "../budget/types";
+import type { PaymentPrefill } from "./payment-due";
 import type { TripTaggedPurchase } from "./types";
 
 // "2026-10-11" → "Oct 11, 2026".
@@ -186,5 +188,165 @@ function EditPayment({ loaded, onClose }: { loaded: Loaded; onClose: () => void 
         />
       </div>
     </div>
+  );
+}
+
+type Pickers = [Loaded["opts"], Loaded["payees"]];
+
+/**
+ * Logs a booking's payment in the transaction form, opened already filled in
+ * from the booking: the booking it pays for, its trip, card, payee, booking
+ * date and planned amount (Victor, 2026-10-24). A booking's Spent comes only
+ * from its transactions, so this is how a paid booking gets one.
+ */
+export function useAddPayment() {
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<{ prefill: PaymentPrefill; opts: Loaded["opts"]; payees: Loaded["payees"]; onDone: (saved: boolean) => void } | null>(null);
+  // The form's pickers load in the background once a booking form is open,
+  // so the click only waits for the booking to save.
+  const pickers = useRef<Promise<Pickers> | null>(null);
+  const loadPickers = () => {
+    pickers.current ??= Promise.all([loadTxFormOptions(), listPayees()]).catch((err) => {
+      pickers.current = null;
+      throw err;
+    });
+    return pickers.current;
+  };
+  useEffect(() => {
+    const t = setTimeout(() => void loadPickers().catch(() => {}), 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  /** Opens the form for a saved booking; `onDone` hears whether it was saved. */
+  const open = async (prefill: PaymentPrefill, onDone: (saved: boolean) => void) => {
+    setError(null);
+    setOpening(true);
+    try {
+      // The booking was only just saved: the form's "Pays for" list must
+      // have it before the form can pick it.
+      const [[opts, payees]] = await Promise.all([loadPickers(), refreshTripTaggingAfterSave()]);
+      setForm({ prefill, opts, payees, onDone });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't open the transaction form.");
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  const overlay =
+    form && typeof document !== "undefined"
+      ? createPortal(
+          <NewPayment
+            prefill={form.prefill}
+            opts={form.opts}
+            payees={form.payees}
+            onClose={(saved) => {
+              setForm(null);
+              // A save moves balances and owed: fetch the lists afresh.
+              pickers.current = null;
+              form.onDone(saved);
+            }}
+          />,
+          document.body,
+        )
+      : null;
+
+  return { open, opening, error, overlay };
+}
+
+function NewPayment({
+  prefill,
+  opts,
+  payees,
+  onClose,
+}: {
+  prefill: PaymentPrefill;
+  opts: Loaded["opts"];
+  payees: Loaded["payees"];
+  onClose: (saved: boolean) => void;
+}) {
+  const saved = useRef(false);
+  const close = () => onClose(saved.current);
+  useCloseOnEscape(close);
+  // The trip's catch-all item (Traveling/Trips): a booking's payment always
+  // lands there, the same item "Pays for" moves it to.
+  const item = opts.subOptions.find((o) => o.receivesTripPlans && o.travelCategory === "other") ?? null;
+  const account = prefill.accountId && opts.accountOptions.some((a) => a.id === prefill.accountId) ? prefill.accountId : undefined;
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      onSubmit={(e) => e.stopPropagation()}
+      className="fixed inset-0 z-[70] flex items-stretch justify-center bg-surface sm:items-start sm:bg-black/40 sm:overflow-y-auto sm:px-4 sm:py-10"
+    >
+      <div className="w-full sm:max-w-[520px]">
+        <TransactionModal
+          editTx={null}
+          monthKey={opts.month.key}
+          firstOfMonth={opts.month.firstOfMonth}
+          subOptions={opts.subOptions}
+          accountOptions={opts.accountOptions}
+          propertyOptions={opts.propertyOptions}
+          bucketsByAccount={opts.bucketsByAccount}
+          payeeOptions={payees}
+          payeeLineItems={opts.payeeLineItems}
+          initialKind={item?.kind ?? "expenses"}
+          initialSubId={item?.id}
+          initialAccountId={account}
+          initialAmountCents={prefill.amountCents && prefill.amountCents > 0 ? prefill.amountCents : undefined}
+          initialPayee={prefill.payee || undefined}
+          initialDate={prefill.date ?? undefined}
+          initialTripId={prefill.tripId}
+          initialBookingRef={prefill.bookingRef}
+          onSaved={() => {
+            saved.current = true;
+          }}
+          onClose={close}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Under a booking's locked Spent: the button that logs its payment, and a red
+ * line while it is booked with cash to pay and no transaction yet. The button
+ * saves the booking first, so the form links to it as it now stands.
+ */
+export function PaymentPrompt({
+  due,
+  busy,
+  error,
+  onAdd,
+  className = "",
+}: {
+  due: boolean;
+  busy: boolean;
+  error: string | null;
+  onAdd: () => void;
+  className?: string;
+}) {
+  return (
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${className}`}>
+      <button
+        type="button"
+        onClick={onAdd}
+        disabled={busy}
+        className="rounded-md bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-sky-300 transition hover:bg-sky-200 disabled:opacity-60 dark:bg-sky-900/50 dark:ring-sky-700 dark:hover:bg-sky-800/60"
+      >
+        {busy ? "Saving…" : "Save & add transaction"}
+      </button>
+      {due ? <span className="text-xs font-semibold text-negative">No transaction logged yet</span> : null}
+      {error ? <span className="basis-full text-xs text-negative">{error}</span> : null}
+    </div>
+  );
+}
+
+/** On a Bookings Log row: booked, cash to pay, no transaction logged yet. */
+export function NoTransactionChip() {
+  return (
+    <span className="ml-1.5 inline-block shrink-0 rounded bg-negative/10 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-negative">
+      No transaction
+    </span>
   );
 }

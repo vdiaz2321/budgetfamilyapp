@@ -8,6 +8,7 @@ import { centsPerPointToMicros } from "./points-value";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { syncRewardLedger, type RewardDraw } from "./reward-ledger";
 import { linkedPaidCents, syncBookingPayment } from "./booking-payments";
+import { paymentDue, spentTypedByHand, type PaymentPrefill } from "./payment-due";
 
 function revalidate() {
   revalidatePath("/travel");
@@ -79,7 +80,7 @@ function cleanBaggage(b: FlightPayload["baggage"]) {
 const flightNote = (airline: string, bookingCode: string | null) =>
   bookingCode ? `${airline} ${bookingCode}` : airline;
 
-export async function saveTravelFlight(payload: FlightPayload) {
+export async function saveTravelFlight(payload: FlightPayload): Promise<{ error: string | null; payment?: PaymentPrefill | null }> {
   const { supabase, household } = await getSessionContext();
   const householdId = household.id;
 
@@ -106,10 +107,21 @@ export async function saveTravelFlight(payload: FlightPayload) {
     .map((p) => (foreignCurrency ? p : { ...p, plannedForeign: "", fareEur: "" }));
   // Bought once a Spent fare or the booking date is in; a plan until then
   // (isPlannedOnly in travel-form, the same rule the form shows).
-  const isEstimate = !named.some((p) => p.fare.trim() || p.fareEur.trim()) && !reservedOn;
   // Linked transactions set the pocket cost and mark it bought; a form save
   // keeps both rather than undoing what the payments did.
-  const paid = payload.id ? await linkedPaidCents(supabase, householdId, "flight", payload.id) : null;
+  const [paid, stored] = await Promise.all([
+    payload.id ? linkedPaidCents(supabase, householdId, "flight", payload.id) : null,
+    payload.id
+      ? supabase.from("travel_flights").select("moves_card_points, cancelled_at").eq("id", payload.id).eq("household_id", householdId).maybeSingle()
+      : null,
+  ]);
+  if (stored?.error) return { error: `Couldn't load that flight — ${stored.error.message}` };
+  // A sheet import keeps its typed Spent fares; any other flight's Spent is
+  // its linked transactions only, so fares posted from the form are ignored.
+  const imported = stored?.data ? !stored.data.moves_card_points : false;
+  const typedSpent = spentTypedByHand(imported, reservedOn);
+  const spentFare = (p: { fare: string }) => (typedSpent ? p.fare : "");
+  const isEstimate = !named.some((p) => spentFare(p).trim() || (typedSpent && p.fareEur.trim())) && !reservedOn;
   const cents = (v: string) => (v.trim() ? Math.max(0, displayToCents(v)) : null);
   const passengers = named
     .map((p) => {
@@ -127,11 +139,11 @@ export async function saveTravelFlight(payload: FlightPayload) {
         name: p.name.trim(),
         // The fare columns hold what the seat costs now — the plan until it
         // is bought — so every total that reads them is unchanged.
-        fareCents: (isEstimate || pointsBought ? plannedFareCents : cents(p.fare)) ?? 0,
+        fareCents: (isEstimate || pointsBought ? plannedFareCents : cents(spentFare(p))) ?? 0,
         fareEurCents: isEstimate ? plannedFareForeignCents : cents(p.fareEur),
         plannedFareCents,
         plannedFareForeignCents,
-        cashPaidCents: pointsBought ? cents(p.fare) : null,
+        cashPaidCents: pointsBought ? cents(spentFare(p)) : null,
         pointsUsed: onPoints,
         pointsCost: p.pointsUsed ? points : 0,
       };
@@ -324,7 +336,29 @@ export async function saveTravelFlight(payload: FlightPayload) {
   }
 
   revalidate();
-  return { error: null };
+  // What the transaction form needs to log this flight's payment — only for
+  // a flight on a trip whose Spent comes from transactions and has none yet.
+  const payment: PaymentPrefill | null =
+    typedSpent || paid != null || !trip.tripId || !flightId
+      ? null
+      : {
+          bookingRef: `flight:${flightId}`,
+          tripId: trip.tripId,
+          label: airline,
+          accountId,
+          amountCents: row.planned_cost_cents,
+          payee: airline,
+          date: reservedOn,
+          due: paymentDue({
+            isEstimate,
+            cancelledAt: stored?.data?.cancelled_at ?? null,
+            paid: false,
+            imported,
+            reservedOn,
+            cashToPay: passengers.some((p) => !p.pointsUsed),
+          }),
+        };
+  return { error: null, payment };
 }
 
 async function loadFlightDraw(id: string) {
@@ -392,7 +426,14 @@ export async function setTravelFlightCancelled(id: string, cancelled: boolean) {
 
   const { error } = await supabase
     .from("travel_flights")
-    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId, payment_restore: null })
+    // Payments still linked keep what unlinking them would restore, the
+    // same as a form save — wiping it left a deleted payment's amount
+    // behind as Spent with no transaction.
+    .update({
+      cancelled_at: cancelled ? new Date().toISOString() : null,
+      reward_activity_id: activityId,
+      ...((await linkedPaidCents(supabase, householdId, "flight", id)) == null ? { payment_restore: null } : {}),
+    })
     .eq("id", id)
     .eq("household_id", householdId);
   if (error) return { error: `Couldn't update that booking — ${error.message}` };

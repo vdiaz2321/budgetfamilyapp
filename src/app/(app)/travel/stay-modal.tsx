@@ -15,7 +15,8 @@ import type { Embed, SectionHandle } from "./embedded-section";
 import { addDays } from "./trip-summary";
 import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
 import { formatCentsPerPoint, microsToCentsField } from "./points-value";
-import { useLinkedPayments } from "./linked-payments";
+import { PaymentPrompt, useAddPayment, useLinkedPayments } from "./linked-payments";
+import { spentTypedByHand, stayCashToPay, type PaymentPrefill } from "./payment-due";
 
 const NO_CARD = "";
 
@@ -94,7 +95,7 @@ export function StayModal({
         if (!formRef.current) return { error: null };
         if (spentError) return { error: spentError };
         const result = await saveTravelStay(new FormData(formRef.current));
-        return { error: result?.error ?? null };
+        return { error: result?.error ?? null, payments: result?.payment ? [result.payment] : [] };
       },
       copyForRoom: () => currentAsRoom(),
     });
@@ -193,14 +194,26 @@ export function StayModal({
   // The hotel takes the card at check-in, and the last day to cancel free.
   const [payAtProperty, setPayAtProperty] = useState(stay?.payAtProperty ?? false);
   const [freeCancelUntil, setFreeCancelUntil] = useState(stay?.freeCancelUntil ?? "");
+  // Spent is the linked transactions only, except on a sheet import or a
+  // stay booked before the app — see payment-due.
+  const hasPaid = stay?.paidCents != null;
+  const typedSpent = spentTypedByHand(stay ? !stay.movesCardPoints : false, reservedOn);
+  const spentLocked = hasPaid || !typedSpent;
+  // Locked with nothing linked, Spent is empty: a figure typed before the
+  // lock is no payment.
+  const shownFig = spentLocked && !hasPaid ? { ...fig, spent: "" } : fig;
   // Booked once a Spent figure or the booking date is in; a plan until then.
-  const isEstimate = isPlannedOnly(Boolean(fig.spent.trim() || fig.spentForeign.trim()), reservedOn);
-  const pocketCost = isEstimate ? fig.planned : fig.spent;
+  const isEstimate = isPlannedOnly(Boolean(shownFig.spent.trim() || (typedSpent && shownFig.spentForeign.trim())), reservedOn);
+  const pocketCost = isEstimate ? fig.planned : shownFig.spent;
+  // Booked with cash to pay and no transaction yet: said in red under Spent.
+  const due = !isEstimate && !stay?.cancelledAt && !hasPaid && !typedSpent &&
+    stayCashToPay({ pointsUsed, freeNightUsed, payAtProperty, checkIn });
+  const pay = useAddPayment();
   const tripNote = outsideTripNote(trips, trip.tripId, [checkIn]);
   const spentError = spentMissingError({
     reservedOn,
     spentTyped: Boolean(fig.spent.trim() || fig.spentForeign.trim()),
-    exempt: pointsUsed || freeNightUsed || payAtProperty || stay?.paidCents != null,
+    exempt: pointsUsed || freeNightUsed || payAtProperty || spentLocked,
     dateLabel: "Reservation Made",
     alsoTry: "Paying at the hotel? Select Pay at check-in.",
   });
@@ -266,16 +279,69 @@ export function StayModal({
   const alreadyDrawn = stay && !stay.cancelledAt && !stay.isEstimate && stay.accountId === accountId
     ? { points: stay.pointsUsed ? stay.pointsCost : 0, credit: stay.hotelCreditCents }
     : { points: 0, credit: 0 };
-  const draw = card && (!stay || stay.movesCardPoints)
+  // A cancelled stay draws nothing until it is restored.
+  const draw = card && (!stay || stay.movesCardPoints) && !stay?.cancelledAt
     ? {
         points: (pointsUsed && !isEstimate ? pointsTyped : 0) - alreadyDrawn.points,
         credit: (isEstimate ? 0 : creditTyped) - alreadyDrawn.credit,
       }
     : null;
 
-  const saved =
-    Math.round((Number(hotelCost.replace(/[$,\s]/g, "")) || 0) * 100) -
-    Math.round((Number(pocketCost.replace(/[$,\s]/g, "")) || 0) * 100);
+  // No hotel cost typed: the room cost what was paid, so nothing was saved
+  // (see hotelCents in types).
+  const pocketCents = Math.round((Number(pocketCost.replace(/[$,\s]/g, "")) || 0) * 100);
+  const saved = (Math.round((Number(hotelCost.replace(/[$,\s]/g, "")) || 0) * 100) || pocketCents) - pocketCents;
+
+  // Saves the stay, then each added room. A saved room leaves the list, so a
+  // retry after a failed one doesn't save it twice. False when anything
+  // failed (the error is shown); otherwise what its payment form needs.
+  async function saveAll(): Promise<PaymentPrefill | null | false> {
+    if (spentError) {
+      setError(spentError);
+      return false;
+    }
+    if (!formRef.current) return false;
+    setError(null);
+    const result = await saveTravelStay(new FormData(formRef.current));
+    if (result?.error) {
+      setError(result.error);
+      return false;
+    }
+    const failed: string[] = [];
+    for (const r of rooms) {
+      const handle = roomHandles.current[r.id];
+      if (!handle || (!r.stay && handle.isEmpty())) continue;
+      const roomResult = await handle.save();
+      if (roomResult.error) failed.push(`Room ${r.roomNo}: ${roomResult.error}`);
+      else setRooms((rs) => rs.filter((x) => x.id !== r.id));
+    }
+    // revalidatePath alone leaves the client router cache in place,
+    // so the new row wouldn't appear until a manual reload.
+    router.refresh();
+    if (failed.length) {
+      setError(failed.join(" · "));
+      return false;
+    }
+    return result.payment ?? null;
+  }
+
+  // "Save & add transaction": the stay saves, then its payment form opens
+  // on top, filled in from it. Done either way, the stay form closes —
+  // what it showed is out of date.
+  function saveAndPay() {
+    start(async () => {
+      const payment = await saveAll();
+      if (payment === false) return;
+      if (!payment) {
+        setError("Put the stay on a trip first — its payment is linked through the trip.");
+        return;
+      }
+      await pay.open(payment, () => {
+        router.refresh();
+        onClose();
+      });
+    });
+  }
 
   // Pinned in the popup header (in place of the X) so they are reachable
   // without scrolling to the bottom of a long form.
@@ -368,30 +434,8 @@ export function StayModal({
         onSubmit={(e) => {
           e.preventDefault();
           if (embed) return;
-          if (spentError) return setError(spentError);
-          const formData = new FormData(e.currentTarget);
           start(async () => {
-            setError(null);
-            const result = await saveTravelStay(formData);
-            if (result?.error) {
-              setError(result.error);
-              return;
-            }
-            // Then each added room. A saved room leaves the list, so a retry
-            // after a failed one doesn't save it twice.
-            const failed: string[] = [];
-            for (const r of rooms) {
-              const handle = roomHandles.current[r.id];
-              if (!handle || (!r.stay && handle.isEmpty())) continue;
-              const roomResult = await handle.save();
-              if (roomResult.error) failed.push(`Room ${r.roomNo}: ${roomResult.error}`);
-              else setRooms((rs) => rs.filter((x) => x.id !== r.id));
-            }
-            // revalidatePath alone leaves the client router cache in place,
-            // so the new row wouldn't appear until a manual reload.
-            router.refresh();
-            if (failed.length) setError(failed.join(" · "));
-            else onClose();
+            if ((await saveAll()) !== false) onClose();
           });
         }}
         className="grid grid-cols-1 gap-3 sm:grid-cols-2"
@@ -542,20 +586,29 @@ export function StayModal({
         <div className="space-y-2 sm:col-span-2">
           <PlanSpentFields
             picker={<CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />}
-            value={fig}
+            value={shownFig}
             onChange={setFig}
             currency={currency}
             foreignCurrency={foreignCurrency}
             spentRateDate={isEstimate ? undefined : reservedOn}
-            spentLocked={stay?.paidCents != null}
+            spentLocked={spentLocked}
             onOpenSpent={linked.canOpen ? linked.open : undefined}
+            spentNote={hasPaid ? undefined : null}
             showForeign={Boolean(foreignCurrency)}
           />
+          {/* Nothing linked yet: log the payment from here. Inside the Add
+              Trip popup it is offered once the popup has saved. Not on a
+              stay paid with points or a free night — nothing is owed (cash
+              taxes still go through + Transaction). */}
+          {spentLocked && !hasPaid && !embed && !stay?.cancelledAt && !pointsUsed && !freeNightUsed ? (
+            <PaymentPrompt due={due} busy={pending || pay.opening} error={pay.error} onAdd={saveAndPay} />
+          ) : null}
           {linked.error ? <p className="text-[11px] text-negative">{linked.error}</p> : null}
           {linked.overlay}
+          {pay.overlay}
           <input type="hidden" name="plannedCost" value={fig.planned} />
           <input type="hidden" name="plannedCostForeign" value={fig.plannedForeign} />
-          <input type="hidden" name="pocketCost" value={fig.spent} />
+          <input type="hidden" name="pocketCost" value={shownFig.spent} />
           <input type="hidden" name="spentForeign" value={fig.spentForeign} />
           <input type="hidden" name="foreignCurrency" value={foreignCurrency} />
         </div>

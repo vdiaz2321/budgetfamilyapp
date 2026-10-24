@@ -1,4 +1,5 @@
 import type { TripChoice } from "./trip-picker";
+import type { PaymentPrefill } from "./payment-due";
 import type { TravelStay } from "./types";
 
 /**
@@ -9,7 +10,9 @@ import type { TravelStay } from "./types";
 export type SectionHandle = {
   /** Nothing typed yet — the save skips it. */
   isEmpty: () => boolean;
-  save: () => Promise<{ error: string | null }>;
+  /** `payments`: what the saved bookings' payment forms need, offered once
+   *  the popup has saved (see payment-due). */
+  save: () => Promise<{ error: string | null; payments?: PaymentPrefill[] }>;
   /** Stay only: what a second room copies from this one, as typed so far. */
   copyForRoom?: () => TravelStay;
 };

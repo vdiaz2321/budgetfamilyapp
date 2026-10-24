@@ -231,7 +231,7 @@ export function TripDetailModal({
   // only once there is both a plan and a spend.
   const fxDiffText = (planned: number | null | undefined, actual: number | null | undefined, code: string) =>
     planned != null && actual != null
-      ? `${planned - actual >= 0 ? "" : "−"}${formatForeignWhole(Math.abs(planned - actual), code)}`
+      ? `${formatForeignWhole(planned - actual, code)}`
       : null;
 
   // The Spending Total's difference sums every row that has one (see
@@ -395,8 +395,16 @@ export function TripDetailModal({
                 {t.pax ? `${t.pax} pax` : null}
               </span>
             ) : null}
+            {/* Clicking the dates edits them — the same form as the notes
+                button (Victor clicked here first and nothing happened). */}
             {t.start ? (
-              <span className="flex items-end gap-2 rounded-full bg-sky-100 px-4 py-1.5 dark:bg-sky-900/50">
+              <button
+                type="button"
+                onClick={openEdit}
+                disabled={mode === "edit"}
+                aria-label="Edit trip dates"
+                className="flex items-end gap-2 rounded-full bg-sky-100 px-4 py-1.5 ring-1 ring-transparent transition enabled:hover:bg-sky-200 enabled:hover:ring-sky-400 dark:bg-sky-900/50 dark:enabled:hover:bg-sky-800/60 dark:enabled:hover:ring-sky-500"
+              >
                 <TripDay iso={t.start} />
                 {t.end && t.end !== t.start ? (
                   <>
@@ -404,9 +412,16 @@ export function TripDetailModal({
                     <TripDay iso={t.end} />
                   </>
                 ) : null}
-              </span>
+                {mode === "edit" ? null : (
+                  <svg aria-hidden viewBox="0 0 20 20" className="mb-0.5 h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M13.5 3.5l3 3L7 16H4v-3z" />
+                  </svg>
+                )}
+              </button>
             ) : (
-              <span>No dates yet</span>
+              <button type="button" onClick={openEdit} className={SECTION_BUTTON}>
+                + Add dates
+              </button>
             )}
           </span>
           {mode !== "edit" ? (
@@ -535,8 +550,9 @@ export function TripDetailModal({
           <Stat
             wide
             label="Total Difference"
-            value={differenceCents == null ? "—" : `${differenceCents < 0 ? "−" : ""}${formatMoneyWhole(Math.abs(differenceCents), currency)}`}
-            className={differenceCents == null ? undefined : differenceCents >= 0 ? "text-positive" : "text-negative"}
+            value={differenceCents == null ? "—" : `${formatMoneyWhole(differenceCents, currency)}`}
+            // Over by less than 50¢ shows as "$0" — on plan, so not red.
+            className={differenceCents == null ? undefined : differenceCents > -50 ? "text-positive" : "text-negative"}
             note={
               differenceCents == null ? (
                 "nothing to compare yet"
@@ -628,14 +644,14 @@ export function TripDetailModal({
                         diff={
                           diff == null ? DASH : (
                             <>
-                              {`${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+                              {`${formatMoneyWhole(diff, currency)}`}
                               {fxDiffText(fx.planned, fx.actual, fx.code) ? (
                                 <span className="block text-xs">{fxDiffText(fx.planned, fx.actual, fx.code)}</span>
                               ) : null}
                             </>
                           )
                         }
-                        diffClass={diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}
+                        diffClass={diff == null ? "text-muted" : diff > -50 ? "text-positive" : "text-negative"}
                       />
                     </button>
                     {bookingPayments(b).length ? (
@@ -673,8 +689,8 @@ export function TripDetailModal({
                                   <span className="text-muted">{DASH}</span>
                                 )}
                               </span>
-                              <span className={`text-center ${p.diff == null ? "text-muted" : p.diff >= 0 ? "text-positive" : "text-negative"}`}>
-                                {p.diff == null ? DASH : `${p.diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(p.diff), currency)}`}
+                              <span className={`text-center ${p.diff == null ? "text-muted" : p.diff > -50 ? "text-positive" : "text-negative"}`}>
+                                {p.diff == null ? DASH : `${formatMoneyWhole(p.diff, currency)}`}
                               </span>
                             </span>
                           ))}
@@ -811,8 +827,8 @@ export function TripDetailModal({
                             </span>
                           ) : null}
                         </td>
-                        <td className={`whitespace-nowrap px-3 py-2 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
-                          {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+                        <td className={`whitespace-nowrap px-3 py-2 text-center tabular-nums ${diff == null ? "text-muted" : diff > -50 ? "text-positive" : "text-negative"}`}>
+                          {diff == null ? DASH : `${formatMoneyWhole(diff, currency)}`}
                           {diff != null && fxDiffText(fx.planned, fx.actual, fx.code) ? (
                             <span className="font-normal"> / {fxDiffText(fx.planned, fx.actual, fx.code)}</span>
                           ) : null}
@@ -845,8 +861,8 @@ export function TripDetailModal({
                               <span className="text-muted">{DASH}</span>
                             )}
                           </td>
-                          <td className={`whitespace-nowrap px-3 text-center ${p.diff == null ? "text-muted" : p.diff >= 0 ? "text-positive" : "text-negative"}`}>
-                            {p.diff == null ? DASH : `${p.diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(p.diff), currency)}`}
+                          <td className={`whitespace-nowrap px-3 text-center ${p.diff == null ? "text-muted" : p.diff > -50 ? "text-positive" : "text-negative"}`}>
+                            {p.diff == null ? DASH : `${formatMoneyWhole(p.diff, currency)}`}
                           </td>
                         </tr>
                       ))}
@@ -941,14 +957,14 @@ export function TripDetailModal({
                       diff={
                         diff == null ? DASH : (
                           <>
-                            {`${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+                            {`${formatMoneyWhole(diff, currency)}`}
                             {fxDiffText(e.plannedEurCents, actualEur(e), t.trip.spendingCurrency) ? (
                               <span className="block text-xs">{fxDiffText(e.plannedEurCents, actualEur(e), t.trip.spendingCurrency)}</span>
                             ) : null}
                           </>
                         )
                       }
-                      diffClass={diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}
+                      diffClass={diff == null ? "text-muted" : diff > -50 ? "text-positive" : "text-negative"}
                     />
                     {openRow === key ? <TaggedPurchaseList list={e.txList} currency={currency} tripYear={t.start?.slice(0, 4)} /> : null}
                   </li>
@@ -972,7 +988,7 @@ export function TripDetailModal({
                   diff={
                     spendingTotalDiff == null ? DASH : (
                       <>
-                        {`${spendingTotalDiff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(spendingTotalDiff), currency)}`}
+                        {`${formatMoneyWhole(spendingTotalDiff, currency)}`}
                         {fxDiffText(eurTotal("plannedEurCents"), eurTotal("actualEurCents"), t.trip.spendingCurrency) ? (
                           <span className="block text-xs">
                             {fxDiffText(eurTotal("plannedEurCents"), eurTotal("actualEurCents"), t.trip.spendingCurrency)}
@@ -981,7 +997,7 @@ export function TripDetailModal({
                       </>
                     )
                   }
-                  diffClass={spendingTotalDiff == null ? "text-muted" : spendingTotalDiff >= 0 ? "text-positive" : "text-negative"}
+                  diffClass={spendingTotalDiff == null ? "text-muted" : spendingTotalDiff > -50 ? "text-positive" : "text-negative"}
                 />
               </li>
             </ul>
@@ -1031,8 +1047,8 @@ export function TripDetailModal({
                             </span>
                           ) : null}
                         </td>
-                        <td className={`px-3 py-1.5 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
-                          {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+                        <td className={`px-3 py-1.5 text-center tabular-nums ${diff == null ? "text-muted" : diff > -50 ? "text-positive" : "text-negative"}`}>
+                          {diff == null ? DASH : `${formatMoneyWhole(diff, currency)}`}
                           {diff != null && fxDiffText(e.plannedEurCents, actualEur(e), t.trip.spendingCurrency) ? (
                             <span className="font-normal"> / {fxDiffText(e.plannedEurCents, actualEur(e), t.trip.spendingCurrency)}</span>
                           ) : null}
@@ -1058,8 +1074,8 @@ export function TripDetailModal({
                       const diff = spendingTotalDiff;
                       const fxText = fxDiffText(eurTotal("plannedEurCents"), eurTotal("actualEurCents"), t.trip.spendingCurrency);
                       return (
-                        <td className={`px-3 py-1.5 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
-                          {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+                        <td className={`px-3 py-1.5 text-center tabular-nums ${diff == null ? "text-muted" : diff > -50 ? "text-positive" : "text-negative"}`}>
+                          {diff == null ? DASH : `${formatMoneyWhole(diff, currency)}`}
                           {diff != null && fxText ? <span className="font-normal"> / {fxText}</span> : null}
                         </td>
                       );
@@ -1583,8 +1599,8 @@ function RoomsDesktop({ line, currency, tripYear, cardNames, todayIso, onEdit }:
         <td className="whitespace-nowrap px-3 py-2 text-center font-semibold tabular-nums">
           <RoomsSpent f={f} currency={currency} />
         </td>
-        <td className={`whitespace-nowrap px-3 py-2 text-center tabular-nums ${f.diff == null ? "text-muted" : f.diff >= 0 ? "text-positive" : "text-negative"}`}>
-          {f.diff == null ? DASH : `${f.diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(f.diff), currency)}`}
+        <td className={`whitespace-nowrap px-3 py-2 text-center tabular-nums ${f.diff == null ? "text-muted" : f.diff > -50 ? "text-positive" : "text-negative"}`}>
+          {f.diff == null ? DASH : `${formatMoneyWhole(f.diff, currency)}`}
         </td>
       </tr>
       {line.members.map((m, i) => {
@@ -1613,8 +1629,8 @@ function RoomsDesktop({ line, currency, tripYear, cardNames, todayIso, onEdit }:
             <td className="whitespace-nowrap px-3 text-center">
               <RoomPaid booking={b} currency={currency} />
             </td>
-            <td className={`whitespace-nowrap px-3 text-center ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
-              {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+            <td className={`whitespace-nowrap px-3 text-center ${diff == null ? "text-muted" : diff > -50 ? "text-positive" : "text-negative"}`}>
+              {diff == null ? DASH : `${formatMoneyWhole(diff, currency)}`}
             </td>
           </tr>
         );
@@ -1655,8 +1671,8 @@ function RoomsMobile({ line, currency, tripYear, cardNames, todayIso, onEdit }: 
           ) : DASH
         }
         actual={<RoomsSpent f={f} currency={currency} />}
-        diff={f.diff == null ? DASH : `${f.diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(f.diff), currency)}`}
-        diffClass={f.diff == null ? "text-muted" : f.diff >= 0 ? "text-positive" : "text-negative"}
+        diff={f.diff == null ? DASH : `${formatMoneyWhole(f.diff, currency)}`}
+        diffClass={f.diff == null ? "text-muted" : f.diff > -50 ? "text-positive" : "text-negative"}
       />
       <ul className="mt-2 space-y-0.5 border-t border-line/60 pt-1.5">
         {line.members.map((m) => {
