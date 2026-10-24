@@ -1,4 +1,6 @@
 "use client";
+
+import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { MINUS, centsToGroupedDisplay, currencySymbol, formatMoney, formatMoneyWhole } from "@/lib/money";
 import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
@@ -33,6 +35,8 @@ export type YearCell = {
   /** January's deposits already inside `startBalanceCents` (the year opened on
    *  January's close), so growth must not subtract them again. */
   openingContribCents?: number;
+  /** Moved out by Withdraw — added back into growth. */
+  transferOutCents?: number;
 };
 
 export type BucketRow = {
@@ -123,11 +127,13 @@ function effectiveCell(a: InvestAccount, year: number): YearCell {
   let close = parent?.closeBalanceCents ?? null;
   let manual = !!parent?.accruedManual;
   let openingContrib = parent?.openingContribCents ?? 0;
+  let movedOut = parent?.transferOutCents ?? 0;
   for (const b of a.buckets) {
     const c = b.cells[year];
     if (!c) continue;
     contributed += c.contributedCents;
     openingContrib += c.openingContribCents ?? 0;
+    movedOut += c.transferOutCents ?? 0;
     accrued += c.accruedCents;
     if (c.accruedManual) manual = true;
     if (c.startBalanceCents != null) start = (start ?? 0) + c.startBalanceCents;
@@ -139,7 +145,7 @@ function effectiveCell(a: InvestAccount, year: number): YearCell {
   // open on the account slot and close on its buckets (TSP, split mid-2026),
   // and summing the parts there would report zero growth. Deposits already
   // inside a January opening are left out, the same as each part's own cell.
-  if (!manual && start != null && end != null) accrued = end - start - (contributed - openingContrib);
+  if (!manual && start != null && end != null) accrued = end - start - (contributed - openingContrib) + movedOut;
 
   return {
     year,
@@ -462,13 +468,13 @@ export function InvestBoard({
   );
 
   useRegisterMobilePageActions([
-    { label: "Transfer/Withdraw", onSelect: () => setShowTransfer(true) },
+    { label: "Withdraw", onSelect: () => setShowTransfer(true) },
     { label: "How investment tracking works", onSelect: () => setShowGuide((open) => !open) },
   ]);
 
   return (
     <div className="mx-auto flex w-full max-w-[110rem] flex-col gap-6 px-4 py-7">
-      {/* Header: title + one Transfer/Withdraw entry + hero stats + tabs */}
+      {/* Header: title + one Withdraw entry + hero stats + tabs */}
       <header className="space-y-4">
         {/* Title and its one action share a row. Below md the action lives in
             the ⋯ menu instead (registered above) — title and button don't fit
@@ -481,10 +487,12 @@ export function InvestBoard({
             onClick={() => setShowTransfer(true)}
             className="hidden items-center md:flex gap-1.5 rounded-lg bg-brand-soft px-3 py-2 text-sm font-bold text-brand ring-1 ring-brand/20 transition hover:bg-brand-soft/80"
           >
+            {/* It only ever moves money out of an investment into a bank —
+                a withdrawal, so that's its name (Victor, 2026-10-24). */}
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M7 17l10-10M17 7v10M17 7H7" />
+              <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" />
             </svg>
-            Transfer/Withdraw
+            Withdraw
           </button>
           {/* The guide sits beside the page's action rather than taking a
               full-width bar of its own above the tax card. */}
@@ -1273,7 +1281,12 @@ function PerformanceChart({
     return Math.max(...bars.map((b) => b.contrib + Math.max(b.gain, 0)), 1);
   }, [bars, mode]);
 
-  const niceCeil = Math.ceil(maxBar / 10000) * 10000;
+  // Axis steps that read at a glance — $10k, $20k, $30k — rather than the
+  // $9.4k, $19k, $28k a $100 round-up gave.
+  const rawStep = maxBar / 4;
+  const stepPow = 10 ** Math.floor(Math.log10(rawStep));
+  const tickStep = ([1, 2, 2.5, 5, 10].find((m) => m * stepPow >= rawStep) ?? 10) * stepPow;
+  const niceCeil = tickStep * 4;
   const scale = (v: number) => (v / niceCeil) * chartH;
 
   const slotW = chartW / bars.length;
@@ -1362,7 +1375,8 @@ function PerformanceChart({
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-bills)" }} />
-          Unrealized gains
+          {/* "Gains", as the tables below call the same figure. */}
+          Gains
         </span>
       </div>
 
@@ -1533,7 +1547,7 @@ function ChartTooltip({
       <div className="space-y-0.5 text-muted">
         <div>Contributed: <span className="font-medium text-foreground">{formatMoney(b.contrib, currency)}</span></div>
         <div>
-          Unrealized gains:{" "}
+          Gains:{" "}
           <span className="font-medium" style={{ color: b.gain >= 0 ? "var(--viz-bills)" : "var(--color-negative)" }}>
             {formatMoney(b.gain, currency)}
           </span>
@@ -2455,6 +2469,7 @@ function TransferModal({
   onClose: () => void;
 }) {
   useScrollLock();
+  const router = useRouter();
   const [pending, start] = useTransition();
   const [sourceAccountId, setSourceAccountId] = useState("");
   const [sourceBucketId, setSourceBucketId] = useState("");
@@ -2483,7 +2498,11 @@ function TransferModal({
       setErrorMsg(null);
       const r = await transferFromInvestment(fd);
       if (r.error) setErrorMsg(r.error);
-      else onClose();
+      else {
+        // Fresh balances and gains straight away, not on the next reload.
+        router.refresh();
+        onClose();
+      }
     });
   };
 
@@ -2496,7 +2515,7 @@ function TransferModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <h2 className="text-lg font-bold">Transfer / Withdraw</h2>
+          <h2 className="text-lg font-bold">Withdraw from an investment</h2>
           <button type="button" onClick={onClose} className="rounded-lg p-1 text-muted transition hover:bg-brand-soft hover:text-foreground">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M18 6L6 18M6 6l12 12" /></svg>
           </button>
@@ -2625,7 +2644,7 @@ function TransferModal({
               disabled={pending || !sourceAccountId || !destAccountId || !amount || !date}
               className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand/90 disabled:opacity-40"
             >
-              {pending ? "Transferring…" : "Transfer"}
+              {pending ? "Withdrawing…" : "Withdraw"}
             </button>
           </div>
         </form>

@@ -292,6 +292,14 @@ export function parseSpendRestart(raw: unknown): boolean {
   return !!raw && typeof raw === "object" && (raw as { spendFrom?: unknown }).spendFrom === true;
 }
 
+/** How much money from `fromYear` has grown by `toYear` (lib/inflation
+ *  inflationGrowth: each year at its own rate). A bare number is one rate
+ *  for every year. */
+export type InflationGrow = (fromYear: number, toYear: number) => number;
+
+const growFn = (inflation: number | InflationGrow): InflationGrow =>
+  typeof inflation === "number" ? (from, to) => Math.pow(1 + inflation / 100, to - from) : inflation;
+
 /** What the investments hold: every group but Cash. A withdrawal % is of this. */
 export function investmentsCents(balances: Record<GroupKind, number>): number {
   return GROUP_KINDS.reduce((t, k) => (k === "cash" ? t : t + Math.max(0, balances[k])), 0);
@@ -303,7 +311,8 @@ export function investmentsCents(balances: Record<GroupKind, number>): number {
  * dollars raised by inflation. Call once per year in order; it remembers the
  * typed year's dollars. Returns the overrides with `cents` filled in.
  */
-export function pctWithdrawCarrier(inflationPct: number) {
+export function pctWithdrawCarrier(inflation: number | InflationGrow) {
+  const grow = growFn(inflation);
   let base: { from: number; cents: number } | null = null;
   return (year: number, opening: Record<GroupKind, number>, overrides: YearOverrides | undefined): YearOverrides | undefined => {
     const w = overrides?.withdraw;
@@ -311,7 +320,7 @@ export function pctWithdrawCarrier(inflationPct: number) {
     if (!base || base.from !== w.from) {
       base = { from: w.from, cents: Math.round((investmentsCents(opening) * w.pct) / 100) };
     }
-    const cents = Math.round(base.cents * Math.pow(1 + inflationPct / 100, year - base.from));
+    const cents = Math.round(base.cents * grow(base.from, year));
     return { ...overrides, withdraw: { ...w, cents } };
   };
 }
@@ -361,8 +370,9 @@ export function clampReturnPct(pct: number): number {
  */
 export function resolveOverrides(
   rows: { year: number; typed: TypedGroups; withdraw?: TypedWithdraw | null }[],
-  inflationPct: number,
+  inflation: number | InflationGrow,
 ): Map<number, YearOverrides> {
+  const grow = growFn(inflation);
   const out = new Map<number, YearOverrides>();
   let lastWithdraw: { typed: TypedWithdraw; year: number } | null = null;
   const lastAdd = new Map<GroupKind, { cents: number; year: number }>();
@@ -382,7 +392,7 @@ export function resolveOverrides(
         "pct" in t
           ? { pct: t.pct, from: lastWithdraw.year }
           : {
-              cents: Math.round(t.cents * Math.pow(1 + inflationPct / 100, r.year - lastWithdraw.year)),
+              cents: Math.round(t.cents * grow(lastWithdraw.year, r.year)),
               from: lastWithdraw.year,
             };
     }
@@ -414,7 +424,7 @@ export function resolveOverrides(
         ...(p ? { ret: p.pct, retFrom: p.year } : {}),
         ...(a ? { add: a.cents, addFrom: a.year } : {}),
         ...(w
-          ? { take: Math.round(w.cents * Math.pow(1 + inflationPct / 100, r.year - w.year)), takeFrom: w.year }
+          ? { take: Math.round(w.cents * grow(w.year, r.year)), takeFrom: w.year }
           : {}),
       };
     }

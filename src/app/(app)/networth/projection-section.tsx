@@ -67,6 +67,9 @@ export type ProjectionYear = {
    *  register has any category history for the year. */
   actualIncomeCents: number | null;
   actualSpendingCents: number | null;
+  /** Income, spending and debt come from the spreadsheet's yearly totals
+   *  (Annual Overview's Breakdown), not the register. */
+  actualFromSheet?: boolean;
   /** Debt payments recorded that year (Budget's debt categories). */
   actualDebtPaidCents: number | null;
   /** Deposits into the kids' 529s that year — already inside
@@ -180,9 +183,6 @@ export function ProjectionSection({
   spouseBirthYear = null,
   groupSlots,
   currentNwCents,
-  inflationPct,
-  todays,
-  onTodays,
   assumptions,
   details,
   onEditIncome,
@@ -202,11 +202,6 @@ export function ProjectionSection({
   onEditIncome?: (suggestYearlyCents: number | null) => void;
   /** Today's live net worth — the figure Accounts and the sidebar show. */
   currentNwCents: number;
-  /** The plan's inflation — what turns a future year's dollars into today's. */
-  inflationPct: number;
-  /** Today's Money (true) or Not Today's Money — the page's one toggle. */
-  todays: boolean;
-  onTodays: (v: boolean) => void;
   /** From the retirement plan: the Edit assumptions line that rebuilds this
    *  table, and the retirement details under it. */
   assumptions?: React.ReactNode;
@@ -232,16 +227,10 @@ export function ProjectionSection({
 
   const current = years.find((y) => y.year === thisYear) ?? null;
 
-  // Today's money: each future year's figures shrunk by inflation back to
-  // this year, so 2071 reads as what it buys now. Net worth since
-  // 2026-10-16; income, spending, saved, contributed, withdrawn and gains
-  // too since 2026-10-23 (Victor: "I don't want future dollars"). Not
-  // Today's Money shows the dollars actually paid. This year and earlier
-  // are already today's money.
-  const inToday = (year: number, cents: number) =>
-    Math.round(cents / Math.pow(1 + inflationPct / 100, Math.max(0, year - thisYear)));
-  const shown = (year: number, cents: number) => (todays ? inToday(year, cents) : cents);
-  const m = (year: number, cents: number, cur: string) => formatMoneyWhole(shown(year, cents), cur);
+  // Every figure is the plain dollar amount the plan works out — no
+  // shrinking by inflation into "today's money". Victor removed that toggle
+  // (2026-10-24): the table and the year popup showed different numbers for
+  // the same year, and a deflated figure hides what the inputs really say.
 
   const forecastFor = (y: ProjectionYear) => yearForecast(y, thisYear)?.cents ?? null;
   const forecast = current ? forecastFor(current) : null;
@@ -389,7 +378,7 @@ export function ProjectionSection({
           {target ? (
             <Figure
               label={`Net worth in ${target.year}`}
-              value={m(target.year, target.eoyCents, currency)}
+              value={formatMoneyWhole(target.eoyCents, currency)}
               tone=""
               style={{ color: "var(--viz-savings)" }}
               sub={
@@ -415,12 +404,6 @@ export function ProjectionSection({
                   ) : (
                     "Expected"
                   )}
-                  <span className="block">
-                    {todays ? "Not Today's Money" : "Today's Money"}:{" "}
-                    <span className="font-semibold">
-                      {formatMoneyWhole(todays ? target.eoyCents : inToday(target.year, target.eoyCents), currency)}
-                    </span>
-                  </span>
                 </>
               }
               className="col-span-2 sm:col-span-1"
@@ -464,27 +447,6 @@ export function ProjectionSection({
               <span className="text-sm font-semibold sm:text-lg">Year by year</span>
             </button>
             {assumptions}
-            {/* Which dollars the table and the end-of-plan card show. */}
-            <div className="flex flex-wrap items-center gap-2">
-              {([
-                [true, "Today's Money"],
-                [false, "Not Today's Money"],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => onTodays(value)}
-                  aria-pressed={todays === value}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 transition sm:text-sm ${
-                    todays === value
-                      ? "bg-sky-100 text-foreground ring-sky-400 dark:bg-sky-900/50"
-                      : "text-foreground ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
           </div>
           {tableOpen ? (
           <>
@@ -542,7 +504,7 @@ export function ProjectionSection({
                       ) : null}
                       {/* Plan on top, what actually happened underneath. */}
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
-                        {m(y.year, y.incomeCents, currency)}
+                        {formatMoneyWhole(y.incomeCents, currency)}
                         {/* Before military retirement: the other income on top
                             of the typed pay. Income is gross — taxes are
                             budgeted as spending. */}
@@ -552,16 +514,16 @@ export function ProjectionSection({
                         y.incomeCents !== y.workIncomeCents &&
                         y.year === thisYear ? (
                           <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
-                            incl. {m(y.year, y.incomeCents - y.workIncomeCents, currency)} other
+                            incl. {formatMoneyWhole(y.incomeCents - y.workIncomeCents, currency)} other
                           </span>
                         ) : null}
                         <Actual cents={y.actualIncomeCents} currency={currency} row={y} thisYear={thisYear} />
                       </td>
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums text-negative">
-                        {m(y.year, y.spendingCents, currency)}
+                        {formatMoneyWhole(y.spendingCents, currency)}
                         {y.spendingCents - y.baseSpendingCents + y.debtFreedCents - y.withdrawalTaxCents > 0 ? (
                           <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
-                            incl. {m(y.year, y.spendingCents - y.baseSpendingCents + y.debtFreedCents - y.withdrawalTaxCents, currency)} health
+                            incl. {formatMoneyWhole(y.spendingCents - y.baseSpendingCents + y.debtFreedCents - y.withdrawalTaxCents, currency)} health
                           </span>
                         ) : null}
                         {/* Withdrawal tax stays in the figure; no "incl. … tax" line under it. */}
@@ -577,7 +539,7 @@ export function ProjectionSection({
                           className={y.incomeCents - y.spendingCents < 0 ? "text-negative" : undefined}
                           style={y.incomeCents - y.spendingCents < 0 ? undefined : { color: "var(--viz-savings)" }}
                         >
-                          {m(y.year, y.incomeCents - y.spendingCents, currency)}
+                          {formatMoneyWhole(y.incomeCents - y.spendingCents, currency)}
                         </span>
                         {/* Logged income less logged spending — the same sum
                             as the column, so plan and actual compare like for
@@ -602,7 +564,7 @@ export function ProjectionSection({
                           <span className="text-foreground">—</span>
                         ) : (
                           <span className="text-foreground">
-                            {m(y.year, (y.contributedCents ?? y.plannedAddCents)!, currency)}
+                            {formatMoneyWhole((y.contributedCents ?? y.plannedAddCents)!, currency)}
                           </span>
                         )}
                         <Actual cents={y.actualInvestedCents} currency={currency} row={y} thisYear={thisYear} always />
@@ -612,7 +574,7 @@ export function ProjectionSection({
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {y.withdrawnCents ? (
                           <span style={{ color: "var(--viz-spending)" }}>
-                            {m(y.year, y.withdrawnCents, currency)}
+                            {formatMoneyWhole(y.withdrawnCents, currency)}
                           </span>
                         ) : (
                           <span className="text-foreground">—</span>
@@ -623,7 +585,7 @@ export function ProjectionSection({
                           measure so the running year isn't blank. */}
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         <span className={y.growthCents < 0 ? "text-negative" : "text-positive"}>
-                          {m(y.year, y.growthCents, currency)}
+                          {formatMoneyWhole(y.growthCents, currency)}
                         </span>
                         <Actual
                           cents={y.actualGainsCents ?? y.runningGainsCents}
@@ -638,7 +600,7 @@ export function ProjectionSection({
                           <span className="text-muted">—</span>
                         ) : (
                           <>
-                            {m(y.year, y.actualCents, currency)}
+                            {formatMoneyWhole(y.actualCents, currency)}
                             {y.inProgress ? (
                               <span className="block max-sm:text-[12px] sm:text-base font-normal text-foreground">
                                 {/* Today's live net worth, as on Accounts. */}
@@ -649,7 +611,7 @@ export function ProjectionSection({
                         )}
                       </td>
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
-                        {m(y.year, y.eoyCents, currency)}
+                        {formatMoneyWhole(y.eoyCents, currency)}
                         {/* Named under the close it moved, rather than given a
                             ninth column — the grid already scrolls sideways on
                             a phone, and a one-off is rare enough that a column
@@ -674,7 +636,7 @@ export function ProjectionSection({
                             >
                               {/* Two lines on a phone, so the longer label
                                   doesn't push past the column's edge. */}
-                              <span className="max-sm:block">Forecasted NW:</span> {m(y.year, f, currency)}
+                              <span className="max-sm:block">Forecasted NW:</span> {formatMoneyWhole(f, currency)}
                             </span>
                           );
                         })()}
@@ -689,7 +651,7 @@ export function ProjectionSection({
                             }`}
                           >
                             {diff >= 0 ? "+" : "−"}
-                            {m(y.year, Math.abs(diff), currency)}
+                            {formatMoneyWhole(Math.abs(diff), currency)}
                           </span>
                         )}
                       </td>
@@ -1373,8 +1335,11 @@ function YearModal({
   // equation the server re-chains with. It read the STORED closing balance
   // before, so a box labelled "Predicted" answered with the figure you were in
   // the middle of replacing.
+  // The box shows gains in whole dollars; left as shown, the exact figure
+  // counts, so this matches the table's Proj EOY NW to the dollar.
+  const gainsCents = gains === toWhole(row.growthCents) ? row.growthCents : displayToCents(gains);
   const predictedEoyCents =
-    row.boyCents + savedCents + displayToCents(gains) + displayToCents(oneOff);
+    row.boyCents + savedCents + gainsCents + displayToCents(oneOff);
 
   // Actual against what the boxes say right now, so the difference moves with
   // the fields above. Always coloured by sign — ahead of the projection or
@@ -1474,12 +1439,12 @@ function YearModal({
                 narrower question (`measured`), and tying the two together
                 blanked the "so far" lines for the year in progress, which is
                 the year you most want them for. */}
-            <Recorded label="Income" cents={row.actualIncomeCents} currency={currency} from={row.inProgress ? "Logged so far" : "Logged"} tone="income" estCents={incomeCents} />
+            <Recorded label="Income" cents={row.actualIncomeCents} currency={currency} from={row.actualFromSheet ? "Annual Overview" : row.inProgress ? "Logged so far" : "Logged"} tone="income" estCents={incomeCents} />
             <Recorded
               label="Spending"
               cents={row.actualSpendingCents}
               currency={currency}
-              from={`${row.inProgress ? "Logged so far" : "Logged"}${row.actualKidsCents ? " + 529s" : ""}`}
+              from={row.actualFromSheet ? "Annual Overview" : `${row.inProgress ? "Logged so far" : "Logged"}${row.actualKidsCents ? " + 529s" : ""}`}
               tone="spending"
               estCents={spendingCents}
             />

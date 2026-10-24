@@ -269,7 +269,7 @@ export function NetworthBoard({
         thisYear={thisYear}
         projection={projectionYears}
       >
-        {({ assumptions, details, todays, setTodays, editIncome }) => (
+        {({ assumptions, details, editIncome }) => (
           <ProjectionSection
             years={projectionYears}
             currency={currency}
@@ -280,9 +280,6 @@ export function NetworthBoard({
             groupSlots={fiPlan.accountGroups.slots}
             onEditIncome={editIncome}
             currentNwCents={projectionYears.find((y) => y.inProgress)?.actualCents ?? fiMeasured.assetsCents}
-            inflationPct={fiPlan.inflationPct}
-            todays={todays}
-            onTodays={setTodays}
             assumptions={assumptions}
             details={details}
           />
@@ -1678,11 +1675,15 @@ function BalanceGrid({
                         >
                           <path d="M9 6l6 6-6 6" />
                         </svg>
-                        <span className="whitespace-nowrap max-sm:text-[12px] font-bold uppercase tracking-wide text-foreground sm:text-sm">
-                          {g.section}
-                        </span>
-                        <span className="hidden min-w-0 truncate text-xs font-normal normal-case text-muted sm:block">
-                          {accountCount} {accountCount === 1 ? "account" : "accounts"}
+                        {/* The count under the name: beside it, "Investments"
+                            and "Kids Funding" cut it to "7 acc…". */}
+                        <span className="flex min-w-0 flex-col">
+                          <span className="whitespace-nowrap max-sm:text-[12px] font-bold uppercase tracking-wide text-foreground sm:text-sm">
+                            {g.section}
+                          </span>
+                          <span className="hidden whitespace-nowrap text-xs font-normal normal-case text-foreground sm:block">
+                            {accountCount} {accountCount === 1 ? "account" : "accounts"}
+                          </span>
                         </span>
                       </button>
                     </td>
@@ -2169,13 +2170,14 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
       // The last finished month, not the one in progress — same rule as the
       // cards above (investments only move at the month-end update).
       const latest = points.filter((p) => p.month.startsWith(String(y)) && p.month < lockedFromMonth).at(-1);
-      if (latest) rows.push({ label: `${MONTHS_SHORT[Number(latest.month.slice(5, 7)) - 1]} ${String(y).slice(2)}`, year: y, p: latest });
+      // Full year: "Sep 26" read as September 26th, "Dec 25" as Christmas.
+      if (latest) rows.push({ label: `${MONTHS_SHORT[Number(latest.month.slice(5, 7)) - 1]} ${y}`, year: y, p: latest });
       continue;
     }
     const dec = pointByMonth.get(`${y}-12-01`);
     const janNext = pointByMonth.get(`${y + 1}-01-01`);
     const p = dec ?? janNext;
-    if (p) rows.push({ label: `Dec ${String(y).slice(2)}`, year: y, p });
+    if (p) rows.push({ label: `Dec ${y}`, year: y, p });
   }
   // Sort newest first for display; keep asc for prev-year lookup via map.
   const rowByYear = new Map(rows.map((r) => [r.year, r]));

@@ -19,6 +19,7 @@ import {
   periodStartFor,
   resolveContributedCents,
   signedContributionCents,
+  transferOutCents,
 } from "@/lib/fund-contributions";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { throwIfAny } from "@/lib/supabase-result";
@@ -158,6 +159,7 @@ export default async function InvestPage({
     { data: essentialActuals, error: essentialActualsError },
     { data: storedCapRows, error: storedCapRowsError },
     { data: cardOwedRows, error: cardOwedError },
+    { data: transferRows, error: transferRowsError },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -283,6 +285,13 @@ export default async function InvestPage({
       .from("v_card_balances")
       .select("account_id, owed_cents")
       .eq("household_id", household.id),
+    // Money moved in or out of an investment by Withdraw — added
+    // back when working out gains (see transferOutCents).
+    supabase
+      .from("transactions")
+      .select("account_id, bucket_id, amount_cents, is_withdrawal, occurred_on")
+      .eq("household_id", household.id)
+      .eq("movement_type", "investment_transfer"),
   ]);
   throwIfAny({
     allAccountRows: allAccountRowsError,
@@ -298,6 +307,7 @@ export default async function InvestPage({
     essentialActuals: essentialActualsError,
     storedCapRows: storedCapRowsError,
     cardOwed: cardOwedError,
+    transferRows: transferRowsError,
   });
 
   // This month's rows as the capture started at the top writes them.
@@ -455,6 +465,19 @@ export default async function InvestPage({
     return sum;
   }
 
+  // Transfers out of a slot after `afterMonth` ("" = the whole year), the
+  // same slot rules as contribThrough.
+  function transferredOut(accountId: string, bucketId: string | null, year: number, afterMonth: string, wholeAccount: boolean): number {
+    let sum = 0;
+    for (const t of transferRows ?? []) {
+      if (t.account_id !== accountId || Number(t.occurred_on.slice(0, 4)) !== year) continue;
+      if (t.occurred_on.slice(5, 7) <= afterMonth) continue;
+      if (!wholeAccount && (t.bucket_id ?? null) !== bucketId) continue;
+      sum += transferOutCents(t);
+    }
+    return sum;
+  }
+
   // Stored/reviewed rows.
   const storedBy = new Map<
     string,
@@ -534,8 +557,10 @@ export default async function InvestPage({
     const alreadyIn = openMonth
       ? contribThrough(accountId, bucketKey === "_" ? null : bucketKey, year, openMonth, opensWholeAccount)
       : 0;
+    // Money moved out by a transfer comes back in: it left, it wasn't lost.
+    const movedOut = transferredOut(accountId, bucketKey === "_" ? null : bucketKey, year, openMonth ?? "", opensWholeAccount);
     const autoAccrued =
-      start != null && end != null ? end - start - (contributed - alreadyIn) : 0;
+      start != null && end != null ? end - start - (contributed - alreadyIn) + movedOut : 0;
     const accrued = stored?.accruedManual ? stored.accrued : autoAccrued;
 
     return {
@@ -553,6 +578,7 @@ export default async function InvestPage({
       // the table renders these read-only instead of pretending they take.
       contribFromLedger: year === nowYear && contribBy.has(key),
       openingContribCents: alreadyIn,
+      transferOutCents: movedOut,
     };
   }
 

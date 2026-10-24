@@ -66,6 +66,20 @@ export function signedContributionCents(tx: {
 }
 
 /**
+ * Money a transfer moved OUT of an investment (Transfer/Withdraw to a bank),
+ * signed: out positive, in negative. It isn't a contribution, but it isn't a
+ * loss either — growth is (worth now − worth at the start − paid in + taken
+ * out). Without it the $877.22 moved from Fundrise to USAA on 2026-10-09 read
+ * as a −99% year on Invest / Savings and cut Net Worth's gains by the same.
+ */
+export function transferOutCents(tx: {
+  amount_cents: number;
+  is_withdrawal: boolean | null;
+}): number {
+  return tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
+}
+
+/**
  * Key for one (account, bucket, year) slot.
  *
  * `"_"` stands in for the account-level slot so a bucket id and "no bucket"

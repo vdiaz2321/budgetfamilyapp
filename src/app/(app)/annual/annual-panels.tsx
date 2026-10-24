@@ -30,7 +30,12 @@ type Props = {
   years: number[];
   netByYear: Record<number, number>;
   currency: string;
+  /** Says why Category by Months is empty (a spreadsheet year). */
+  emptyNote?: string;
 };
+
+// The two group names the Bills/Expenses card is called after.
+const SPENDING_NAMES = new Set(["bills", "expenses"]);
 
 const CARD_ORDER: CardId[] = ["income", "spending", "savings", "kids", "debt", "net"];
 const MONTH_ABBR = [
@@ -52,7 +57,7 @@ const MONTH_ABBR = [
  */
 export function AnnualPanels({
   year, outflowKinds, totals, kidsTotal, totalNet, remainingMonths, currentMonthIdx,
-  groups, monthLabels, properties, kinds, years, netByYear, currency,
+  groups, monthLabels, properties, kinds, years, netByYear, currency, emptyNote,
 }: Props) {
   const currentMonthLabel = currentMonthIdx === null ? null : monthLabels[currentMonthIdx];
   const [selected, setSelected] = useState<Selection>(() => new Map());
@@ -181,6 +186,9 @@ export function AnnualPanels({
             outflowKinds={outflowKinds}
             totals={totals}
             kidsTotal={kidsTotal}
+            spendingAlso={groups
+              .filter((g) => (g.kind === "bills" || g.kind === "expenses") && !SPENDING_NAMES.has(g.label.toLowerCase()))
+              .map((g) => g.label)}
             currency={currency}
             filter={filter}
             onClear={clear}
@@ -201,6 +209,7 @@ export function AnnualPanels({
             remainingMonths={remainingMonths}
             totalNet={totalNet}
             incomeTotal={totals.income}
+            emptyNote={emptyNote}
           />
         </div>
 

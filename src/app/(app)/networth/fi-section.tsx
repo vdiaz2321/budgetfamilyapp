@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { ModalShell } from "@/components/modal-shell";
-import { usePersistentCollapse, useSessionCollapse } from "@/lib/use-session-collapse";
-import { centsToDisplay, formatMoney, formatMoneyWhole } from "@/lib/money";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { centsToDisplay, displayToCents, formatMoney, formatMoneyWhole } from "@/lib/money";
 import {
   INCOME_LINE_KINDS,
   ageInYear,
@@ -46,6 +46,7 @@ import {
   type RentalRow,
   planEndYear,
 } from "@/lib/retirement";
+import type { InflationHistory } from "@/lib/inflation";
 import { saveRetirementPlan, setWithdrawalRate } from "./actions";
 import {
   GROUP_KINDS,
@@ -91,6 +92,8 @@ export type FiPlan = {
   basePayByYear: Record<string, number>;
   /** Raises spending, healthcare and rental prices each year. */
   inflationPct: number;
+  /** Earlier rates, each with the last year it covered (lib/inflation). */
+  inflationHistory: InflationHistory;
   /** What savings (checking + savings buckets) earn a year. */
   cashReturnPct: number;
   /** The COLA: future rate, actual ones by year, and which incomes get it. */
@@ -105,16 +108,17 @@ export type FiPlan = {
   children: PlanChild[];
   /** SGLI held on active duty and VGLI kept after retirement. */
   insurance: MilitaryInsurance;
-  /** TRICARE For Life: yearly Medicare Part B premium at current rates
-   *  from the start age, rising inflation + growthPct a year. */
+  /** TRICARE For Life: yearly Medicare Part B premium from the start age,
+   *  as typed. */
   healthcareAnnualCents: number | null;
+  /** How the TFL box shows it: per month (default) or per year. */
+  healthcareAnnualPer: "mo" | "yr";
   /** Health plans from military retirement until TFL, each with its yearly
    *  premium. More than one runs side by side. */
   healthPlans: HealthPlan[];
   /** Dental & vision plans (FEDVIP or private); blank start = retirement month, blank end = for life. */
   dentalPlans: DentalPlan[];
   healthcareStartAge: number;
-  healthcareGrowthPct: number;
   incomeLines: IncomeLine[];
   /** Account groups: settings as stored, which account sits where, today's
    *  balances and the last twelve months' contributions. */
@@ -192,9 +196,6 @@ export function FiSection({
   children: (parts: {
     assumptions: React.ReactNode;
     details: React.ReactNode;
-    /** Today's Money vs Not Today's Money — one choice for the whole page. */
-    todays: boolean;
-    setTodays: (v: boolean) => void;
     /** Opens the assumptions at Income (a first Pay line at the amount given). */
     editIncome: (suggestYearlyCents: number | null) => void;
   }) => React.ReactNode;
@@ -204,18 +205,8 @@ export function FiSection({
   const open = !!collapse.open;
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) =>
     setCollapse((s) => ({ ...s, open: typeof next === "function" ? next(!!s.open) : next }));
-  // Today's Money: every later year's NET WORTH shrunk by inflation back to
-  // this year — the table, these panels and the chart alike, one toggle for
-  // the page (Victor, 2026-10-16). Income, spending and gains always show the
-  // dollars actually paid: retired pay is the $95,640 the High-3 pays. Kept
-  // across logins.
-  const [moneyPref, setMoneyPref] = usePersistentCollapse("networth-money", () => ({ todays: true }));
-  const todays = moneyPref.todays !== false;
-  const setTodays = (v: boolean) => setMoneyPref({ todays: v });
-  /** What a dollar in `year` is worth today: 1 for this year and earlier. */
-  const deflator = (year: number) =>
-    todays ? Math.pow(1 + plan.inflationPct / 100, Math.max(0, year - thisYear)) : 1;
-  const sh = (year: number, cents: number) => Math.round(cents / deflator(year));
+  // Plain dollars everywhere: the Today's Money toggle is gone (Victor,
+  // 2026-10-24) — panels and the chart show what the plan works out.
 
   // true = open at the top; "sbp" = open scrolled to the SBP box; "income" =
   // open at Income (from a year's Edit income).
@@ -572,29 +563,9 @@ export function FiSection({
     (_, i) => firstFullRetiredYear + i,
   );
 
-  // The chart in the chosen money — net worth, and income and spending for
-  // its Income & spending bars and year readout — like the table.
-  const fiShown = {
-    ...fi,
-    years: fi.years.map((y) => ({
-      ...y,
-      startCents: sh(y.year, y.startCents),
-      endCents: sh(y.year, y.endCents),
-      targetCents: sh(y.year, y.targetCents),
-    })),
-  };
-  const projectionShown = projection.map((p) => ({
-    ...p,
-    eoyCents: sh(p.year, p.eoyCents),
-    actualCents: p.actualCents == null ? p.actualCents : sh(p.year, p.actualCents),
-    incomeCents: sh(p.year, p.incomeCents),
-    spendingCents: sh(p.year, p.spendingCents),
-  }));
-
   // The button that opens the rates that rebuild the table, above it.
-  // Same pill as Today's Money, set apart by a pencil and a light orange
-  // fill — Victor asked for orange (2026-10-18) so it doesn't read as one of
-  // the blue Today's / Not Today's Money toggles beside it. An action button,
+  // A pill set apart by a pencil and a light orange fill — Victor asked for
+  // orange (2026-10-18) so it reads as an action. An action button,
   // not data, so the no-orange-in-charts rule doesn't apply.
   const assumptions = (
     <button
@@ -745,7 +716,7 @@ export function FiSection({
                         mile.targetCents > 0 ? (
                           <>
                             Covers a{" "}
-                            {formatMoneyWhole(sh(mile.year, Math.round((mile.targetCents * plan.withdrawalRatePct) / 100)), currency)}
+                            {formatMoneyWhole(Math.round((mile.targetCents * plan.withdrawalRatePct) / 100), currency)}
                             /yr spending gap,{" "}
                             <span className="whitespace-nowrap">
                               drawing <PctInput key={plan.withdrawalRatePct} pct={plan.withdrawalRatePct} label="Withdrawal rate" save={setWithdrawalRate} /> a year
@@ -755,16 +726,16 @@ export function FiSection({
                           "Retired pay covers spending"
                         )
                       }
-                      value={mile.targetCents > 0 ? formatMoneyWhole(sh(mile.year, mile.targetCents), currency) : "Nothing"}
+                      value={mile.targetCents > 0 ? formatMoneyWhole(mile.targetCents, currency) : "Nothing"}
                       tone={mile.targetCents > 0 ? "" : "text-positive"}
                     />
-                    <ValueRow label={`Expected in ${mile.year}`} value={formatMoneyWhole(sh(mile.year, mile.endCents), currency)} />
+                    <ValueRow label={`Expected in ${mile.year}`} value={formatMoneyWhole(mile.endCents, currency)} />
                     <ValueRow
                       label="Status"
                       value={
                         mile.endCents >= mile.targetCents
                           ? "On track"
-                          : `Short ${formatMoneyWhole(sh(mile.year, mile.targetCents - mile.endCents), currency)}`
+                          : `Short ${formatMoneyWhole(mile.targetCents - mile.endCents, currency)}`
                       }
                       tone={mile.endCents >= mile.targetCents ? "text-positive" : "text-negative"}
                       bold
@@ -795,7 +766,7 @@ export function FiSection({
                   // The year that age falls in — the balance is its year-end
                   // bar in the chart below.
                   note={plan.birthYear ? `Year: ${plan.birthYear + 80}` : undefined}
-                  value={at80 == null ? "—" : formatMoneyWhole(sh(plan.birthYear! + 80, Math.max(0, at80)), currency)}
+                  value={at80 == null ? "—" : formatMoneyWhole(Math.max(0, at80), currency)}
                 />
               </ul>
             </div>
@@ -1077,8 +1048,8 @@ export function FiSection({
               {stressEnd != null ? (
                 <>
                   {" · "}{plan.spouseBirthYear ? `Left in ${untilYear}` : `Left at age ${plan.longevityAge}`}:{" "}
-                  <span className="font-semibold">{formatMoneyWhole(sh(untilYear!, Math.max(0, stressEnd)), currency)}</span>
-                  {planEnd != null ? ` (without the drop ${formatMoneyWhole(sh(untilYear!, Math.max(0, planEnd)), currency)})` : ""}
+                  <span className="font-semibold">{formatMoneyWhole(Math.max(0, stressEnd), currency)}</span>
+                  {planEnd != null ? ` (without the drop ${formatMoneyWhole(Math.max(0, planEnd), currency)})` : ""}
                 </>
               ) : null}
             </p>
@@ -1086,14 +1057,14 @@ export function FiSection({
 
           <FiChart
             view={chartView}
-            stressEnds={stressed && chartView === "nw" ? new Map(stressed.years.map((y) => [y.year, sh(y.year, y.endCents)])) : null}
+            stressEnds={stressed && chartView === "nw" ? new Map(stressed.years.map((y) => [y.year, y.endCents])) : null}
             stressPct={dropPct}
-            fi={fiShown}
+            fi={fi}
             thisYear={thisYear}
             birthYear={plan.birthYear}
             targetRetireYear={plan.targetRetireYear}
             ssYear={ssLine?.startYear ?? null}
-            projection={projectionShown}
+            projection={projection}
             currency={currency}
           />
         </div>
@@ -1103,7 +1074,7 @@ export function FiSection({
 
   return (
     <>
-      {children({ assumptions, details, todays, setTodays, editIncome })}
+      {children({ assumptions, details, editIncome })}
       {editing ? (
         <PlanModal
           plan={plan}
@@ -1655,6 +1626,8 @@ type PlanDraft<K extends string> = {
   key: string;
   kind: K;
   amount: string;
+  /** What `amount` is typed per: a month or a year. */
+  per: "mo" | "yr";
   startYear: string;
   startMonth: string;
   endYear: string;
@@ -1699,7 +1672,10 @@ type RentalDraft = {
   loanRatePct: string;
   loanYears: string;
   rent: string;
+  /** What `rent` / `costs` are typed per: a month or a year. */
+  rentPer: "mo" | "yr";
   costs: string;
+  costsPer: "mo" | "yr";
   appreciationPct: string;
 };
 
@@ -1808,6 +1784,11 @@ function PlanModal({
     endYear: d.endYear?.toString() ?? "",
     endMonth: endMonthDraft(d.endMonth),
   });
+  // A stored yearly premium back in the box it was typed in.
+  const premiumDraft = (p: { annualCents: number; per: "mo" | "yr" }) => ({
+    amount: p.annualCents ? centsToDisplay(p.per === "mo" ? Math.round(p.annualCents / 12) : p.annualCents) : "",
+    per: p.per,
+  });
   // Starts with one TRICARE Select row so the choice is visible; an empty
   // amount saves as $0.
   const [healthPlans, setHealthPlans] = useState<PlanDraft<HealthPlanKind>[]>(() =>
@@ -1815,10 +1796,10 @@ function PlanModal({
       ? plan.healthPlans.map((p, i) => ({
           key: `saved-${i}`,
           kind: p.kind,
-          amount: p.annualCents ? centsToDisplay(p.annualCents) : "",
+          ...premiumDraft(p),
           ...datesDraft(p),
         }))
-      : [{ key: "new-0", kind: "tricare_select", amount: "", ...datesDraft(NO_DATES) }],
+      : [{ key: "new-0", kind: "tricare_select", amount: "", per: "mo", ...datesDraft(NO_DATES) }],
   );
   const updateHealthPlan = (key: string, patch: Partial<PlanDraft<HealthPlanKind>>) =>
     setHealthPlans((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -1828,13 +1809,66 @@ function PlanModal({
       ? plan.dentalPlans.map((p, i) => ({
           key: `saved-${i}`,
           kind: p.kind,
-          amount: p.annualCents ? centsToDisplay(p.annualCents) : "",
+          ...premiumDraft(p),
           ...datesDraft(p),
         }))
-      : [{ key: "new-0", kind: "fedvip_dental", amount: "", ...datesDraft(NO_DATES) }],
+      : [{ key: "new-0", kind: "fedvip_dental", amount: "", per: "mo", ...datesDraft(NO_DATES) }],
   );
   const updateDentalPlan = (key: string, patch: Partial<PlanDraft<DentalPlanKind>>) =>
     setDentalPlans((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  // A plan whose end month has passed moves to its list's Archive, folded
+  // away so a new row each year doesn't stack the section long (Victor,
+  // 2026-10-24). Still saved, still editable once the Archive is open.
+  const nowMonth = (() => {
+    const d = new Date();
+    return d.getFullYear() * 12 + d.getMonth();
+  })();
+  const planEnded = (r: PlanDraft<string>) =>
+    /^\d{4}$/.test(r.endYear.trim()) && Number(r.endYear) * 12 + (Number(r.endMonth) || 12) - 1 < nowMonth;
+  const [archiveOpen, setArchiveOpen] = useState<Set<"health" | "dental">>(() => new Set());
+  const toggleArchive = (list: "health" | "dental") =>
+    setArchiveOpen((s) => {
+      const next = new Set(s);
+      if (next.has(list)) next.delete(list);
+      else next.add(list);
+      return next;
+    });
+  const healthRow = (row: PlanDraft<HealthPlanKind>) => (
+    <PlanRow
+      key={row.key}
+      row={row}
+      kinds={HEALTH_PLAN_KINDS}
+      ariaLabel="Health plan"
+      onChange={(patch) => updateHealthPlan(row.key, patch)}
+      onRemove={() => setHealthPlans((rows) => rows.filter((r) => r.key !== row.key))}
+      endPlaceholder="TFL"
+      currency={currency}
+      note={`${HEALTH_PLAN_NOTE[row.kind]} Blank end = until Medicare at 65${tflYear ? ` (${tflYear})` : ""}.`}
+    />
+  );
+  const dentalRow = (row: PlanDraft<DentalPlanKind>) => (
+    <PlanRow
+      key={row.key}
+      row={row}
+      kinds={DENTAL_PLAN_KINDS}
+      ariaLabel="Dental or vision plan"
+      onChange={(patch) => updateDentalPlan(row.key, patch)}
+      onRemove={() => setDentalPlans((rows) => rows.filter((r) => r.key !== row.key))}
+      endPlaceholder="Never"
+      currency={currency}
+      note={`${
+        row.kind === "fedvip_dental"
+          ? "Retiree dental through FEDVIP, which replaced TRICARE's."
+          : row.kind === "fedvip_vision"
+            ? "FEDVIP vision, open to you while on a TRICARE plan."
+            : "Private plan premium."
+      } Blank end = for life.`}
+    />
+  );
+  // TRICARE For Life, typed per month or per year like the plans above it.
+  const [tfl, setTfl] = useState(() =>
+    premiumDraft({ annualCents: plan.healthcareAnnualCents ?? 0, per: plan.healthcareAnnualPer }),
+  );
   // A new row starts in the retirement month as currently typed.
   const newPlanDates = () => ({ ...datesDraft(NO_DATES), startYear: retireYear, startMonth: startMonthDraft(retireMonth) });
   const [birthYear, setBirthYear] = useState(plan.birthYear?.toString() ?? "");
@@ -1869,6 +1903,46 @@ function PlanModal({
       sbpPct: Number(sbpPct) || 0,
     },
   );
+  // Health and dental & vision premiums running in the retirement month, a
+  // month of each as typed — what the table's Spending counts. Listed in red
+  // under retired pay beside SBP, since they come out of the retired pay
+  // check (Victor, 2026-10-24); counted once, in Spending.
+  const retirePremiums = (() => {
+    const ry = toYear(retireYear);
+    if (ry == null) return [];
+    const at = ry * 12 + (Number(retireMonth) || 1) - 1;
+    const untilTfl = tflYear != null ? (tflYear - 1) * 12 + 11 : null;
+    const runs = (r: PlanDraft<string>, defaultEnd: number | null) => {
+      const sy = toYear(r.startYear);
+      const ey = toYear(r.endYear);
+      const start = sy != null ? sy * 12 + (Number(r.startMonth) || 1) - 1 : at;
+      const end = ey != null ? ey * 12 + (Number(r.endMonth) || 12) - 1 : defaultEnd;
+      return start <= at && (end == null || at <= end);
+    };
+    const label = (kinds: { value: string; label: string }[], kind: string) => kinds.find((k) => k.value === kind)?.label ?? kind;
+    return [
+      ...healthPlans.filter((r) => runs(r, untilTfl)).map((r) => ({ r, name: label(HEALTH_PLAN_KINDS, r.kind) })),
+      ...dentalPlans.filter((r) => runs(r, null)).map((r) => ({ r, name: label(DENTAL_PLAN_KINDS, r.kind) })),
+    ]
+      .map(({ r, name }) => ({
+        name,
+        monthlyCents: Math.round(displayToCents(r.amount) / (r.per === "mo" ? 1 : 12)),
+      }))
+      .filter((p) => p.monthlyCents > 0);
+  })();
+  // Each deduction from retired pay, in red: SBP, then the premiums.
+  const deductions = (times: number) =>
+    [
+      ...(estimate && estimate.sbpAtRetireCents > 0 ? [{ name: "SBP", monthlyCents: estimate.sbpAtRetireCents }] : []),
+      ...retirePremiums,
+    ].map((d) => (
+      <span key={d.name}>
+        ,{" "}
+        <span className="text-negative">
+          minus {formatMoneyWhole(d.monthlyCents * times, currency)} {d.name}
+        </span>
+      </span>
+    ));
 
   const [lines, setLines] = useState<LineDraft[]>(() => {
     const saved: LineDraft[] = plan.incomeLines.map((l) => ({
@@ -1926,8 +2000,11 @@ function PlanModal({
       loanBalance: r.loan_balance_cents ? centsToDisplay(r.loan_balance_cents) : "",
       loanRatePct: String(Number(r.loan_rate_pct)),
       loanYears: String(r.loan_years),
-      rent: r.monthly_rent_cents ? centsToDisplay(r.monthly_rent_cents) : "",
-      costs: r.monthly_costs_cents ? centsToDisplay(r.monthly_costs_cents) : "",
+      // A yearly figure reopens as typed; otherwise the monthly one.
+      rent: r.yearly_rent_cents != null ? centsToDisplay(r.yearly_rent_cents) : r.monthly_rent_cents ? centsToDisplay(r.monthly_rent_cents) : "",
+      rentPer: r.yearly_rent_cents != null ? "yr" : "mo",
+      costs: r.yearly_costs_cents != null ? centsToDisplay(r.yearly_costs_cents) : r.monthly_costs_cents ? centsToDisplay(r.monthly_costs_cents) : "",
+      costsPer: r.yearly_costs_cents != null ? "yr" : "mo",
       appreciationPct: String(Number(r.appreciation_pct)),
     })),
   );
@@ -1989,7 +2066,9 @@ function PlanModal({
         loanRatePct: "7",
         loanYears: "30",
         rent: "",
+        rentPer: "mo",
         costs: "",
+        costsPer: "mo",
         appreciationPct: "0",
       },
     ]);
@@ -2031,8 +2110,8 @@ function PlanModal({
         : money(r.loanBalance),
       loanRatePct: Number(r.loanRatePct) || 0,
       loanYears: Number(r.loanYears) || 0,
-      monthlyRentCents: money(r.rent),
-      monthlyCostsCents: money(r.costs),
+      monthlyRentCents: Math.round(money(r.rent) / (r.rentPer === "yr" ? 12 : 1)),
+      monthlyCostsCents: Math.round(money(r.costs) / (r.costsPer === "yr" ? 12 : 1)),
       appreciationPct: Number(r.appreciationPct) || 0,
     };
     const first = owned ? thisYear + 1 : model.purchaseYear;
@@ -2129,6 +2208,7 @@ function PlanModal({
         rows.map((r) => ({
           kind: r.kind,
           amount: r.amount,
+          per: r.per,
           startYear: r.startYear,
           startMonth: r.startMonth,
           endYear: r.endYear,
@@ -2183,7 +2263,9 @@ function PlanModal({
           loanRatePct: r.loanRatePct,
           loanYears: r.loanYears,
           rent: r.rent,
+          rentPer: r.rentPer,
           costs: r.costs,
+          costsPer: r.costsPer,
           appreciationPct: r.appreciationPct,
         })),
       ),
@@ -2595,6 +2677,15 @@ function PlanModal({
                   className={`${lineInput} text-center`}
                 />
               </PctBox>
+              {/* A change counts from this year; earlier years keep their rate. */}
+              {[
+                ...plan.inflationHistory.map((h) => `${h.pct}% to ${h.until}`),
+                ...(Number(inflation) !== plan.inflationPct && inflation.trim() !== "" ? [`New from ${thisYear}`] : []),
+              ].map((t) => (
+                <span key={t} className="mt-0.5 block text-center text-xs text-foreground sm:text-sm">
+                  {t}
+                </span>
+              ))}
             </label>
             {(["cash", ...GROUP_KINDS.filter((k) => k !== "cash")] as GroupKind[]).map((kind) => {
               // "Traditional / retirement", "Roth / retirement" on two lines.
@@ -2816,13 +2907,11 @@ function PlanModal({
             </span>
             <span className="font-semibold">Retired pay: {formatMoneyWhole(estimate.grossAtRetireCents, currency)}/mo</span>{" "}
             in {toYear(retireYear)}
-            {estimate.sbpAtRetireCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpAtRetireCents, currency)} SBP` : ""}, before tax.
+            {deductions(1)}, before tax.
             {/* The same pay a year at a time — twelve of each monthly figure. */}
             <span className="block">
               <span className="font-semibold">Yearly: {formatMoneyWhole(estimate.grossAtRetireCents * 12, currency)}</span>
-              {estimate.sbpAtRetireCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpAtRetireCents * 12, currency)} SBP` : ""}, before tax.
-              {" "}
-              {colaMilitary ? "Rises with the COLA each year after." : "The same every year after."}
+              {deductions(12)}, before tax.
             </span>
           </p>
         ) : null}
@@ -3013,73 +3102,55 @@ function PlanModal({
         {/* One row per plan; two can run side by side (a TRICARE plan plus a
             private supplement). All of them stop when TFL starts. */}
         <div className="space-y-2 sm:col-span-2">
-          {healthPlans.length === 0 ? (
+          {healthPlans.filter((r) => !planEnded(r)).length === 0 ? (
             <p className="text-xs sm:text-sm text-foreground">No health plan premium before Medicare.</p>
           ) : null}
-          {healthPlans.map((row) => (
-            <PlanRow
-              key={row.key}
-              row={row}
-              kinds={HEALTH_PLAN_KINDS}
-              ariaLabel="Health plan"
-              onChange={(patch) => updateHealthPlan(row.key, patch)}
-              onRemove={() => setHealthPlans((rows) => rows.filter((r) => r.key !== row.key))}
-              endPlaceholder="TFL"
-              note={`${HEALTH_PLAN_NOTE[row.kind]} Blank end = until Medicare at 65${tflYear ? ` (${tflYear})` : ""}.`}
-            />
-          ))}
-          <button
-            type="button"
-            onClick={() =>
-              setHealthPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "private", amount: "", ...newPlanDates() }])
-            }
-            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/30"
-          >
-            + Add health plan
-          </button>
+          {healthPlans.filter((r) => !planEnded(r)).map(healthRow)}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setHealthPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "private", amount: "", per: "mo", ...newPlanDates() }])
+              }
+              className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/30"
+            >
+              + Add health plan
+            </button>
+            <ArchiveToggle count={healthPlans.filter(planEnded).length} open={archiveOpen.has("health")} onToggle={() => toggleArchive("health")} />
+          </div>
+          {archiveOpen.has("health") ? healthPlans.filter(planEnded).map(healthRow) : null}
         </div>
         {/* Dental & vision: a list like the health plans, each row FEDVIP or
             private. TFL covers neither, so these run for life by default. */}
         <div className="space-y-2 sm:col-span-2">
-          <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Dental &amp; vision (/yr)</span>
-          {dentalPlans.length === 0 ? <p className="text-xs sm:text-sm text-foreground">No dental or vision premium.</p> : null}
-          {dentalPlans.map((row) => (
-            <PlanRow
-              key={row.key}
-              row={row}
-              kinds={DENTAL_PLAN_KINDS}
-              ariaLabel="Dental or vision plan"
-              onChange={(patch) => updateDentalPlan(row.key, patch)}
-              onRemove={() => setDentalPlans((rows) => rows.filter((r) => r.key !== row.key))}
-              endPlaceholder="Never"
-              note={`${
-                row.kind === "fedvip_dental"
-                  ? "Retiree dental through FEDVIP, which replaced TRICARE's."
-                  : row.kind === "fedvip_vision"
-                    ? "FEDVIP vision, open to you while on a TRICARE plan."
-                    : "Private plan premium."
-              } Blank end = for life.`}
-            />
-          ))}
-          <button
-            type="button"
-            onClick={() =>
-              setDentalPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "fedvip_vision", amount: "", ...newPlanDates() }])
-            }
-            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/30"
-          >
-            + Add dental or vision plan
-          </button>
+          <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Dental &amp; vision</span>
+          {dentalPlans.filter((r) => !planEnded(r)).length === 0 ? (
+            <p className="text-xs sm:text-sm text-foreground">No dental or vision premium.</p>
+          ) : null}
+          {dentalPlans.filter((r) => !planEnded(r)).map(dentalRow)}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setDentalPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "fedvip_vision", amount: "", per: "mo", ...newPlanDates() }])
+              }
+              className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/30"
+            >
+              + Add dental or vision plan
+            </button>
+            <ArchiveToggle count={dentalPlans.filter(planEnded).length} open={archiveOpen.has("dental")} onToggle={() => toggleArchive("dental")} />
+          </div>
+          {archiveOpen.has("dental") ? dentalPlans.filter(planEnded).map(dentalRow) : null}
         </div>
         <Field
-          label="TRICARE For Life (/yr)"
+          label="TRICARE For Life"
           hint={
             <>
               Your Medicare Part B premium{tflYear ? `, from ${tflYear} (age ${TFL_AGE})` : ""}.{" "}
               <button
                 type="button"
                 onClick={() => setTflInfoOpen(true)}
-                className="whitespace-nowrap font-semibold underline underline-offset-2"
+                className="text-left font-semibold underline underline-offset-2 sm:whitespace-nowrap"
                 style={{ color: "var(--viz-savings)" }}
               >
                 What is TRICARE For Life?
@@ -3087,16 +3158,21 @@ function PlanModal({
             </>
           }
         >
-          <input
-            name="healthcareAnnual"
-            inputMode="decimal"
-            defaultValue={plan.healthcareAnnualCents ? centsToDisplay(plan.healthcareAnnualCents) : ""}
-            placeholder="0.00"
-            className={inputClass}
-          />
-        </Field>
-        <Field label="Rises above inflation (%/yr)" hint="Medical costs grow faster than prices overall: inflation + this. 2.5% + 1.5% = 4% a year.">
-          <input name="healthcareGrowthPct" inputMode="decimal" defaultValue={plan.healthcareGrowthPct} className={inputClass} />
+          {/* One cell, so the cost sits under the box, not beside it. */}
+          <span className="block">
+            <span className="flex gap-1">
+              <input
+                name="healthcareAnnual"
+                inputMode="decimal"
+                value={tfl.amount}
+                onChange={(e) => setTfl((t) => ({ ...t, amount: e.target.value }))}
+                placeholder="0.00"
+                className={inputClass}
+              />
+              <PerSelect name="healthcareAnnualPer" value={tfl.per} onChange={(per) => setTfl((t) => ({ ...t, per }))} />
+            </span>
+            <OtherWayCost amount={tfl.amount} per={tfl.per} currency={currency} />
+          </span>
         </Field>
         </div>
 
@@ -3119,7 +3195,9 @@ function PlanModal({
             const owned = !!r.propertyAccountId;
             const preview = rentalPreview(r);
             return (
-              <div key={r.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-4">
+              // items-start: Rent and Costs carry a cost line under the box,
+              // so the boxes line up by their tops.
+              <div key={r.key} className="grid grid-cols-2 items-start gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-4">
                 <LineField label="Name" className="col-span-2">
                   <input value={r.name} onChange={(e) => updateRental(r.key, { name: e.target.value })} className={lineInput} />
                 </LineField>
@@ -3176,11 +3254,19 @@ function PlanModal({
                 <LineField label="Loan rate %">
                   <input inputMode="decimal" value={r.loanRatePct} onChange={(e) => updateRental(r.key, { loanRatePct: e.target.value })} className={`${lineInput}`} />
                 </LineField>
-                <LineField label="Rent / mo">
-                  <input inputMode="decimal" value={r.rent} onChange={(e) => updateRental(r.key, { rent: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
+                <LineField label="Rent">
+                  <span className="flex gap-1">
+                    <input inputMode="decimal" value={r.rent} onChange={(e) => updateRental(r.key, { rent: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
+                    <PerSelect value={r.rentPer} onChange={(rentPer) => updateRental(r.key, { rentPer })} />
+                  </span>
+                  <OtherWayCost amount={r.rent} per={r.rentPer} currency={currency} label="rent" />
                 </LineField>
-                <LineField label="Costs / mo">
-                  <input inputMode="decimal" value={r.costs} onChange={(e) => updateRental(r.key, { costs: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
+                <LineField label="Costs">
+                  <span className="flex gap-1">
+                    <input inputMode="decimal" value={r.costs} onChange={(e) => updateRental(r.key, { costs: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
+                    <PerSelect value={r.costsPer} onChange={(costsPer) => updateRental(r.key, { costsPer })} />
+                  </span>
+                  <OtherWayCost amount={r.costs} per={r.costsPer} currency={currency} />
                 </LineField>
                 <LineField label="Value growth %">
                   <input inputMode="decimal" value={r.appreciationPct} onChange={(e) => updateRental(r.key, { appreciationPct: e.target.value })} className={`${lineInput}`} />
@@ -3188,7 +3274,7 @@ function PlanModal({
                 <button
                   type="button"
                   onClick={() => setRentalDrafts((prev) => prev.filter((x) => x.key !== r.key))}
-                  className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                  className="h-[34px] self-end rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 >
                   Remove
                 </button>
@@ -3512,8 +3598,7 @@ function TflInfo({ tflYear, onClose }: { tflYear: number | null; onClose: () => 
           <span className="font-semibold">Don&rsquo;t skip Part B:</span> without it you lose TRICARE coverage at 65.
         </p>
         <p>
-          <span className="font-semibold">What to enter:</span> 2434.80 for one person, 4869.60 for two. It rises with medical
-          inflation each year.
+          <span className="font-semibold">What to enter:</span> 202.90 a month for one person, 405.80 for two.
         </p>
         <ul className="space-y-1 border-t border-line pt-3">
           <li>
@@ -3543,7 +3628,34 @@ function TflInfo({ tflYear, onClose }: { tflYear: number | null; onClose: () => 
   );
 }
 
-// One health or dental & vision plan: type, yearly premium, start, end and
+// Opens and folds a plan list's Archive: the plans whose end has passed.
+function ArchiveToggle({ count, open, onToggle }: { count: number; open: boolean; onToggle: () => void }) {
+  if (count === 0) return null;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="inline-flex items-center gap-1.5 rounded-md bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-sky-300 transition hover:bg-sky-200 dark:bg-sky-900/50 dark:ring-sky-700 dark:hover:bg-sky-900"
+    >
+      <svg
+        aria-hidden
+        viewBox="0 0 20 20"
+        className={`h-3 w-3 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M5 7.5 10 12.5 15 7.5" />
+      </svg>
+      Archive ({count})
+    </button>
+  );
+}
+
+// One health or dental & vision plan: type, premium (per month or year), start, end and
 // Remove, with a short note under it.
 function PlanRow<K extends string>({
   row,
@@ -3553,6 +3665,7 @@ function PlanRow<K extends string>({
   onRemove,
   endPlaceholder,
   note,
+  currency,
 }: {
   row: PlanDraft<K>;
   kinds: { value: K; label: string }[];
@@ -3561,10 +3674,11 @@ function PlanRow<K extends string>({
   onRemove: () => void;
   endPlaceholder: string;
   note: string;
+  currency: string;
 }) {
   return (
     <div className="space-y-1.5 rounded-lg bg-background p-2 ring-1 ring-line">
-      <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_6rem_9.5rem_9.5rem_auto]">
+      <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_9.5rem_9.5rem_auto]">
         <LineField label="Plan" className="col-span-2 sm:col-span-1">
           <select
             value={row.kind}
@@ -3579,15 +3693,18 @@ function PlanRow<K extends string>({
             ))}
           </select>
         </LineField>
-        <LineField label="$ / yr">
-          <input
-            inputMode="decimal"
-            value={row.amount}
-            onChange={(e) => onChange({ amount: e.target.value })}
-            placeholder="0.00"
-            aria-label="Premium per year"
-            className={`${lineInput} tabular-nums`}
-          />
+        <LineField label="Amount">
+          <span className="flex gap-1">
+            <input
+              inputMode="decimal"
+              value={row.amount}
+              onChange={(e) => onChange({ amount: e.target.value })}
+              placeholder="0.00"
+              aria-label="Premium"
+              className={`${lineInput} tabular-nums`}
+            />
+            <PerSelect value={row.per} onChange={(per) => onChange({ per })} />
+          </span>
         </LineField>
         <LineField label="Starts">
           <MonthYearBox
@@ -3618,8 +3735,50 @@ function PlanRow<K extends string>({
           Remove
         </button>
       </div>
+      <OtherWayCost amount={row.amount} per={row.per} currency={currency} />
       <p className="text-xs leading-snug text-foreground sm:text-sm">{note}</p>
     </div>
+  );
+}
+
+// Per month or per year, beside an amount.
+function PerSelect({ name, value, onChange }: { name?: string; value: "mo" | "yr"; onChange: (per: "mo" | "yr") => void }) {
+  return (
+    <select
+      name={name}
+      value={value}
+      onChange={(e) => onChange(e.target.value as "mo" | "yr")}
+      aria-label="Per month or per year"
+      className="w-[4.25rem] shrink-0 cursor-pointer rounded-md bg-surface px-1.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+    >
+      <option value="mo">/mo</option>
+      <option value="yr">/yr</option>
+    </select>
+  );
+}
+
+// A cost the other way round under its box: a monthly one's year, a yearly
+// one's month — like the income lines' estimate.
+function OtherWayCost({
+  amount,
+  per,
+  currency,
+  label = "cost",
+}: {
+  amount: string;
+  per: "mo" | "yr";
+  currency: string;
+  /** What the amount is: "cost" (default) or "rent". */
+  label?: string;
+}) {
+  const cents = displayToCents(amount);
+  if (cents <= 0) return null;
+  return (
+    <p className="mt-1 text-center text-xs text-foreground sm:text-sm">
+      {per === "mo"
+        ? `Yearly ${label}: ${formatMoney(cents * 12, currency)}`
+        : `Monthly ${label}: ${formatMoney(Math.round(cents / 12), currency)}`}
+    </p>
   );
 }
 

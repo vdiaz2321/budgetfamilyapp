@@ -96,10 +96,16 @@ function statsFor(cards: SavingsCardData[]) {
     }),
     { goal: 0, planned: 0, saved: 0, deposits: 0, withdrawals: 0, net: 0 },
   );
+  // Goal progress counts only goals: Bitcoin (no goal) added its $1,700 to
+  // "saved" against targets it isn't part of, reading $145,200 of $152,046
+  // when the goals held $143,501. Each goal counts up to its target, so one
+  // over-funded goal can't hide another's gap.
+  const towardGoals = cards.reduce((t, c) => (c.goalCents > 0 ? t + Math.min(c.savedCents, c.goalCents) : t), 0);
   return {
     ...totals,
-    left: Math.max(0, totals.goal - totals.saved),
-    goalPct: totals.goal > 0 ? (totals.saved / totals.goal) * 100 : 0,
+    towardGoals,
+    left: Math.max(0, totals.goal - towardGoals),
+    goalPct: totals.goal > 0 ? (towardGoals / totals.goal) * 100 : 0,
     planPct: totals.planned > 0 ? (totals.net / totals.planned) * 100 : 0,
   };
 }
@@ -563,7 +569,7 @@ export function SavingsPanel({
                       <ScopeButton active={scope === "all"} onClick={() => setScope("all")}>With kids</ScopeButton>
                     </div>
                     <div className="ml-2 border-l border-line/70 pl-2">
-                      <ScopeButton active={scope === "kids"} onClick={() => setScope("kids")} className={scope === "kids" ? "border border-brand bg-brand text-white shadow-sm" : "border border-brand/35 bg-surface text-brand shadow-sm hover:bg-brand-soft hover:text-brand"}>Kids only</ScopeButton>
+                      <ScopeButton active={scope === "kids"} onClick={() => setScope("kids")}>Kids only</ScopeButton>
                     </div>
                   </div>
                 ) : null}
@@ -578,7 +584,7 @@ export function SavingsPanel({
               <div className="space-y-2 border-t border-line/70 px-4 py-3">
                 <div className="flex items-center justify-between gap-3 text-xs sm:text-sm">
                   <span className="font-medium">Overall goal progress</span>
-                  <span className="tabular-nums text-muted"><span className="text-positive">{formatSavingsMoney(stats.saved, currency)}</span> of {formatSavingsMoney(stats.goal, currency)}</span>
+                  <span className="tabular-nums text-muted"><span className="text-positive">{formatSavingsMoney(stats.towardGoals, currency)}</span> of {formatSavingsMoney(stats.goal, currency)}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-line/60">
                   <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.min(100, Math.max(0, stats.goalPct))}%`, backgroundColor: "var(--viz-savings)" }} />
@@ -632,8 +638,21 @@ export function SavingsPanel({
   );
 }
 
-function ScopeButton({ active, onClick, children, className }: { active: boolean; onClick: () => void; children: React.ReactNode; className?: string }) {
-  return <button type="button" aria-pressed={active} onClick={onClick} className={`rounded-md px-2.5 py-1 font-medium transition ${className ?? (active ? "bg-brand text-white shadow-sm" : "text-muted hover:text-foreground")}`}>{children}</button>;
+// A filter chip: light blue when picked, like the other pages' filters — the
+// solid brand fill is for action buttons (Victor's colour rule).
+function ScopeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`rounded-md px-2.5 py-1 font-medium text-foreground transition ${
+        active ? "bg-sky-100 font-semibold ring-1 ring-sky-400 dark:bg-sky-900/50" : "hover:bg-sky-50 dark:hover:bg-sky-950/40"
+      }`}
+    >
+      {children}
+    </button>
+  );
 }
 
 function Metric({ label, value, detail, tone, action }: { label: string; value: string; detail?: React.ReactNode; tone?: string; action?: React.ReactNode }) {

@@ -8,6 +8,7 @@ import { verifiedUser } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { unwrap } from "@/lib/supabase-result";
+import { inflationGrowth, parseInflationHistory, recordInflationChange } from "@/lib/inflation";
 import { applySsRecord, parseSsEarnings, toSsRecord, type SsStatementFigures } from "@/lib/ssa";
 import {
   estimatePension,
@@ -405,7 +406,7 @@ export async function saveRetirementPlan(formData: FormData) {
   // Each row: a plan kind, its yearly premium as typed, and its dates.
   // Health plans and dental & vision plans ride along as JSON: each row a
   // kind, its yearly premium as typed, and its start/end.
-  type PlanIn = { kind: string; amount: string; startYear?: string; startMonth?: string; endYear?: string; endMonth?: string };
+  type PlanIn = { kind: string; amount: string; per?: string; startYear?: string; startMonth?: string; endYear?: string; endMonth?: string };
   const readPlans = (key: string, label: string): { rows: unknown[] } | { error: string } => {
     let raw: PlanIn[];
     try {
@@ -424,7 +425,9 @@ export async function saveRetirementPlan(formData: FormData) {
     return {
       rows: raw.map((r) => ({
         kind: r.kind,
-        annualCents: r.amount?.trim() ? Math.max(0, displayToCents(r.amount)) : 0,
+        // Typed per month or per year; stored yearly.
+        annualCents: r.amount?.trim() ? Math.max(0, displayToCents(r.amount)) * (r.per === "mo" ? 12 : 1) : 0,
+        per: r.per,
         startYear: r.startYear?.trim(),
         startMonth: r.startMonth,
         endYear: r.endYear?.trim(),
@@ -443,7 +446,6 @@ export async function saveRetirementPlan(formData: FormData) {
     d.startYear != null && d.endYear != null && d.endYear * 12 + (d.endMonth ?? 12) < d.startYear * 12 + (d.startMonth ?? 1);
   if (healthPlans.some(endsBeforeStart)) return { error: "Health plan: the end can't be before the start." };
   if (dentalPlans.some(endsBeforeStart)) return { error: "Dental & vision: the end can't be before the start." };
-  const healthGrowth = num("healthcareGrowthPct");
   const colaPct = num("colaPct");
   if (colaPct != null && (colaPct < 0 || colaPct > 15)) return { error: "COLA has to be between 0% and 15%." };
   // Actual COLAs ride along as JSON rows: a payment year and its %, one per
@@ -541,9 +543,6 @@ export async function saveRetirementPlan(formData: FormData) {
   const payout = (key: string) => (formData.get(key) === "monthly36" ? "monthly36" : "lump");
   if (healthStartAge != null && (healthStartAge < 18 || healthStartAge > 120)) {
     return { error: "Healthcare start age has to be between 18 and 120." };
-  }
-  if (healthGrowth != null && (healthGrowth < 0 || healthGrowth > 20)) {
-    return { error: "Healthcare growth has to be between 0% and 20%." };
   }
 
   // The income lines ride along as JSON so the whole popup saves at once.
@@ -655,7 +654,9 @@ export async function saveRetirementPlan(formData: FormData) {
     loanRatePct?: string;
     loanYears?: string;
     rent?: string;
+    rentPer?: string;
     costs?: string;
+    costsPer?: string;
     appreciationPct?: string;
   };
   let rentalsIn: RentalIn[] = [];
@@ -711,8 +712,11 @@ export async function saveRetirementPlan(formData: FormData) {
       loan_balance_cents: owned ? cents(r.loanBalance) : null,
       loan_rate_pct: rate,
       loan_years: years,
-      monthly_rent_cents: cents(r.rent),
-      monthly_costs_cents: cents(r.costs),
+      // Typed per month or per year; the projection reads the monthly figure.
+      monthly_rent_cents: r.rentPer === "yr" ? Math.round(cents(r.rent) / 12) : cents(r.rent),
+      yearly_rent_cents: r.rentPer === "yr" ? cents(r.rent) : null,
+      monthly_costs_cents: r.costsPer === "yr" ? Math.round(cents(r.costs) / 12) : cents(r.costs),
+      yearly_costs_cents: r.costsPer === "yr" ? cents(r.costs) : null,
       appreciation_pct: appreciation,
       sort_order: i,
     });
@@ -791,6 +795,23 @@ export async function saveRetirementPlan(formData: FormData) {
     });
   }
 
+  // A new inflation rate counts from this year; the one it replaces stays on
+  // the years before (lib/inflation).
+  const { data: before } = await supabase
+    .from("retirement_plan")
+    .select("inflation_pct, inflation_history")
+    .eq("household_id", householdId)
+    .maybeSingle();
+  const inflationHistory =
+    before?.inflation_pct == null
+      ? parseInflationHistory(before?.inflation_history)
+      : recordInflationChange(
+          parseInflationHistory(before.inflation_history),
+          Number(before.inflation_pct),
+          inflation ?? 2.5,
+          new Date().getFullYear(),
+        );
+
   const { error } = await supabase.from("retirement_plan").upsert(
     {
       household_id: householdId,
@@ -812,6 +833,7 @@ export async function saveRetirementPlan(formData: FormData) {
       // what's stored rather than resetting it.
       ...(formData.has("withdrawalRatePct") ? { withdrawal_rate_pct: withdrawal ?? 4 } : {}),
       inflation_pct: inflation ?? 2.5,
+      inflation_history: inflationHistory,
       cash_return_pct: cashReturn ?? 3,
       sbp_enabled: formData.get("sbpEnabled") === "on",
       sbp_pct: sbpPct ?? 6.5,
@@ -824,10 +846,14 @@ export async function saveRetirementPlan(formData: FormData) {
       vgli_cents: vgliEnabled ? vgliCents : 0,
       vgli_payout: payout("vgliPayout"),
       health_plans: healthPlans,
-      healthcare_annual_cents: money("healthcareAnnual"),
+      // Typed per month or per year; stored yearly.
+      healthcare_annual_cents: (() => {
+        const c = money("healthcareAnnual");
+        return c != null && formData.get("healthcareAnnualPer") !== "yr" ? c * 12 : c;
+      })(),
+      healthcare_annual_per: formData.get("healthcareAnnualPer") === "yr" ? "yr" : "mo",
       dental_plans: dentalPlans,
       healthcare_start_age: healthStartAge ?? 65,
-      healthcare_growth_pct: healthGrowth ?? 1.5,
       cola_pct: colaPct ?? 0,
       cola_by_year: colaByYear,
       cola_military: formData.get("colaMilitary") === "on",
@@ -1065,6 +1091,10 @@ async function recomputeRetirementIncome(
     },
   );
   const inflationPct = Number(plan.inflation_pct ?? 2.5);
+  // Spending, typed withdrawals and the 4% rule grow from the year they were
+  // typed, each year at the rate it had (lib/inflation).
+  const inflation = { pct: inflationPct, history: parseInflationHistory(plan.inflation_history) };
+  const grow = (from: number, to: number) => inflationGrowth(from, to, inflation);
   const cola: ColaPlan = {
     pct: Number(plan.cola_pct ?? 2.5),
     byYear: parseColaByYear(plan.cola_by_year),
@@ -1087,8 +1117,6 @@ async function recomputeRetirementIncome(
     tflAnnualCents: plan.healthcare_annual_cents,
     tflStartAge: Number(plan.healthcare_start_age ?? 65),
     dentalPlans: parseDentalPlans(plan.dental_plans),
-    growthPct: Number(plan.healthcare_growth_pct ?? 1.5),
-    inflationPct,
   };
   // Each group's return, contributions, withdrawals and tax; a blank return
   // is the plan's (Cash: the savings APY), blank contributions what the last
@@ -1127,10 +1155,10 @@ async function recomputeRetirementIncome(
   // into every later year until another year types a new figure.
   // A typed withdrawal % becomes dollars in its own year, then rises with
   // inflation (the 4% rule).
-  const carryPct = pctWithdrawCarrier(inflationPct);
+  const carryPct = pctWithdrawCarrier(grow);
   const overridesByYear = resolveOverrides(
     rows.map((r) => ({ year: r.year, typed: parseTypedGroups(r.group_overrides), withdraw: parseTypedWithdraw(r.group_overrides) })),
-    inflationPct,
+    grow,
   );
 
   // Typed spending rises with inflation from the year it was typed.
@@ -1141,7 +1169,7 @@ async function recomputeRetirementIncome(
       restart: parseSpendRestart(r.group_overrides),
     })),
     thisYear,
-    inflationPct,
+    grow,
   );
 
   const stamp = new Date().toISOString();
@@ -1194,7 +1222,7 @@ async function recomputeRetirementIncome(
     // drop by each debt's payment once the Debts page projected it paid off,
     // which on two small 0% cards meant a −$33…−$900 line on every row from
     // 2028; Victor had it removed (2026-09-28).
-    const lifeSpending = Math.max(0, (grownSpend.get(row.year) ?? baseSpend) + healthcareForYear(row.year, health, thisYear));
+    const lifeSpending = Math.max(0, (grownSpend.get(row.year) ?? baseSpend) + healthcareForYear(row.year, health));
     const propertyEffect = rent.equityEndCents - rent.equityStartCents - rent.purchaseCashCents;
     // This year keeps its own gains (the register is measuring them); later
     // years run through the groups.

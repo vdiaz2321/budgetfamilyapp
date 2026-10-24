@@ -58,6 +58,8 @@ type Props = {
   totalNet: number;
   /** The year's income, for each group's "% of income". */
   incomeTotal: number;
+  /** Replaces the empty-year line (a spreadsheet year has no months). */
+  emptyNote?: string;
 };
 
 // Months run newest-first, left to right: the panel is half a screen wide, so
@@ -97,6 +99,7 @@ export function CategoryMonthsTable({
   remainingMonths,
   totalNet,
   incomeTotal,
+  emptyNote,
 }: Props) {
   // Open by default, and persistent: this panel is the year read line by
   // line, so it should be found as it was left rather than collapsed on
@@ -147,6 +150,11 @@ export function CategoryMonthsTable({
               <Chevron open={open} />
               <span className="whitespace-nowrap font-semibold">Category by Months</span>
             </span>
+            {/* Says the amounts can be clicked — they add up in the cards
+                above, and nothing on the page said so. */}
+            {open && groups.length ? (
+              <span className="pl-[1.6rem] pr-2 text-xs font-normal text-foreground">Click amounts to add them up</span>
+            ) : null}
           </span>
           {open && groups.length ? (
             <>
@@ -192,12 +200,12 @@ export function CategoryMonthsTable({
                 <div className="grid w-full items-center gap-2 py-2 pr-4" style={{ ...gridStyle(monthCount), ...trackMinWidth(monthCount) }}>
                   <span className="sticky left-0 z-10 -my-2 flex self-stretch bg-surface">
                     <span className="flex min-w-0 flex-1 items-center bg-brand-soft/40 pl-[calc(1rem+21px)]">
-                      <span className="truncate text-[13px] font-bold uppercase tracking-wide">Remaining</span>
+                      <span className="truncate text-[15px] font-bold uppercase tracking-wide">Remaining</span>
                     </span>
                   </span>
                   <YearBand pad="-my-2">
                     <span className="flex w-full flex-col items-center tabular-nums">
-                      <span className={`text-[15px] font-bold ${totalNet >= 0 ? "text-positive" : "text-negative"}`}>
+                      <span className={`text-[17px] font-bold ${totalNet >= 0 ? "text-positive" : "text-negative"}`}>
                         {formatMoney(totalNet, currency)}
                       </span>
                       {incomeTotal > 0 ? (
@@ -210,7 +218,7 @@ export function CategoryMonthsTable({
                   {visibleMonths(remainingMonths, monthCount).map((v, i) => (
                     <span
                       key={i}
-                      className={`text-center text-[15px] font-bold tabular-nums ${v == null ? "" : v >= 0 ? "text-positive" : "text-negative"}`}
+                      className={`text-center text-[17px] font-bold tabular-nums ${v == null ? "" : v >= 0 ? "text-positive" : "text-negative"}`}
                     >
                       {v == null ? <span className="text-muted">—</span> : formatMoney(v, currency)}
                     </span>
@@ -221,8 +229,7 @@ export function CategoryMonthsTable({
           </div>
         ) : (
           <p className="border-t border-line px-4 py-3 text-sm text-muted">
-            No actuals recorded yet this year. Line items appear here once they have logged
-            transactions.
+            {emptyNote ?? "No actuals recorded yet this year. Line items appear here once they have logged transactions."}
           </p>
         )
       ) : null}
@@ -319,7 +326,7 @@ function Group({
           <span className="sticky left-0 z-10 -my-2 flex self-stretch bg-surface">
             <span className="flex min-w-0 flex-1 items-center gap-2 bg-brand-soft/40 pl-4">
               <Chevron open={open} small />
-              <span className="truncate text-[13px] font-bold uppercase tracking-wide">{group.label}</span>
+              <span className="truncate text-[15px] font-bold uppercase tracking-wide">{group.label}</span>
               {picked ? (
                 <span className="whitespace-nowrap text-[12px] font-semibold text-muted">
                   {picked.count} selected
@@ -329,8 +336,10 @@ function Group({
           </span>
           <YearBand pad="-my-2">
             <span className="flex w-full flex-col items-center tabular-nums">
+              {/* Group figures 17px bold — they were 15px, smaller than the
+                  18px lines they total; 18px bold crowded the month columns. */}
               <span
-                className="text-[15px] font-bold"
+                className="text-[17px] font-bold"
                 style={{ color: picked ? KIND_COLOR[group.kind] : "var(--foreground)" }}
               >
                 {formatMoney(picked ? picked.sum : group.total, currency)}
@@ -348,7 +357,7 @@ function Group({
             </span>
           </YearBand>
           {visibleMonths(group.monthTotals, monthCount).map((v, i) => (
-            <span key={i} className="text-center text-[15px] font-bold tabular-nums">
+            <span key={i} className="text-center text-[17px] font-bold tabular-nums">
               {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
             </span>
           ))}

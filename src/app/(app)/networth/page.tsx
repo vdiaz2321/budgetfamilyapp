@@ -1,4 +1,5 @@
 import { toSsRecord } from "@/lib/ssa";
+import { inflationGrowth, parseInflationHistory } from "@/lib/inflation";
 import { CASH_KINDS, inflatedSpending, parseChildren, parseColaByYear, parseDentalPlans, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
 import { withCurrentMonth, captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
@@ -7,7 +8,7 @@ import { adoptClosedProjectionYears, anchorYearToActualStart } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { LIABILITY_KINDS as SHARED_LIABILITY_KINDS } from "@/lib/debt-identity";
-import { investSlotKey, resolveContributedCents } from "@/lib/fund-contributions";
+import { investSlotKey, resolveContributedCents, transferOutCents } from "@/lib/fund-contributions";
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
 import { loadUpcomingTravelPlanCents } from "../travel/upcoming-plan";
 import { loadGroupInputs } from "@/lib/account-groups-load";
@@ -96,6 +97,8 @@ export default async function NetworthPage() {
     { data: fiContribRows, error: fiContribError },
     { data: janContribRows, error: janContribError },
     { data: ssRow, error: ssError },
+    sheetRows,
+    { data: transferRows, error: transferError },
   ] = await Promise.all([
     // Every snapshot ever taken — this page IS the history view, so none of
     // these can be date-bounded. They grow by one row per account/bucket/debt
@@ -164,7 +167,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, spouse_retire_year, spouse_birth_year, spouse_longevity_age, spouse_ss_claim_age, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security, children, sgli_cents, sgli_payout, vgli_enabled, vgli_cents, vgli_payout")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, spouse_retire_year, spouse_birth_year, spouse_longevity_age, spouse_ss_claim_age, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, inflation_history, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, healthcare_annual_per, health_plans, dental_plans, healthcare_start_age, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security, children, sgli_cents, sgli_payout, vgli_enabled, vgli_cents, vgli_payout")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -211,7 +214,7 @@ export default async function NetworthPage() {
       .order("created_at"),
     supabase
       .from("rental_properties")
-      .select("id, name, property_account_id, loan_account_id, purchase_year, value_cents, down_payment_pct, closing_cost_pct, loan_balance_cents, loan_rate_pct, loan_years, monthly_rent_cents, monthly_costs_cents, appreciation_pct")
+      .select("id, name, property_account_id, loan_account_id, purchase_year, value_cents, down_payment_pct, closing_cost_pct, loan_balance_cents, loan_rate_pct, loan_years, monthly_rent_cents, monthly_costs_cents, yearly_rent_cents, yearly_costs_cents, appreciation_pct")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("created_at"),
@@ -238,8 +241,29 @@ export default async function NetworthPage() {
       .eq("household_id", household.id)
       .eq("person", "self")
       .maybeSingle(),
+    // The spreadsheet's yearly totals (2018–2025) — what Annual Overview's
+    // Breakdown shows for the years before the register.
+    fetchAllRows<{ kind: string; year: number; amount_cents: number; group_label: string }>((from, to) =>
+      supabase
+        .from("annual_breakdown_history")
+        .select("kind, year, amount_cents, group_label")
+        .eq("household_id", household.id)
+        .order("year")
+        .order("kind")
+        .order("group_label")
+        .order("line_label")
+        .range(from, to),
+    ),
+    // Money moved out of an investment by Withdraw — added back
+    // into this year's gains, as Invest / Savings does.
+    supabase
+      .from("transactions")
+      .select("account_id, amount_cents, is_withdrawal, occurred_on")
+      .eq("household_id", household.id)
+      .eq("movement_type", "investment_transfer")
+      .gte("occurred_on", `${fiToMonth.slice(0, 4)}-01-01`),
   ]);
-  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError, incomeLines: incomeLineError, rentals: rentalError, fiContributions: fiContribError, janContributions: janContribError, ssRecord: ssError });
+  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError, incomeLines: incomeLineError, rentals: rentalError, fiContributions: fiContribError, janContributions: janContribError, ssRecord: ssError, transfers: transferError });
 
   // This month's rows as the capture started above writes them.
   const accSnaps = withCurrentMonth(
@@ -834,8 +858,13 @@ export default async function NetworthPage() {
             .reduce((t, r) => t + (r.net_contribution_cents ?? 0), 0)
         : 0;
     const contributed = investedByYear.get(thisYearNum);
+    // Taken out by a transfer (Fundrise → USAA): it left investments, it
+    // wasn't lost. After January when January stands in as the opening.
+    const movedOut = (transferRows ?? [])
+      .filter((t) => householdAccountIds.has(t.account_id) && (opening === priorDec || t.occurred_on.slice(5, 7) > "01"))
+      .reduce((sum, t) => sum + transferOutCents(t), 0);
     if (closing != null && opening != null && contributed != null) {
-      runningGainsByYear.set(thisYearNum, closing - opening - (contributed - janAlreadyIn));
+      runningGainsByYear.set(thisYearNum, closing - opening - (contributed - janAlreadyIn) + movedOut);
     }
   }
 
@@ -890,6 +919,12 @@ export default async function NetworthPage() {
   const groupInputs = await groupInputsPromise;
   await capturePromise;
 
+  // Each year at the inflation rate it had (lib/inflation).
+  const planInflation = {
+    pct: planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
+    history: parseInflationHistory(planRow?.inflation_history),
+  };
+  const planGrow = (from: number, to: number) => inflationGrowth(from, to, planInflation);
   // The typed spending each year, grown by inflation from the year it was typed —
   // what the table shows and the year popup edits.
   const grownSpend = inflatedSpending(
@@ -899,17 +934,16 @@ export default async function NetworthPage() {
       restart: parseSpendRestart(r.group_overrides),
     })),
     thisYearNum,
-    planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
+    planGrow,
   );
   // ---- Account groups in the year popup.
   //
   // Proj Contributed / Proj Withdraw: what the year popup typed, carried
   // forward (lib/account-groups resolveOverrides) — the same figures the
   // recompute runs on.
-  const planInflationPct = planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct);
   const overridesByYear = resolveOverrides(
     (projectionRows ?? []).map((r) => ({ year: r.year, typed: parseTypedGroups(r.group_overrides), withdraw: parseTypedWithdraw(r.group_overrides) })),
-    planInflationPct,
+    planGrow,
   );
   // The year in progress isn't run through the groups (its gains are being
   // measured), so its table is built from the real accounts instead: the
@@ -1040,6 +1074,21 @@ export default async function NetworthPage() {
       survivorPctByYear.set(r.year, carry);
     }
   }
+  // A spreadsheet year's actual income and spending, from the same totals
+  // Annual Overview shows — so a past year's plan has its actual under it,
+  // as Contributed and Gains already did (Victor, 2026-10-24). Spending is
+  // Bills + Expenses (+ Kids Funding), the same sum the register gives this
+  // year. "… Detail" groups only split a line already counted, so they're
+  // skipped, as Annual does.
+  const sheetByYear = new Map<number, { income: number; spending: number; debt: number }>();
+  for (const r of sheetRows) {
+    if (/ Detail$/.test(r.group_label)) continue;
+    const t = sheetByYear.get(r.year) ?? { income: 0, spending: 0, debt: 0 };
+    if (r.kind === "income") t.income += r.amount_cents;
+    else if (r.kind === "bills" || r.kind === "expenses" || r.kind === "kidsFunding") t.spending += r.amount_cents;
+    else if (r.kind === "debt") t.debt += r.amount_cents;
+    sheetByYear.set(r.year, t);
+  }
   const projectionYears = (projectionRows ?? []).map((r) => ({
     year: r.year,
     survivorPctTyped: r.survivor_spending_pct == null ? null : Number(r.survivor_spending_pct),
@@ -1080,11 +1129,15 @@ export default async function NetworthPage() {
     // kids' 529 deposits, which are not net worth, so counting them here made
     // the forecast treat money that left net worth as already saved.
     actualSavedCents: investedByYear.get(r.year) ?? null,
-    actualIncomeCents: earnedByYear.get(r.year) ?? null,
-    actualSpendingCents: spentByYear.get(r.year) ?? null,
-    actualDebtPaidCents: debtPaidByYear.get(r.year) ?? null,
+    // A spreadsheet year reads the sheet's totals, never the odd stray
+    // transaction dated in it; later years read the register.
+    actualIncomeCents: sheetByYear.get(r.year)?.income ?? earnedByYear.get(r.year) ?? null,
+    actualSpendingCents: sheetByYear.get(r.year)?.spending ?? spentByYear.get(r.year) ?? null,
+    actualDebtPaidCents: sheetByYear.get(r.year)?.debt ?? debtPaidByYear.get(r.year) ?? null,
+    actualFromSheet: sheetByYear.has(r.year),
     actualKidsCents: kidsByYear.get(r.year) || null,
-    actualMonths: monthsByYear.get(r.year)?.size ?? 0,
+    // A spreadsheet year counts as a whole year on record.
+    actualMonths: sheetByYear.has(r.year) ? 12 : monthsByYear.get(r.year)?.size ?? 0,
     // `|| null`, not `?? null`: every year with an investment slot gets a
     // gainsByYear entry, and mid-year that entry is 0 because the reviewed
     // figure has not been typed yet. A stored 0 is "not entered", not "the
@@ -1136,6 +1189,7 @@ export default async function NetworthPage() {
         high3MonthlyCents: planRow?.high3_monthly_cents ?? null,
         basePayByYear: (planRow?.base_pay_by_year ?? {}) as Record<string, number>,
         inflationPct: planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
+        inflationHistory: parseInflationHistory(planRow?.inflation_history),
         cashReturnPct: planRow?.cash_return_pct == null ? 3 : Number(planRow.cash_return_pct),
         cola: {
           pct: planRow?.cola_pct == null ? 2.5 : Number(planRow.cola_pct),
@@ -1157,10 +1211,10 @@ export default async function NetworthPage() {
           vgliPayout: planRow?.vgli_payout === "monthly36" ? "monthly36" : "lump",
         },
         healthcareAnnualCents: planRow?.healthcare_annual_cents ?? null,
+        healthcareAnnualPer: planRow?.healthcare_annual_per === "yr" ? "yr" : "mo",
         healthPlans: parseHealthPlans(planRow?.health_plans),
         dentalPlans: parseDentalPlans(planRow?.dental_plans),
         healthcareStartAge: planRow?.healthcare_start_age ?? 65,
-        healthcareGrowthPct: planRow?.healthcare_growth_pct == null ? 1.5 : Number(planRow.healthcare_growth_pct),
         rentalRows: (rentalRows ?? []) as RentalRow[],
         rentals: ((rentalRows ?? []) as RentalRow[]).map((r) =>
           toRentalProperty(

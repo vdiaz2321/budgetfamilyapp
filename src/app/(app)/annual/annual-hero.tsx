@@ -26,6 +26,9 @@ type Props = {
   totals: Record<CategoryKind, number>;
   /** The kids' 529s — out of Savings, in a card of their own. */
   kidsTotal: number;
+  /** Other groups the Bills/Expenses card counts (Taxes, Insurance), named
+   *  under it so the card adds up against the table below. */
+  spendingAlso?: string[];
   currency: string;
   filter?: HeroFilter | null;
   onClear?: () => void;
@@ -38,6 +41,7 @@ export function AnnualHero({
   outflowKinds,
   totals,
   kidsTotal,
+  spendingAlso = [],
   currency,
   filter,
   onClear,
@@ -86,12 +90,13 @@ export function AnnualHero({
             tone="text-negative"
             subtitleTone="text-negative"
             subtitle={cap("spending", share(spendingTotal))}
+            note={!active && spendingAlso.length ? `Incl. ${spendingAlso.join(", ")}` : null}
           />
         );
       case "savings":
         return (
           <Stat
-            label={`${year} Savings`}
+            label={`${year} Invest/Savings`}
             value={val("savings", savingsTotal)}
             currency={currency}
             color="var(--viz-savings)"
@@ -199,6 +204,7 @@ function Stat({
   subtitle,
   subtitleTone,
   subtitleColor,
+  note,
 }: {
   label: string;
   value: number;
@@ -216,6 +222,8 @@ function Stat({
   // the value color above it.
   subtitleTone?: string;
   subtitleColor?: string;
+  /** A last plain line under the subtitle. */
+  note?: string | null;
 }) {
   return (
     <div className="h-full rounded-2xl bg-surface px-3 py-3 text-center xl:px-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -240,6 +248,7 @@ function Stat({
           {subtitle}
         </p>
       ) : null}
+      {note ? <p className="mt-0.5 text-xs text-foreground">{note}</p> : null}
     </div>
   );
 }

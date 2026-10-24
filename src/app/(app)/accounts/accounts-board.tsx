@@ -751,6 +751,7 @@ export function AccountsBoard({
     { label: estateToFill > 0 ? `Estate guide (${estateToFill} to fill in)` : "Estate guide", onSelect: () => setEstateOpen(true) },
     { label: "Add account", onSelect: () => setAddOpen(true) },
     { label: "Transfer Funds", onSelect: () => setTransferOpen("banking") },
+    { label: "Withdraw from investment", onSelect: () => setTransferOpen("investment") },
     { label: "Transfer Activity", onSelect: () => setActivityOpen(true) },
   ]);
 
@@ -808,6 +809,18 @@ export function AccountsBoard({
               <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
             </svg>
             Transfer Funds
+          </button>
+          {/* Money out of an investment has its own button, so it isn't
+              hidden inside Transfer Funds (Victor, 2026-10-24). */}
+          <button
+            type="button"
+            onClick={() => setTransferOpen("investment")}
+            className="hidden shrink-0 items-center gap-1.5 md:inline-flex whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" />
+            </svg>
+            Withdraw
           </button>
           <button
             type="button"
@@ -973,6 +986,7 @@ export function AccountsBoard({
             headerBadge={section.kidsGroup ? "Not in Net Worth" : undefined}
             onAddAccount={() => setAddOpen(true)}
             onTransfer={() => setTransferOpen(section.key === "investments" ? "investment" : "banking")}
+            transferLabel={section.key === "investments" ? "Withdraw" : undefined}
           />
           </div>
         );
@@ -1623,6 +1637,7 @@ function TransferModal({
   onClose: () => void;
 }) {
   useScrollLock();
+  const router = useRouter();
   const [pending, start] = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -1672,7 +1687,9 @@ function TransferModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold">Transfer between accounts</h2>
+          {/* Named for what it does: taking money out of an investment is a
+              withdrawal. */}
+          <h2 className="text-base font-bold">{fromIsInvestment ? "Withdraw from an investment" : "Transfer between accounts"}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -1707,7 +1724,12 @@ function TransferModal({
                 r = await transferBetweenAccounts(fd);
               }
               if (r?.error) setErrorMsg(r.error);
-              else onClose();
+              else {
+                // The totals above didn't move until a reload after a
+                // withdrawal, which read as "it didn't work".
+                router.refresh();
+                onClose();
+              }
             });
           }}
           className="space-y-2"
@@ -1806,7 +1828,7 @@ function TransferModal({
               disabled={pending}
               className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
             >
-              {pending ? "Transferring…" : "Transfer"}
+              {fromIsInvestment ? (pending ? "Withdrawing…" : "Withdraw") : pending ? "Transferring…" : "Transfer"}
             </button>
           </div>
         </form>
@@ -1964,6 +1986,7 @@ function AccountSection({
   headerBadge,
   onAddAccount,
   onTransfer,
+  transferLabel = "Transfer Funds",
 }: {
   section: Section;
   accounts: AccountData[];
@@ -1983,6 +2006,8 @@ function AccountSection({
   // new account doesn't mean closing the section first. They open above it.
   onAddAccount?: () => void;
   onTransfer?: () => void;
+  /** The transfer button's words — "Withdraw" on Investments. */
+  transferLabel?: string;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -2182,9 +2207,9 @@ function AccountSection({
               className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
+                {transferLabel === "Withdraw" ? <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" /> : <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />}
               </svg>
-              Transfer Funds
+              {transferLabel}
             </button>
           ) : null}
           {onAddAccount ? (
@@ -3016,7 +3041,8 @@ function HistoricBucketBalanceInput({
     >
       <input type="hidden" name="bucketId" value={bucketId} />
       <input type="hidden" name="month" value={month} />
-      <span className={`pointer-events-none text-sm ${balanceCents == null ? "text-muted/50" : "text-muted"}`}>
+      {/* No "$" on an empty month: it read "$—". */}
+      <span className={`pointer-events-none text-sm text-muted ${balanceCents == null ? "hidden" : ""}`}>
         {currencySymbol(currency)}
       </span>
       <AutoWidthAmountInput
@@ -3207,7 +3233,8 @@ function HistoricBalanceInput({
     >
       <input type="hidden" name="accountId" value={accountId} />
       <input type="hidden" name="month" value={month} />
-      <span className={`pointer-events-none text-sm ${balanceCents == null ? "text-muted/50" : "text-muted"}`}>
+      {/* No "$" on an empty month: it read "$—". */}
+      <span className={`pointer-events-none text-sm text-muted ${balanceCents == null ? "hidden" : ""}`}>
         {currencySymbol(currency)}
       </span>
       <AutoWidthAmountInput

@@ -673,7 +673,7 @@ export default async function BudgetPage({
       subName: movementType === "account_transfer"
         ? "Transfer"
         : movementType === "investment_transfer"
-          ? "Investment transfer"
+          ? "Investment withdrawal"
           : movementType === "card_payment"
             // On a card carried as a debt the payment is booked to the debt,
             // so it reads like a debt payment entered on Budget.

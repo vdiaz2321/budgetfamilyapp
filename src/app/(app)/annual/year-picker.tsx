@@ -5,22 +5,20 @@ import { useRouter } from "next/navigation";
 type Props = {
   year: number;
   currentYear: number;
+  /** The first spreadsheet year (2018) — nothing exists before it. */
+  firstYear: number;
 };
 
-// Capitall's first year — the earliest any budget data exists, so the picker
-// never needs to reach below it.
-const START_YEAR = 2026;
-
 // The bold year in the navigator, but a real <select> so any year is one tap
-// away instead of clicking the arrow N times to reach a distant year. Floor is
-// fixed at START_YEAR and the top is this year — later years have nothing in
-// them yet, so listing them only offered empty pages.
+// away instead of clicking the arrow N times to reach a distant year. It runs
+// from the first spreadsheet year — those years show the sheet's totals — up
+// to this year: later years have nothing in them yet.
 // Picking the current year drops the ?year param so the URL stays clean.
-export function YearPicker({ year, currentYear }: Props) {
+export function YearPicker({ year, currentYear, firstYear }: Props) {
   const router = useRouter();
   const years: number[] = [];
   // Guard the bounds so a year reached via URL still appears in the list.
-  const min = Math.min(START_YEAR, year);
+  const min = Math.min(firstYear, year);
   const max = Math.max(currentYear, year);
   for (let y = max; y >= min; y--) years.push(y);
 

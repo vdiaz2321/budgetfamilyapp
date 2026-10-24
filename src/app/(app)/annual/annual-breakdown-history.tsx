@@ -74,6 +74,11 @@ const CURRENT_YEAR = new Date().getFullYear();
  * beside five visible columns would print a Total the row visibly doesn't add
  * up to. Everything in this panel totals what it shows.
  */
+/** Any figure in the years on screen. */
+function hasMoneyIn(byYear: Record<number, number>, years: number[]): boolean {
+  return years.some((y) => (byYear[y] ?? 0) !== 0);
+}
+
 function sumOverYears(byYear: Record<number, number>, years: number[]): number {
   return years.reduce((sum, y) => sum + (byYear[y] ?? 0), 0);
 }
@@ -454,9 +459,12 @@ function KindBlock({
   // Biggest first, by the Total column: the question a breakdown answers is
   // "what takes the most", and that shouldn't need a scan of every row.
   // Groups, their line items and a line's split all sort the same way.
-  const filteredGroups = [...kind.groups].sort(
-    (a, b) => sumOverYears(b.subtotalByYear, years) - sumOverYears(a.subtotalByYear, years),
-  );
+  // Only what has money in the years on screen: twenty rows of dashes
+  // (Stimulus Check, Webull, Gas…) buried the ones that do. "All 9 years"
+  // brings back any that only have older years.
+  const filteredGroups = [...kind.groups]
+    .filter((g) => hasMoneyIn(g.subtotalByYear, years))
+    .sort((a, b) => sumOverYears(b.subtotalByYear, years) - sumOverYears(a.subtotalByYear, years));
   const effectiveOpen = open;
 
   return (
@@ -566,6 +574,7 @@ function Group({
 
       <ul className="divide-y divide-line">
         {[...group.lines]
+          .filter((l) => hasMoneyIn(l.byYear, years))
           .sort((a, b) => sumOverYears(b.byYear, years) - sumOverYears(a.byYear, years))
           .map((l) => (
           <LineRow

@@ -262,26 +262,35 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
  * amount matches the year before (typing $90,000 again in 2033 restarts the
  * growth there). Returns year → spending before healthcare. Years before
  * `thisYear` are left as typed.
+ *
+ * The growth counts from the year typed even when that year has passed: an
+ * amount typed in 2026 keeps its 2026–2027 rise once 2027 arrives, rather
+ * than dropping back to the typed figure every New Year. `inflation` is one
+ * rate for every year, or how much one year's money has grown by a later
+ * year (lib/inflation inflationGrowth — each year at its own rate).
  */
 export function inflatedSpending(
   rows: { year: number; baseSpendingCents: number; restart?: boolean }[],
   thisYear: number,
-  inflationPct: number,
+  inflation: number | InflationGrow,
 ): Map<number, number> {
+  const grow = growFn(inflation);
   const out = new Map<number, number>();
   let anchorYear: number | null = null;
   let prevBase: number | null = null;
   for (const r of [...rows].sort((a, b) => a.year - b.year)) {
-    if (r.year < thisYear) {
-      out.set(r.year, r.baseSpendingCents);
-      continue;
-    }
     if (anchorYear == null || r.restart || r.baseSpendingCents !== prevBase) anchorYear = r.year;
     prevBase = r.baseSpendingCents;
-    out.set(r.year, Math.round(r.baseSpendingCents * inflateTo(r.year, anchorYear, inflationPct)));
+    out.set(r.year, r.year < thisYear ? r.baseSpendingCents : Math.round(r.baseSpendingCents * grow(anchorYear, r.year)));
   }
   return out;
 }
+
+/** How much money from `fromYear` has grown by `toYear`. */
+export type InflationGrow = (fromYear: number, toYear: number) => number;
+
+const growFn = (inflation: number | InflationGrow): InflationGrow =>
+  typeof inflation === "number" ? (from, to) => inflateTo(to, from, inflation) : inflation;
 
 // ---- Savings vs investments.
 //
@@ -1188,7 +1197,11 @@ export type CostDates = {
   endMonth: number | null;
 };
 
-export type HealthPlan = { kind: HealthPlanKind; annualCents: number } & CostDates;
+/** A premium is always stored yearly; `per` says how it was typed, so the
+ *  box reopens the same way ($41.25 a month shows as 41.25 /mo). */
+export type PremiumPer = "mo" | "yr";
+
+export type HealthPlan = { kind: HealthPlanKind; annualCents: number; per: PremiumPer } & CostDates;
 
 /** Retiree dental & vision come through FEDVIP (it replaced the TRICARE
  *  Retiree Dental Program), or a private plan. */
@@ -1201,7 +1214,7 @@ export const DENTAL_PLAN_KINDS: { value: DentalPlanKind; label: string }[] = [
   { value: "private_vision", label: "Private vision" },
 ];
 
-export type DentalPlan = { kind: DentalPlanKind; annualCents: number } & CostDates;
+export type DentalPlan = { kind: DentalPlanKind; annualCents: number; per: PremiumPer } & CostDates;
 
 const yearOrNull = (v: unknown) => {
   const n = Number(v);
@@ -1214,7 +1227,7 @@ const monthOrNull = (v: unknown) => {
 
 /** A stored plan list (`health_plans`, `dental_plans`), with anything
  *  malformed or of another kind dropped. */
-function parsePlans<K extends string>(raw: unknown, kinds: readonly K[]): ({ kind: K; annualCents: number } & CostDates)[] {
+function parsePlans<K extends string>(raw: unknown, kinds: readonly K[]): ({ kind: K; annualCents: number; per: PremiumPer } & CostDates)[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((p) => {
     const kind = p?.kind;
@@ -1224,6 +1237,7 @@ function parsePlans<K extends string>(raw: unknown, kinds: readonly K[]): ({ kin
       {
         kind,
         annualCents: Number.isFinite(cents) && cents > 0 ? Math.round(cents) : 0,
+        per: p?.per === "yr" ? "yr" : "mo",
         startYear: yearOrNull(p?.startYear),
         startMonth: monthOrNull(p?.startMonth),
         endYear: yearOrNull(p?.endYear),
@@ -1261,20 +1275,18 @@ export type HealthcarePlan = {
   tflStartAge: number;
   /** Dental & vision plans, by default from retirement on (TFL covers neither). */
   dentalPlans: DentalPlan[];
-  /** How much faster than inflation medical costs rise, % a year. */
-  growthPct: number;
-  inflationPct: number;
 };
 
 /**
- * Healthcare as its own yearly cost, rising inflation + `growthPct` a year
- * (medical costs run ahead of prices overall), counted from this year. Three
- * lines: each health plan for the months between its start and end (by
+ * Healthcare as its own yearly cost, at the premiums exactly as typed — no
+ * growth. A new price is a new plan row with its own start (Victor,
+ * 2026-10-24: "every year I will check and if needed, will add a new plan").
+ * Three lines: each health plan for the months between its start and end (by
  * default from the retirement month until TRICARE For Life starts), TFL
  * (Medicare Part B) from the year of its start age, and each dental & vision
  * plan for its months (by default from the retirement month on).
  */
-export function healthcareForYear(year: number, plan: HealthcarePlan, thisYear: number): number {
+export function healthcareForYear(year: number, plan: HealthcarePlan): number {
   const tflYear = plan.birthYear != null ? plan.birthYear + plan.tflStartAge : null;
   const onTfl = tflYear != null && year >= tflYear;
   const retired: YearMonth | null =
@@ -1290,8 +1302,7 @@ export function healthcareForYear(year: number, plan: HealthcarePlan, thisYear: 
     (onTfl ? plan.tflAnnualCents ?? 0 : 0) +
     plan.plans.reduce((t, p) => t + p.annualCents * share(p, untilTfl), 0) +
     plan.dentalPlans.reduce((t, p) => t + p.annualCents * share(p, null), 0);
-  if (base <= 0) return 0;
-  return Math.round(base * inflateTo(year, thisYear, plan.inflationPct + plan.growthPct));
+  return Math.max(0, Math.round(base));
 }
 
 // ---- Rental properties.
@@ -1447,6 +1458,9 @@ export type RentalRow = {
   loan_years: number;
   monthly_rent_cents: number;
   monthly_costs_cents: number;
+  /** Set when typed per year (the monthly figure is this ÷ 12). */
+  yearly_rent_cents?: number | null;
+  yearly_costs_cents?: number | null;
   appreciation_pct: number | string;
 };
 

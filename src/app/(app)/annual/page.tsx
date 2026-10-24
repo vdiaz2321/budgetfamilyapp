@@ -147,6 +147,13 @@ export default async function AnnualOverviewPage({
   const kindBySub = new Map(
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
   );
+  // Years the spreadsheet history covers (2018–2025). Their figures are the
+  // sheet's totals and nothing else: a stray transaction dated in one of them
+  // must not be added on top. It was, but only while that year was the one
+  // viewed (the live window stretches to it), so 2025's Bills read $28,068.99
+  // from the 2026 page and $28,108.98 from the 2025 page.
+  const seedYears = new Set((breakdownRows ?? []).map((r) => r.year));
+  const firstYear = Math.min(2026, ...seedYears);
   const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
   const subcategoryInvestmentTargets = new Set(
     (subs ?? [])
@@ -367,6 +374,7 @@ export default async function AnnualOverviewPage({
     if (!kind) continue;
     if (kind === "savings" && t.is_withdrawal) continue;
     const y = parseInt(t.occurred_on.slice(0, 4), 10);
+    if (seedYears.has(y)) continue;
     let byYear = liveDepositsBySub.get(t.subcategory_id);
     if (!byYear) {
       byYear = new Map();
@@ -384,6 +392,7 @@ export default async function AnnualOverviewPage({
     const name = payeeName.get(t.payee_id);
     if (!name) continue;
     const y = parseInt(t.occurred_on.slice(0, 4), 10);
+    if (seedYears.has(y)) continue;
     let byPayee = detailPayeeBySub.get(t.subcategory_id);
     if (!byPayee) {
       byPayee = new Map();
@@ -421,6 +430,7 @@ export default async function AnnualOverviewPage({
   const bucketById = new Map((investmentBuckets ?? []).map((b) => [b.id, b]));
   const liveInvestmentByDestination = new Map<string, LiveBudgetSub>();
   for (const row of investmentContributionRows ?? []) {
+    if (seedYears.has(row.year)) continue;
     const account = accountById.get(row.account_id);
     if (!account) continue;
     const bucket = row.bucket_id ? bucketById.get(row.bucket_id) : null;
@@ -441,7 +451,6 @@ export default async function AnnualOverviewPage({
   // Annual Breakdown: pivot the seeded leaf rows (2018–2025) into kind → group
   // → line, then overlay 2026+ live totals from Budget transactions.
   const breakdownKinds = buildBreakdown(breakdownRows ?? [], budgetSubsForLive);
-  const seedYears = new Set((breakdownRows ?? []).map((r) => r.year));
   // Years the Breakdown gets a column for: the ones that have actually
   // happened (2026 through today), plus any other year the widened window
   // turned up real rows for. Spanning liveFromYear..liveToYear outright would
@@ -449,9 +458,10 @@ export default async function AnnualOverviewPage({
   const liveYears = new Set<number>();
   for (let y = 2026; y <= currentYear; y++) liveYears.add(y);
   for (const t of liveTxRows ?? []) {
-    liveYears.add(parseInt(t.occurred_on.slice(0, 4), 10));
+    const y = parseInt(t.occurred_on.slice(0, 4), 10);
+    if (!seedYears.has(y)) liveYears.add(y);
   }
-  for (const row of investmentContributionRows ?? []) liveYears.add(row.year);
+  for (const row of investmentContributionRows ?? []) if (!seedYears.has(row.year)) liveYears.add(row.year);
   const breakdownYears = [...new Set([...seedYears, ...liveYears])].sort(
     (a, b) => b - a,
   ); // newest-first
@@ -540,7 +550,25 @@ export default async function AnnualOverviewPage({
     );
   }
 
-  const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0) - kidsTotal;
+  // A spreadsheet year has no months to show — the sheet only kept yearly
+  // totals — so its cards read those totals (the same figures as its Annual
+  // Breakdown column) instead of adding up the odd stray transaction to $0
+  // income and a loss.
+  const historyYear = seedYears.has(year);
+  const yearTotal = (k: BreakdownKind["kind"]) => breakdownKinds.find((bk) => bk.kind === k)?.totalByYear[year] ?? 0;
+  const heroTotals: Record<CategoryKind, number> = historyYear
+    ? {
+        income: yearTotal("income"),
+        savings: yearTotal("investment"),
+        bills: yearTotal("bills"),
+        expenses: yearTotal("expenses"),
+        debt: yearTotal("debt"),
+      }
+    : totals;
+  const heroKids = historyYear ? yearTotal("kidsFunding") : kidsTotal;
+  const totalNet = historyYear
+    ? netByYear[year] ?? 0
+    : totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0) - kidsTotal;
   const currency = household.currency;
 
   return (
@@ -563,8 +591,9 @@ export default async function AnnualOverviewPage({
 
         {/* Year navigator */}
         <div className="flex items-center gap-1 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-          <YearArrow year={year - 1} dir="prev" />
-          <YearPicker year={year} currentYear={currentYear} />
+          {/* Nothing before the first spreadsheet year. */}
+          {year > firstYear ? <YearArrow year={year - 1} dir="prev" /> : <span className="h-7 w-7" aria-hidden />}
+          <YearPicker year={year} currentYear={currentYear} firstYear={firstYear} />
           {/* No later years: nothing has happened in them yet. */}
           {year < currentYear ? <YearArrow year={year + 1} dir="next" /> : <span className="h-7 w-7" aria-hidden />}
         </div>
@@ -576,12 +605,13 @@ export default async function AnnualOverviewPage({
       <AnnualPanels
         year={year}
         outflowKinds={OUTFLOW_KINDS}
-        totals={totals}
-        kidsTotal={kidsTotal}
+        totals={heroTotals}
+        kidsTotal={heroKids}
         totalNet={totalNet}
-        remainingMonths={remainingMonths}
+        remainingMonths={historyYear ? remainingMonths.map(() => null) : remainingMonths}
         currentMonthIdx={year === currentYear ? currentMonthIdx : null}
-        groups={categoryGroups}
+        groups={historyYear ? [] : categoryGroups}
+        emptyNote={historyYear ? `Months start in 2026. ${year} totals: Annual Breakdown below.` : undefined}
         monthLabels={monthLabels}
         properties={propertyRollups}
         kinds={breakdownKinds}
@@ -612,10 +642,15 @@ type BreakdownRow = {
 const KIND_ORDER: BreakdownKind["kind"][] = ["income", "investment", "savings", "bills", "expenses", "debt", "kidsFunding"];
 // Merged lines carry the current Budget name, not the older sheet name:
 // "Fidelity" is now "Fidelity (Taxable) Vic", "TSP" is "TSP Roth". (River
-// merges into Bitcoin, which keeps its own name.)
+// merges into Bitcoin, which keeps its own name.) The debts are the same card
+// under a newer name (Victor, 2026-10-24).
 const LINE_DISPLAY_LABEL: Record<string, string> = {
   fidelity: "Fidelity (Taxable) Vic",
   tsp: "TSP Roth",
+  "santa fe payment": "Sante Fe 2020 (APR26)",
+  "quicksilver (7906) v": "QuickSil7906V (Jun26)",
+  "savorcap 2946 j (jul24)": "Savor2946J (Mar26)",
+  "1163 venture1 v(oct25)": "1163 Venture V",
 };
 const displayLineLabel = (label: string) => LINE_DISPLAY_LABEL[label.toLowerCase()] ?? label;
 
@@ -682,12 +717,19 @@ function buildBreakdown(
   // fold Budget subs onto the seeded row whose name matches (case-insensitive).
   type LineRef = { byYear: Record<number, number>; total: number; lineSort: number };
   const lineIndex = new Map<string, Map<string, LineRef>>(); // kind → nameLower → line
+  // Where each seeded line sits: kind → nameLower → its group and own label.
+  const lineHome = new Map<string, Map<string, { group: string; label: string }>>();
   for (const [kind, groups] of kinds) {
     const idx = new Map<string, LineRef>();
-    for (const [, g] of groups) {
-      for (const [label, l] of g.lines) idx.set(label.toLowerCase(), l);
+    const home = new Map<string, { group: string; label: string }>();
+    for (const [groupLabel, g] of groups) {
+      for (const [label, l] of g.lines) {
+        idx.set(label.toLowerCase(), l);
+        home.set(label.toLowerCase(), { group: groupLabel, label });
+      }
     }
     lineIndex.set(kind, idx);
+    lineHome.set(kind, home);
   }
 
   const FROM_BUDGET = "From Budget";
@@ -708,6 +750,12 @@ function buildBreakdown(
     "fidelity (taxable) vic": "fidelity",
     "tsp roth": "tsp",
     river: "bitcoin",
+    // Debts renamed in Budget — one card, one row (Victor, 2026-10-24).
+    "sante fe 2020 (apr26)": "santa fe payment",
+    "quicksil7906v (jun26)": "quicksilver (7906) v",
+    "savor2946j (mar26)": "savorcap 2946 j (jul24)",
+    "venture1 1163v(feb27)": "1163 venture1 v(oct25)",
+    "1163 venture v": "1163 venture1 v(oct25)",
   };
   const aliasFor = (name: string) => LINE_ALIASES[name.toLowerCase()] ?? name.toLowerCase();
 
@@ -756,7 +804,25 @@ function buildBreakdown(
     // An aliased sub folds onto its history row even when it came from a
     // custom Budget group — the alias is the explicit instruction to merge.
     const match = sub.customGroup && !aliased ? undefined : idx?.get(lookup);
-    if (match) {
+    // A line from a group made in Budget (Taxes, Insurance) that the sheet
+    // kept under Bills: the sheet's years move into the Budget group, so the
+    // item is one row with all its years where Budget files it today. It
+    // used to be two rows of the same name — 2022–2025 under Bills, 2026
+    // under Taxes.
+    const seeded = sub.customGroup && !aliased && sub.groupLabel ? idx?.get(lookup) : undefined;
+    const home = seeded ? lineHome.get(sheetKind)?.get(lookup) : undefined;
+    if (seeded && home && home.group !== sub.groupLabel) {
+      kinds.get(sheetKind)?.get(home.group)?.lines.delete(home.label);
+      const group = ensureBudgetGroup(sheetKind, sub.groupLabel, sub.groupSort);
+      seeded.lineSort = unmatchedSort++;
+      for (const [y, v] of sub.byYear) {
+        seeded.byYear[y] = (seeded.byYear[y] ?? 0) + v;
+        seeded.total += v;
+      }
+      group.lines.set(sub.name, seeded);
+      lineHome.get(sheetKind)?.set(lookup, { group: sub.groupLabel!, label: sub.name });
+      mergeLiveDetails(sheetKind, sub.name, sub);
+    } else if (match) {
       for (const [y, v] of sub.byYear) {
         match.byYear[y] = (match.byYear[y] ?? 0) + v;
         match.total += v;
@@ -821,6 +887,8 @@ function buildBreakdown(
     for (const key of detailGroupKeys) groups.delete(key);
 
     const groupList = [...groups.entries()]
+      // A sheet group whose every line moved into a Budget group is gone.
+      .filter(([, g]) => g.lines.size > 0)
       .sort((a, b) => a[1].groupSort - b[1].groupSort)
       .map(([label, g]) => {
         const lines = [...g.lines.entries()]
@@ -919,7 +987,7 @@ function YearArrow({ year, dir }: { year: number; dir: "prev" | "next" }) {
     <Link
       href={`/annual?year=${year}`}
       aria-label={dir === "prev" ? "Previous year" : "Next year"}
-      className="flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:bg-brand-soft hover:text-brand"
+      className="flex h-7 w-7 items-center justify-center rounded-lg text-foreground hover:bg-sky-100 dark:hover:bg-sky-900/50"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d={dir === "prev" ? "M15 18l-6-6 6-6" : "M9 6l6 6-6 6"} />

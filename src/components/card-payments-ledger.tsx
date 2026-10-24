@@ -110,10 +110,14 @@ export function CardPaymentsLedger({
   const now = new Date();
   const lastMonthShown =
     view === "month" && year === String(now.getFullYear()) ? now.getMonth() + 1 : 12;
+  // Nor the months before anything was recorded: card payments start in
+  // August 2026, and Jan–Jul were seven columns of nothing.
+  const firstRecorded = payments.reduce<string | null>((min, p) => (min == null || p.date < min ? p.date : min), null);
+  const firstMonthShown = firstRecorded && firstRecorded.slice(0, 4) === year ? Number(firstRecorded.slice(5, 7)) : 1;
   const columns =
     view === "month"
-      ? PAYMENT_MONTHS.slice(0, lastMonthShown)
-          .map((label, i) => ({ key: String(i + 1).padStart(2, "0"), label }))
+      ? PAYMENT_MONTHS.slice(firstMonthShown - 1, lastMonthShown)
+          .map((label, i) => ({ key: String(i + firstMonthShown).padStart(2, "0"), label }))
           .reverse()
       : years.map((y) => ({ key: y, label: y }));
   const columnOf = (p: CardPayment) => (view === "month" ? p.date.slice(5, 7) : p.date.slice(0, 4));
@@ -176,20 +180,20 @@ export function CardPaymentsLedger({
   const columnTotal = (key: string) => rows.reduce((sum, r) => sum + (r.cells.get(key) ?? 0), 0);
   const grandTotal = rows.reduce((sum, r) => sum + r.total, 0);
 
-  // Months the average is spread over: a finished year is 12, the current year
-  // only counts the months that have actually happened, so an early-year
-  // average isn't diluted by months that haven't been paid yet.
+  // Months the average is spread over: from the first month anything was
+  // recorded through the last month shown. Months that haven't happened yet
+  // don't count, and nor do months before the record starts — card payments
+  // were only logged from August 2026, and spreading three months over ten
+  // read Sapphire's ~$4,247 a month as $1,274 (Victor, 2026-10-24).
   const elapsedMonths = (() => {
-    if (view === "month") return year === String(now.getFullYear()) ? now.getMonth() + 1 : 12;
-    // By year: the months actually covered, from January of the oldest year
-    // with payments through the current month (or the end of the newest year
-    // when history stops before this one).
-    if (years.length === 0) return 1;
-    const oldest = Number(years[years.length - 1]);
+    if (view === "month") return lastMonthShown - firstMonthShown + 1;
+    // By year: from the first recorded month through the current month (or
+    // the end of the newest year when history stops before this one).
+    if (years.length === 0 || !firstRecorded) return 1;
+    const startIdx = Number(firstRecorded.slice(0, 4)) * 12 + Number(firstRecorded.slice(5, 7)) - 1;
     const newest = Number(years[0]);
-    return newest >= now.getFullYear()
-      ? (now.getFullYear() - oldest) * 12 + now.getMonth() + 1
-      : (newest - oldest + 1) * 12;
+    const endIdx = newest >= now.getFullYear() ? now.getFullYear() * 12 + now.getMonth() : newest * 12 + 11;
+    return endIdx - startIdx + 1;
   })();
   const perMonth = (cents: number) => Math.round(cents / Math.max(1, elapsedMonths));
 

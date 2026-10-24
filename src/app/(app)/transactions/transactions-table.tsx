@@ -62,7 +62,7 @@ const typeLabel = (t: TxData) =>
     : t.isTransfer
       ? "Transfer"
       : t.isInvestmentTransfer
-        ? "Investment transfer"
+        ? "Investment withdrawal"
         : t.isCardPayment
           ? "Card payment"
           : t.kind
@@ -1048,7 +1048,7 @@ function TxLine({
           // Money moving between your own accounts has no budget category, so
           // it gets a neutral pill rather than borrowing a category's color.
           <span className="inline-block max-w-full truncate rounded-full bg-sky-100 px-2 py-0.5 align-middle text-xs font-medium text-muted lg:text-sm dark:bg-sky-900/50">
-            {tx.isTransfer ? "Transfer" : tx.isInvestmentTransfer ? "Investment transfer" : "Card payment"}
+            {tx.isTransfer ? "Transfer" : tx.isInvestmentTransfer ? "Investment withdrawal" : "Card payment"}
           </span>
         ) : tx.kind ? (
           <span
