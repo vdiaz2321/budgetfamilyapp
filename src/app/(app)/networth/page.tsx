@@ -134,7 +134,7 @@ export default async function NetworthPage() {
     ),
     supabase
       .from("accounts")
-      .select("id, name, kind, is_kids_account, bank_group, sort_order")
+      .select("id, name, kind, subtype, is_kids_account, bank_group, sort_order")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -162,7 +162,7 @@ export default async function NetworthPage() {
     // it separately was a second serial trip to Supabase for nothing.
     supabase
       .from("debts")
-      .select("subcategory_id, debt_kind, property_account_id, current_balance_cents, paid_off_at")
+      .select("subcategory_id, debt_kind, property_account_id, current_balance_cents, paid_off_at, apr, term_months, loan_start_date")
       .eq("household_id", household.id),
     // ---- Financial independence inputs.
     supabase
@@ -293,9 +293,19 @@ export default async function NetworthPage() {
   );
   // Mortgage owed on each Property account (linked on Accounts).
   const loanByProperty = new Map<string, number>();
+  // Its rate and years left, so a new rental card starts with them filled in.
+  const loanTermsByProperty = new Map<string, { ratePct: number; yearsLeft: number | null }>();
   for (const d of debtRows ?? []) {
     if (!d.property_account_id || d.paid_off_at) continue;
     loanByProperty.set(d.property_account_id, (loanByProperty.get(d.property_account_id) ?? 0) + (d.current_balance_cents ?? 0));
+    let yearsLeft: number | null = null;
+    if (d.term_months && d.loan_start_date) {
+      const start = new Date(`${d.loan_start_date}T00:00:00`);
+      const now = new Date();
+      const monthsGone = (now.getFullYear() - start.getFullYear()) * 12 + now.getMonth() - start.getMonth();
+      yearsLeft = Math.max(0, Math.ceil((d.term_months - monthsGone) / 12));
+    }
+    loanTermsByProperty.set(d.property_account_id, { ratePct: Number(d.apr ?? 0), yearsLeft });
   }
   const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
   const bankGroupById = new Map(
@@ -1229,8 +1239,11 @@ export default async function NetworthPage() {
           .map((a) => ({
             id: a.id,
             name: a.name,
+            isRental: (a as { subtype?: string | null }).subtype === "Rental property",
             valueCents: (balanceRows ?? []).find((b) => b.id === a.id)?.current_balance_cents ?? 0,
             loanCents: loanByProperty.get(a.id) ?? null,
+            loanRatePct: loanTermsByProperty.get(a.id)?.ratePct ?? null,
+            loanYearsLeft: loanTermsByProperty.get(a.id)?.yearsLeft ?? null,
           })),
         survivorExtras: {
           insurance: insurance.map((i) => ({ name: i.name as string, cents: i.amount_cents as number })),

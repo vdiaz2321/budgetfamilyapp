@@ -23,7 +23,7 @@ import { DEBT_KINDS } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 
-const HEADER_ACCENT: Record<CategoryKind, string> = {
+export const HEADER_ACCENT: Record<CategoryKind, string> = {
   income: "bg-positive",
   savings: "bg-sky-500",
   bills: "bg-brand",
@@ -662,7 +662,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function MonthTransactions({
+export function MonthTransactions({
   txs,
   currency,
   accountNameById,

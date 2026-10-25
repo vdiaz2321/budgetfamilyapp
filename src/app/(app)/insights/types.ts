@@ -80,7 +80,11 @@ export type InsightsData = {
   comparable: boolean;
   periodLabel: string;
   priorLabel: string;
+  // Same, short enough for a table column header ("2025 est.").
+  priorShortLabel: string;
   minYear: number;
+  // Earliest transaction (YYYY-MM-DD), or null with none yet.
+  firstTxDate: string | null;
   totals: Flows;
   prior: Flows;
   buckets: ChartBucket[];

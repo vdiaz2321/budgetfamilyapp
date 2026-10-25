@@ -168,6 +168,11 @@ export function shortRangeLabel(from: string, to: string): string {
   return fm === tm ? `${MON[fm]} ${fd}–${td}` : `${MON[fm]} ${fd}–${MON[tm]} ${td}`;
 }
 
+// "Oct 25".
+export function shortDayLabel(iso: string): string {
+  return `${MON[Number(iso.slice(5, 7)) - 1]} ${Number(iso.slice(8, 10))}`;
+}
+
 // The key of the period immediately before `key`.
 export function priorKey(g: Granularity, key: string): string {
   switch (g) {
@@ -315,15 +320,21 @@ function keyFromOrdinal(g: Granularity, ord: number): string {
   }
 }
 
-// Options offered in the picker's second-level menu, newest first.
+// Options offered in the picker's second-level menu, newest first. With
+// `since` (a YYYY-MM-DD), weeks / months / quarters stop at the one holding
+// that date — yearly keeps going back to minYear (imported history).
 export function periodOptions(
   g: Granularity,
   minYear: number,
   now = new Date(),
+  since?: string | null,
 ): { key: string; label: string }[] {
   const curOrd = ordinal(g, currentPeriodKey(g, now));
-  const count =
+  let count =
     g === "weekly" ? 12 : g === "monthly" ? 24 : g === "quarterly" ? 12 : Math.max(1, now.getFullYear() - minYear + 1);
+  if (since && g !== "yearly") {
+    count = Math.max(1, Math.min(count, curOrd - ordinal(g, keyOfDate(g, since)) + 1));
+  }
   const out: { key: string; label: string }[] = [];
   for (let i = 0; i < count; i++) {
     const key = keyFromOrdinal(g, curOrd - i);

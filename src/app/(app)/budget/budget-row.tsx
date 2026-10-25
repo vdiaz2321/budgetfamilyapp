@@ -420,6 +420,27 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
   );
 }
 
+// The phone keyboard opens over the bottom half of the page, and a Planned box
+// on a lower row (with its Match spent pill above it) ended up behind it. Once
+// the keyboard is up, scroll the row into the top third of what's still
+// visible. visualViewport shrinks to the area above the keyboard; the timer
+// covers a keyboard that was already open, which fires no resize.
+function liftAboveKeyboard(el: HTMLElement) {
+  const vv = window.visualViewport;
+  let done = false;
+  const lift = () => {
+    if (done) return;
+    done = true;
+    vv?.removeEventListener("resize", lift);
+    const visible = vv ? vv.height : window.innerHeight;
+    const top = el.getBoundingClientRect().top - (vv ? vv.offsetTop : 0);
+    const delta = top - visible / 3;
+    if (delta > 0) window.scrollBy({ top: delta, behavior: "smooth" });
+  };
+  vv?.addEventListener("resize", lift);
+  window.setTimeout(lift, 400);
+}
+
 function MobilePlannedInput({
   subId,
   monthKey,
@@ -483,7 +504,7 @@ function MobilePlannedInput({
         inputMode="decimal"
         autoComplete="off"
         defaultValue={`${currencySymbol(currency)}${initial}`}
-        onFocus={(e) => e.currentTarget.select()}
+        onFocus={(e) => { e.currentTarget.select(); liftAboveKeyboard(e.currentTarget); }}
         onBlur={(e) => {
           setEditing(false);
           if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();

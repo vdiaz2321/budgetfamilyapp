@@ -15,6 +15,7 @@ import {
   priorKey,
   priorToDate,
   seriesKeys,
+  shortDayLabel,
   shortRangeLabel,
   type Granularity,
 } from "./period";
@@ -72,6 +73,9 @@ function addFlow(f: Flows, kind: CategoryKind | "uncategorized" | "investment" |
     default: f.expenses += amount; // expenses + uncategorized
   }
 }
+
+const dayMs = (iso: string) =>
+  Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)));
 
 // The server's "today" as a local-noon Date, so the browser's idea of the
 // current period matches the server render's.
@@ -158,6 +162,12 @@ export function computeInsights(
     }
   }
   const annualYears = [...annualFlows.keys()];
+  // The period menu's weeks / months / quarters start here: before it there
+  // are no transactions, so every one of those periods read all $0.
+  const firstTxDate = raw.tx.reduce<string | null>(
+    (min, t) => (min == null || t.occurred_on < min ? t.occurred_on : min),
+    null,
+  );
   const minYear = annualYears.length
     ? Math.min(...annualYears, now.getFullYear())
     : now.getFullYear();
@@ -304,7 +314,28 @@ export function computeInsights(
     kids: annualSum.kids + txSel.kids,
   };
   const priAnnual = multi ? null : annualForKey(prior);
-  const priorFlows = multi ? emptyFlows() : priAnnual ?? txPri;
+  // This year so far against an imported prior year: that history is one
+  // total per year, so it can't be cut to Jan 1–today. Scale it to the same
+  // share of the year instead — Jan–Oct against all of 2025 read as "less"
+  // on nearly every line just because two months were still to come.
+  const priorScale =
+    priAnnual && priToDate
+      ? (Math.round((dayMs(priToDate.to) - dayMs(priFull.from)) / 86_400_000) + 1) /
+        (Math.round((dayMs(priFull.to) - dayMs(priFull.from)) / 86_400_000) + 1)
+      : 1;
+  const scaled = (n: number) => (priorScale === 1 ? n : Math.round(n * priorScale));
+  const priorFlows = multi
+    ? emptyFlows()
+    : priAnnual
+      ? {
+          income: scaled(priAnnual.income),
+          bills: scaled(priAnnual.bills),
+          expenses: scaled(priAnnual.expenses),
+          debt: scaled(priAnnual.debt),
+          savings: scaled(priAnnual.savings),
+          kids: scaled(priAnnual.kids),
+        }
+      : txPri;
   // Historical years have category totals but no per-transaction detail, so
   // merchants / purchases only show when every pick is transaction-backed.
   const detailAvailable = annualKeys.length === 0;
@@ -347,7 +378,7 @@ export function computeInsights(
         name: label,
         kind: r.kind,
         amount: r.amount,
-        priorAmount: priorYearLines?.get(label)?.amount ?? null,
+        priorAmount: priorYearLines?.has(label) ? scaled(priorYearLines.get(label)!.amount) : null,
       }))
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 8);
@@ -364,7 +395,8 @@ export function computeInsights(
       .map(([subId, amount]) => {
         const name = raw.subs[subId]?.name ?? "—";
         const txPrior = multi ? undefined : subTotalsPrior.get(subId);
-        const annualPrior = priorAnnualLines?.get(name)?.amount;
+        const annualLine = priorAnnualLines?.get(name);
+        const annualPrior = annualLine ? scaled(annualLine.amount) : undefined;
         const priorAmount =
           txPrior != null ? txPrior : annualPrior != null ? annualPrior : null;
         return {
@@ -389,12 +421,21 @@ export function computeInsights(
     periodKeys: keys,
     comparable: !multi,
     periodLabel: selectionLabel(granularity, keys, series),
-    // Imported annual history is one total per year, so it can't be cut to
-    // a matching stretch; it's labelled as the whole year it is.
+    // Imported annual history is scaled to the same share of the year (see
+    // priorScale), and says so.
     priorLabel:
-      priToDate && !priAnnual
-        ? shortRangeLabel(priToDate.from, priToDate.to)
-        : periodLabel(granularity, prior),
+      priToDate && priAnnual
+        ? `${prior} to ${shortDayLabel(priToDate.to)} (est.)`
+        : priToDate
+          ? shortRangeLabel(priToDate.from, priToDate.to)
+          : periodLabel(granularity, prior),
+    priorShortLabel:
+      priToDate && priAnnual
+        ? `${prior} est.`
+        : priToDate
+          ? shortRangeLabel(priToDate.from, priToDate.to)
+          : periodLabel(granularity, prior),
+    firstTxDate,
     minYear,
     totals,
     prior: priorFlows,

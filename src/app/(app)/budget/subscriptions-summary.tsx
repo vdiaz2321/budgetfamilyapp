@@ -70,6 +70,8 @@ export function SubscriptionsSummaryCard({
   onAddTransaction,
   editRequestId = null,
   onEditRequestHandled,
+  selectedId = null,
+  onSelect,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
@@ -97,6 +99,10 @@ export function SubscriptionsSummaryCard({
    *  week list uses it so clicking a subscription there edits it in place. */
   editRequestId?: string | null;
   onEditRequestHandled?: () => void;
+  /** With this, a row click opens that subscription's rail panel (its
+   *  charges, like any budget item) instead of the editor. */
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
 }) {
   const [editorTarget, setEditorTarget] = useState<string | "new" | null>(null);
   useEffect(() => {
@@ -262,16 +268,17 @@ export function SubscriptionsSummaryCard({
                     data-reorder-id={s.id}
                     role="button"
                     tabIndex={0}
-                    onClick={() => setEditorTarget(s.id)}
+                    onClick={() => (onSelect ? onSelect(s.id) : setEditorTarget(s.id))}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        setEditorTarget(s.id);
+                        if (onSelect) onSelect(s.id);
+                        else setEditorTarget(s.id);
                       }
                     }}
                     className={`group grid cursor-pointer items-center gap-3 px-4 py-2 text-sm transition hover:bg-brand-soft/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${ROW_COLS} ${
                       !byDue && dragOverId === s.id ? "bg-brand-soft/40" : ""
-                    }`}
+                    } ${selectedId === s.id ? "bg-sky-50 dark:bg-sky-950/40" : ""}`}
                   >
                     {byDue ? (
                       <span className="w-3" aria-hidden />
@@ -971,7 +978,7 @@ function Chevron({ open }: { open: boolean }) {
  * falling back to the row's usual amount once the plan is fully covered — a
  * second charge on an already-paid row would otherwise open at $0.00.
  */
-function remainingPrefill(plannedCents: number, spentCents: number, fallbackCents: number): number {
+export function remainingPrefill(plannedCents: number, spentCents: number, fallbackCents: number): number {
   const remaining = plannedCents - spentCents;
   return remaining > 0 ? remaining : fallbackCents;
 }

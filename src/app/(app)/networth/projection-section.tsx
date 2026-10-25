@@ -2069,12 +2069,14 @@ function Figure({
 }) {
   return (
     <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
+      {/* The number is sized like the Accounts page's summary cards
+          (Victor, 2026-10-25); the label and lines stay readable. */}
       <p className="max-sm:text-[12px] sm:text-sm font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</p>
-      <p className={`mt-0.5 truncate text-base font-bold tabular-nums sm:text-2xl ${tone}`} style={style}>
+      <p className={`mt-0.5 truncate text-2xl font-bold tabular-nums sm:text-3xl xl:text-4xl ${tone}`} style={style}>
         {value}
       </p>
-      {/* The phone keeps 12px; desktop steps up to 16px (Victor, 2026-10-18). */}
-      {sub ? <p className={`max-sm:text-[12px] sm:text-base leading-snug ${subClassName ?? "text-foreground"}`}>{sub}</p> : null}
+      {/* The phone keeps 12px; desktop steps up to 16px (Victor, 2026-10-18,
+          again 2026-10-25 — the Accounts size read as tiny here). */}      {sub ? <p className={`max-sm:text-[12px] sm:text-base leading-snug ${subClassName ?? "text-foreground"}`}>{sub}</p> : null}
       {bar != null ? (
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900/50">
           <div

@@ -125,33 +125,25 @@ numbered, plain words.
     $183 → $196.74 "Groceries + 1 more").
   - Change colours in both tables now follow the cards: less Savings is
     red, more is green (it was the other way round).
-  - **Ask Victor:** three splits look like the amounts went on the wrong
-    items — Commissary Sep 20 (Sales Tax $104.08 / Groceries $7.30),
-    Commissary Aug 12 (both parts Sales Tax, $27.65 + $1.38), Tran soan
-    Aug 29 (Sales Tax $27.12 / Groceries $2.03). Fix them?
-  - **Ideas waiting on Victor:** (1) this year vs last compares Jan–Oct 24
-    with all of 2025, so most "less than 2025" just means two months are
-    left — compare against 2025 scaled to the same point in the year;
-    (2) the period menu offers 2025 weeks / months / quarters, which hold
-    no transactions and show all $0 — start those lists at Jan 2026.
+  - Fixed three swapped splits (Victor's OK, 2026-10-25): Commissary
+    Sep 20, Commissary Aug 12 and Tran soan Aug 29 — the big part is now
+    Groceries, the small part Sales Tax. August: Groceries $1,596.79 →
+    $1,649.53, Sales Tax $193.05 → $140.31. September: Groceries
+    $1,698.39 → $1,795.17, Sales Tax $191.41 → $94.63. Month totals
+    unchanged (Sales Tax sits under Bills, so Bills ↓ / Expenses ↑).
+  - Both ideas built (2026-10-25): (1) 2026 vs imported 2025 now compares
+    against 2025 scaled to the same day of the year ("than 2025 to Oct 25
+    (est.)", table column "vs 2025 est.") — e.g. Income 12% more, not
+    less; finished years still compare whole. (2) the period menu's weeks /
+    months / quarters start at the first transaction (Jan 2026); yearly
+    still lists 2018 on. Checked desktop + 375px.
 
 ## Next — start here
 
 When Victor says "pick up where we left off", start here.
 
-Paused 2026-10-24 (Victor's usage limit). Everything below the "Done"
-list is built, verified and left uncommitted for Victor to commit.
-
-1. **"Go with the 2 ideas"** = build both Insights ideas (see Insights in
-   Done): (1) when the year picked is the current one and the prior year is
-   imported annual history, compare against that year scaled to the same
-   day of the year, labelled so it says so (e.g. "vs 2025 to Oct 24,
-   est."); (2) in the period menu, start the weekly / monthly / quarterly
-   lists at January 2026 (first transactions) — yearly keeps 2018 on.
-   Verify desktop + 375px, then report.
-2. Still open: the three splits that look swapped (Commissary Sep 20,
-   Commissary Aug 12, Tran soan Aug 29) — ask before changing his data.
-3. Every page in the sidebar has now been audited once.
+1. Every page in the sidebar has now been audited once, and nothing from
+   the audit is left open.
 
 ## Left alone on purpose
 

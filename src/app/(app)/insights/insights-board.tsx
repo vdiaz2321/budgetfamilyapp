@@ -112,6 +112,7 @@ export function InsightsBoard({ raw }: { raw: InsightsRaw }) {
           periodKey={multi ? "" : data.periodKey}
           label={data.periodLabel}
           minYear={data.minYear}
+          since={data.firstTxDate}
           onSelect={go}
         />
       </div>
@@ -172,7 +173,7 @@ export function InsightsBoard({ raw }: { raw: InsightsRaw }) {
                   <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
                     <th className="pb-2 text-left font-medium">Category</th>
                     <th className="hidden w-12 sm:w-14 whitespace-nowrap pb-2 text-center font-medium sm:table-cell">% Out</th>
-                    {multi ? null : <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">vs {data.priorLabel}</th>}
+                    {multi ? null : <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">vs {data.priorShortLabel}</th>}
                     <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">Amount</th>
                   </tr>
                 </thead>
@@ -208,7 +209,7 @@ export function InsightsBoard({ raw }: { raw: InsightsRaw }) {
                     <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
                       <th className="pb-2 text-left font-medium">Category</th>
                       <th className="hidden w-12 sm:w-14 whitespace-nowrap pb-2 text-center font-medium sm:table-cell">% Spend</th>
-                      {multi ? null : <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">vs {data.priorLabel}</th>}
+                      {multi ? null : <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">vs {data.priorShortLabel}</th>}
                       <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">Amount</th>
                     </tr>
                   </thead>

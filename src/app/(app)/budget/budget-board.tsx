@@ -10,6 +10,7 @@ import { advanceSubscriptionRenewal, matchSubscriptionPlansToSpent, restoreSubsc
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
 import { ItemPanel } from "./item-panel";
+import { SubscriptionPanel } from "./subscription-panel";
 import { TransactionsPanel } from "./transactions-panel";
 import { TransactionModal } from "./transaction-modal";
 import { SummaryPanel } from "./summary-panel";
@@ -123,7 +124,9 @@ export function BudgetBoard({
   useEffect(() => {
     sessionStorage.setItem("budget-rail-tab", railTab);
   }, [railTab]);
-  const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind } | null>(null);
+  // `subscriptionId`: a row of the Subscriptions card, which opens its own
+  // panel (subId is then "" — it belongs to no single budget row).
+  const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind; subscriptionId?: string } | null>(null);
   const [txFilterKinds, setTxFilterKinds] = useState<CategoryKind[]>([]);
   const [txFilterSubs, setTxFilterSubs] = useState<{ id: string; label: string }[]>([]);
   const toggleFilterKind = (kind: CategoryKind) => {
@@ -457,7 +460,26 @@ export function BudgetBoard({
       />
     ) : null;
 
-  const railContent = itemPanel;
+  const selectedSubscription = selected?.subscriptionId
+    ? subscriptions.find((s) => s.id === selected.subscriptionId) ?? null
+    : null;
+  const subscriptionPanel = selectedSubscription ? (
+    <SubscriptionPanel
+      sub={selectedSubscription}
+      transactions={transactions}
+      currency={currency}
+      accountNameById={accountNameById}
+      onClose={() => setSelected(null)}
+      onEditSubscription={() => {
+        setSelected(null);
+        setSubEditRequest(selectedSubscription.id);
+      }}
+      onAddTransaction={(prefill) => { loadPayees(); setQuickAddPrefill(prefill); setQuickAdd(true); }}
+      onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
+    />
+  ) : null;
+
+  const railContent = itemPanel ?? subscriptionPanel;
 
   // Clicking anywhere off the panel closes it, same as the mobile sheet's
   // backdrop. Clicks on a budget row are left alone — those switch the
@@ -685,6 +707,8 @@ export function BudgetBoard({
                 onAddTransaction={(prefill) => { loadPayees(); setQuickAddPrefill(prefill); setQuickAdd(true); }}
                 editRequestId={subEditRequest}
                 onEditRequestHandled={clearSubEditRequest}
+                selectedId={selected?.subscriptionId ?? null}
+                onSelect={(id) => setSelected({ subId: "", kind: "bills", subscriptionId: id })}
               />
             ) : null}
 
@@ -962,7 +986,7 @@ export function BudgetBoard({
               payeeOptions={payeeOptions}
               payeeLineItems={payeeLineItems}
               initialKind={duePayment?.kind ?? (quickAdd && selected ? selected.kind : quickAddPrefill?.kind)}
-              initialSubId={duePayment?.subId ?? (quickAdd && selected ? selected.subId : quickAddPrefill?.subId ?? undefined)}
+              initialSubId={duePayment?.subId ?? (quickAdd && selected?.subId ? selected.subId : quickAddPrefill?.subId ?? undefined)}
               initialAccountId={duePayment?.accountId ?? quickAddPrefill?.accountId ?? undefined}
               initialAmountCents={duePayment?.amountCents ?? quickAddPrefill?.cents}
               initialPayee={duePayment?.name ?? quickAddPrefill?.payee ?? undefined}

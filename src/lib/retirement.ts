@@ -369,7 +369,7 @@ export const INCOME_LINE_KINDS: { value: IncomeLineKind; label: string }[] = [
   { value: "pay", label: "Pay (work)" },
   { value: "va", label: "VA disability" },
   { value: "social_security", label: "Social Security" },
-  { value: "job", label: "Second job" },
+  { value: "job", label: "Add'l Job" },
   { value: "spouse", label: "Spouse income" },
   { value: "other", label: "Other income" },
 ];

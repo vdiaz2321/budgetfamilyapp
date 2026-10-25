@@ -128,7 +128,16 @@ export type FiPlan = {
   rentalRows: RentalRow[];
   rentals: RentalProperty[];
   /** What a rental can link to on Accounts. */
-  propertyAccounts: { id: string; name: string; valueCents: number; loanCents: number | null }[];
+  propertyAccounts: {
+    id: string;
+    name: string;
+    isRental: boolean;
+    valueCents: number;
+    loanCents: number | null;
+    /** The linked mortgage's APR and years left (from its term), if known. */
+    loanRatePct: number | null;
+    loanYearsLeft: number | null;
+  }[];
   /** From the Estate guide: life insurance payouts (once) and survivor
    *  benefits like VA DIC (monthly, tax-free). */
   survivorExtras: {
@@ -361,7 +370,7 @@ export function FiSection({
 
   // Monthly income by source in a retired year — the first FULL year of
   // military retirement until another is picked (Victor, 2026-10-15). Always
-  // a row of the table, so "Left to save" matches it.
+  // a row of the table, so "Left to Invest/Save" matches it.
   const [incomeYearPick, setIncomeYear] = useState<number | null>(null);
   const incomeYear = Math.max(firstFullRetiredYear, incomeYearPick ?? firstFullRetiredYear);
   const retireIncome = (() => {
@@ -617,7 +626,11 @@ export function FiSection({
           {/* Three panels side by side: what retirement pays, what the
               investments have to do about the gap, and the family's income if
               Victor dies first. Each reads top to bottom as one sum. */}
-          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {/* Income and Investments stack on the left, the long survivor
+              card on the right — three across left two short cards over
+              empty space (Victor, 2026-10-25). */}
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="flex flex-col gap-3">
             {retireIncome ? (
               <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
                 {/* A year picker in the title, like the survivor card's. */}
@@ -678,6 +691,7 @@ export function FiSection({
                     />
                     <IncomeRow
                       label="Planned spending"
+                      note="Incl. investments"
                       monthly={-retireSpendMonthly}
                       yearly={-retireSpendYearly}
                       currency={currency}
@@ -688,7 +702,7 @@ export function FiSection({
                       const netYearly = retireIncome.afterTaxCents - retireSpendYearly;
                       return (
                         <IncomeRow
-                          label={net >= 0 ? "Left to save" : "Gap from savings"}
+                          label={net >= 0 ? "Left to Invest/Save" : "Gap from savings"}
                           monthly={Math.abs(net)}
                           yearly={Math.abs(netYearly)}
                           currency={currency}
@@ -702,7 +716,7 @@ export function FiSection({
               </div>
             ) : null}
 
-            <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+            <div className="flex-1 rounded-lg bg-background px-3 py-2 ring-1 ring-line">
               <p className="text-center text-sm font-bold sm:text-lg">Investments</p>
               <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
                 {mile ? (
@@ -770,10 +784,14 @@ export function FiSection({
                 />
               </ul>
             </div>
+            </div>
 
             {/* What-if: the same plan with Victor's income gone from the
                 year picked. */}
             <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+              {/* Title and the remarry pick share one line, so this card is
+                  no taller than the two beside it (Victor, 2026-10-25). */}
+              <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
               <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-lg">
                 If you die first, in
                 <select
@@ -789,7 +807,7 @@ export function FiSection({
                 </select>
               </p>
               {remarryOptions.length > 0 ? (
-                <p className="mt-1 flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm">
+                <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm">
                   Spouse remarries
                   <select
                     value={remarryYear ?? ""}
@@ -806,6 +824,7 @@ export function FiSection({
                   </select>
                 </p>
               ) : null}
+              </div>
               <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
                 <li className="flex justify-between gap-3 py-1 max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
                   <span>Family income</span>
@@ -831,7 +850,7 @@ export function FiSection({
                             href="https://www.va.gov/family-and-caregiver-benefits/survivor-compensation/dependency-indemnity-compensation/survivor-rates/"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="block w-fit text-xs font-semibold underline underline-offset-2 sm:text-sm"
+                            className="block w-fit text-xs font-semibold underline underline-offset-2 sm:ml-2 sm:inline sm:text-sm"
                             style={{ color: "var(--viz-savings)" }}
                           >
                             VA DIC rates
@@ -844,7 +863,7 @@ export function FiSection({
                             href="https://www.ssa.gov/survivor/amount"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="block w-fit text-xs font-semibold underline underline-offset-2 sm:text-sm"
+                            className="block w-fit text-xs font-semibold underline underline-offset-2 sm:ml-2 sm:inline sm:text-sm"
                             style={{ color: "var(--viz-savings)" }}
                           >
                             SSA rates
@@ -893,6 +912,7 @@ export function FiSection({
                 />
                 <IncomeRow
                   label={survivorYear.spendPct === 100 ? "Planned spending" : `Planned spending (${survivorYear.spendPct}%)`}
+                  note="Incl. investments"
                   monthly={-survivorYear.spendMonthly}
                   yearly={-survivorYear.spendMonthly * 12}
                   currency={currency}
@@ -903,7 +923,7 @@ export function FiSection({
                   const netYearly = survivorYear.afterTaxYearly - survivorYear.spendMonthly * 12;
                   return (
                     <IncomeRow
-                      label={net >= 0 ? "Left to save" : "Gap from savings"}
+                      label={net >= 0 ? "Left to Invest/Save" : "Gap from savings"}
                       monthly={Math.abs(net)}
                       yearly={Math.abs(netYearly)}
                       currency={currency}
@@ -1683,7 +1703,7 @@ const DEFAULT_LINE_NAME: Record<IncomeLineKind, string> = {
   pay: "Pay",
   va: "VA disability",
   social_security: "Social Security",
-  job: "Second job",
+  job: "Add'l Job",
   spouse: "Spouse income",
   other: "Other income",
 };
@@ -1986,8 +2006,11 @@ function PlanModal({
     }
     return byLineDates(saved, thisYear);
   });
-  const [rentalDrafts, setRentalDrafts] = useState<RentalDraft[]>(() =>
-    plan.rentalRows.map((r) => ({
+  // Rentals come from the Accounts page, never a guessed purchase (Victor,
+  // 2026-10-25): every property typed "Rental property" there gets a card
+  // here, ready for its rent and costs.
+  const [rentalDrafts, setRentalDrafts] = useState<RentalDraft[]>(() => [
+    ...plan.rentalRows.map((r): RentalDraft => ({
       key: r.id,
       id: r.id,
       name: r.name,
@@ -2007,7 +2030,28 @@ function PlanModal({
       costsPer: r.yearly_costs_cents != null ? "yr" : "mo",
       appreciationPct: String(Number(r.appreciation_pct)),
     })),
-  );
+    ...plan.propertyAccounts
+      .filter((a) => a.isRental && !plan.rentalRows.some((r) => r.property_account_id === a.id))
+      .map((a) => ({
+        key: `acct-${a.id}`,
+        id: null,
+        name: a.name,
+        propertyAccountId: a.id,
+        loanAccountId: "",
+        purchaseYear: "",
+        value: "",
+        downPaymentPct: "0",
+        closingCostPct: "0",
+        loanBalance: "",
+        loanRatePct: a.loanRatePct != null ? String(a.loanRatePct) : "0",
+        loanYears: a.loanYearsLeft != null ? String(a.loanYearsLeft) : "",
+        rent: "",
+        rentPer: "mo" as const,
+        costs: "",
+        costsPer: "mo" as const,
+        appreciationPct: "0",
+      })),
+  ]);
   const updateRental = (key: string, patch: Partial<RentalDraft>) =>
     setRentalDrafts((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
@@ -2038,40 +2082,10 @@ function PlanModal({
   // The account lists under the Rates section's category boxes. Each
   // category opens on its own by clicking its name, like the year popup's
   // groups — never one switch for all (Victor, 2026-10-17). Folded by default.
-  const [rateAccountsOpen, setRateAccountsOpen] = useState<Set<GroupKind>>(() => new Set());
-  const toggleRateAccounts = (kind: GroupKind) =>
-    setRateAccountsOpen((prev) => {
-      const next = new Set(prev);
-      if (next.has(kind)) next.delete(kind);
-      else next.add(kind);
-      return next;
-    });
+  const [rateAccountsOpen, setRateAccountsOpen] = useState(false);
   // Still saved (a cleared category box falls back to it), but no longer shown.
   const investDefault = String(plan.investmentReturnPct);
   const [cashDefault, setCashDefault] = useState(String(plan.cashReturnPct));
-  const addRental = () =>
-    setRentalDrafts((prev) => [
-      ...prev,
-      {
-        key: `new-${Date.now()}`,
-        id: null,
-        name: `Rental ${prev.length + 1}`,
-        propertyAccountId: "",
-        loanAccountId: "",
-        purchaseYear: retireYear,
-        value: "",
-        downPaymentPct: "25",
-        closingCostPct: "3",
-        loanBalance: "",
-        loanRatePct: "7",
-        loanYears: "30",
-        rent: "",
-        rentPer: "mo",
-        costs: "",
-        costsPer: "mo",
-        appreciationPct: "0",
-      },
-    ]);
   const money = (v: string) => Math.round(Number(v.replace(/[$,]/g, "")) * 100) || 0;
 
   // With a Social Security record, the largest Social Security line is the
@@ -2109,7 +2123,8 @@ function PlanModal({
         ? plan.propertyAccounts.find((a) => a.id === r.propertyAccountId)?.loanCents ?? money(r.loanBalance)
         : money(r.loanBalance),
       loanRatePct: Number(r.loanRatePct) || 0,
-      loanYears: Number(r.loanYears) || 0,
+      // Blank saves as 30 (actions.ts), so the preview reads it that way too.
+      loanYears: r.loanYears.trim() ? Number(r.loanYears) || 0 : 30,
       monthlyRentCents: Math.round(money(r.rent) / (r.rentPer === "yr" ? 12 : 1)),
       monthlyCostsCents: Math.round(money(r.costs) / (r.costsPer === "yr" ? 12 : 1)),
       appreciationPct: Number(r.appreciationPct) || 0,
@@ -2462,7 +2477,9 @@ function PlanModal({
                     className={`${lineInput} sm:w-56`}
                   />
                 </label>
-                <label className="flex min-w-0 items-center gap-2">
+                {/* On a phone Type drops to its own row so Name isn't
+                    squeezed to nothing beside it. */}
+                <label className="flex min-w-0 items-center gap-2 max-sm:order-last max-sm:basis-full">
                   <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Type</span>
                   <select
                     value={l.kind}
@@ -2512,23 +2529,6 @@ function PlanModal({
                   </select>
                 </span>
               </LineField>
-              {/* Pay-like income rises by its own raise each January; VA and
-                  Social Security rise by the COLA instead. */}
-              {RAISE_KINDS.includes(l.kind) ? (
-                <LineField label="Pay Increase %/yr">
-                  <input
-                    inputMode="decimal"
-                    value={l.raisePct}
-                    onChange={(e) => updateLine(l.key, { raisePct: e.target.value })}
-                    placeholder="0"
-                    className={`${lineInput} block text-center sm:mx-auto sm:w-20`}
-                  />
-                </LineField>
-              ) : (
-                <LineField label="Pay Increase %/yr">
-                  <span className="block py-1.5 text-center text-sm text-foreground">COLA</span>
-                </LineField>
-              )}
               {/* Month + year: the first year only counts from this month on. */}
               <LineField label="Starts" className="sm:w-[8.75rem]">
                 <MonthYearBox
@@ -2553,6 +2553,23 @@ function PlanModal({
                   yearPlaceholder="Never"
                 />
               </LineField>
+              {/* Pay-like income rises by its own raise each January; VA and
+                  Social Security rise by the COLA instead. */}
+              {RAISE_KINDS.includes(l.kind) ? (
+                <LineField label="Pay Increase %/yr">
+                  <input
+                    inputMode="decimal"
+                    value={l.raisePct}
+                    onChange={(e) => updateLine(l.key, { raisePct: e.target.value })}
+                    placeholder="0"
+                    className={`${lineInput} block text-center sm:mx-auto sm:w-20`}
+                  />
+                </LineField>
+              ) : (
+                <LineField label="Pay Increase %/yr">
+                  <span className="block py-1.5 text-center text-sm text-foreground">COLA</span>
+                </LineField>
+              )}
               </div>
               {/* The PIA drives the survivor benefits on this record: the
                   children's, the caregiver's and the widow(er)'s. Blank
@@ -2659,14 +2676,29 @@ function PlanModal({
           {/* Columns sized to each name ("Traditional retirement" needs more
               than "Crypto"), so all seven fit the narrower popup. */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-6 lg:grid-cols-[repeat(7,auto)]">
-            <span className="col-span-full block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground lg:col-span-6 lg:col-start-2">
-              Rate of return by category
-            </span>
+            {/* The accounts button sits right after the title (Victor, 2026-10-25). */}
+            <div className="col-span-full flex flex-wrap items-center justify-center gap-x-3 gap-y-1 lg:col-span-6 lg:col-start-2">
+              <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
+                Rate of return by category
+              </span>
+              <button
+                type="button"
+                onClick={() => setRateAccountsOpen((v) => !v)}
+                aria-expanded={rateAccountsOpen}
+                className={`shrink-0 rounded-full px-2.5 py-1 max-sm:text-[12px] sm:text-sm font-semibold transition ${
+                  rateAccountsOpen
+                    ? "bg-negative/10 text-negative ring-1 ring-negative/30 hover:bg-negative/20"
+                    : "bg-sky-100 text-foreground hover:bg-sky-200 dark:bg-sky-900/50"
+                }`}
+              >
+                {rateAccountsOpen ? "Hide Accounts" : "Show Accounts"}
+              </button>
+            </div>
             <label className="order-last min-w-0 self-start lg:order-none lg:col-start-1 lg:row-start-2 lg:border-r-2 lg:border-sky-300 lg:pr-2 dark:lg:border-sky-900">
               <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
                 Spending<br />inflation
               </span>
-              <PctBox value={inflation}>
+              <PctBox value={inflation} textClassName="text-sm font-bold">
                 <input
                   name="inflationPct"
                   inputMode="decimal"
@@ -2674,7 +2706,7 @@ function PlanModal({
                   size={1}
                   value={inflation}
                   onChange={(e) => setInflation(e.target.value)}
-                  className={`${lineInput} text-center`}
+                  className={`${lineInput} text-center font-bold`}
                 />
               </PctBox>
               {/* A change counts from this year; earlier years keep their rate. */}
@@ -2690,31 +2722,12 @@ function PlanModal({
             {(["cash", ...GROUP_KINDS.filter((k) => k !== "cash")] as GroupKind[]).map((kind) => {
               // "Traditional / retirement", "Roth / retirement" on two lines.
               const [first, ...rest] = (kind === "cash" ? "Savings APY" : GROUP_LABEL[kind]).split(" ");
-              const names = groupAccountNames(plan.accountGroups.slots, (x) => x.group === kind);
               return (
                 <div key={kind} className="min-w-0 self-start lg:row-start-2">
-                  {/* The name opens this category's accounts. */}
-                  <button
-                    type="button"
-                    onClick={() => toggleRateAccounts(kind)}
-                    aria-expanded={rateAccountsOpen.has(kind)}
-                    className="mb-0.5 flex w-full items-end justify-center gap-1 rounded-md text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 20 20"
-                      className={`mb-1 h-3 w-3 shrink-0 transition-transform ${rateAccountsOpen.has(kind) ? "" : "-rotate-90"}`}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M5 7.5 10 12.5 15 7.5" />
-                    </svg>
-                    <span>{rest.length > 0 ? <>{first}<br />{rest.join(" ")}</> : <><br />{first}</>}</span>
-                  </button>
-                  <PctBox value={kind === "cash" ? cashDefault : groupDrafts[kind].returnPct} placeholder={kind === "cash" ? "" : investDefault}>
+                  <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
+                    {rest.length > 0 ? <>{first}<br />{rest.join(" ")}</> : <><br />{first}</>}
+                  </span>
+                  <PctBox value={kind === "cash" ? cashDefault : groupDrafts[kind].returnPct} placeholder={kind === "cash" ? "" : investDefault} textClassName="text-sm font-bold">
                   {kind === "cash" ? (
                     <input
                       name="cashReturnPct"
@@ -2723,7 +2736,7 @@ function PlanModal({
                       value={cashDefault}
                       onChange={(e) => setCashDefault(e.target.value)}
                       aria-label="Savings APY"
-                      className={`${lineInput} text-center`}
+                      className={`${lineInput} text-center font-bold`}
                     />
                   ) : (
                     <input
@@ -2733,21 +2746,34 @@ function PlanModal({
                       onChange={(e) => updateGroup(kind, { returnPct: e.target.value })}
                       placeholder={investDefault}
                       aria-label={`${GROUP_LABEL[kind]} rate of return`}
-                      className={`${lineInput} text-center`}
+                      className={`${lineInput} text-center font-bold`}
                     />
                   )}
                   </PctBox>
-                  {/* Which accounts earn this rate — the Accounts page sets
-                      each account's type (Victor, 2026-10-19). */}
-                  {rateAccountsOpen.has(kind) ? (
-                    <p className="mt-1 text-left text-xs leading-snug text-foreground sm:text-sm">
-                      {names.length > 0 ? names.join(" · ") : "No accounts"}
-                    </p>
-                  ) : null}
                 </div>
               );
             })}
           </div>
+          {/* Which accounts earn each rate — the Accounts page sets each
+              account's type (Victor, 2026-10-19). One full-width list under
+              the boxes, not a tall strip under each narrow column. */}
+          {rateAccountsOpen ? (
+            <dl className="mt-3 divide-y divide-line rounded-lg ring-1 ring-line">
+              {(["cash", ...GROUP_KINDS.filter((k) => k !== "cash")] as GroupKind[]).map((kind) => {
+                const names = groupAccountNames(plan.accountGroups.slots, (x) => x.group === kind);
+                return (
+                  <div key={kind} className="grid gap-x-3 px-3 py-1.5 sm:grid-cols-[15rem_1fr]">
+                    <dt className="max-sm:text-[12px] sm:text-sm sm:text-right sm:whitespace-nowrap font-bold uppercase tracking-wide text-foreground">
+                      {kind === "cash" ? "Savings APY" : GROUP_LABEL[kind]}:
+                    </dt>
+                    <dd className="text-xs leading-snug text-foreground sm:text-sm">
+                      {names.length > 0 ? names.join(" · ") : "No accounts"}
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
+          ) : null}
         </div>
 
         </div>
@@ -3191,119 +3217,82 @@ function PlanModal({
         />
         <div className={isOpen("rentals") ? "contents" : "hidden"}>
         <div className="space-y-2 sm:col-span-2">
-          {rentalDrafts.map((r) => {
-            const owned = !!r.propertyAccountId;
+          {/* Only properties on the Accounts page; a planned purchase was
+              too much guessing (Victor, 2026-10-25). */}
+          {rentalDrafts.filter((r) => r.propertyAccountId).length === 0 ? (
+            <p className="text-center text-xs sm:text-sm text-foreground">
+              No rentals yet. Add a property on Accounts with Type: Rental property and it shows here.
+            </p>
+          ) : null}
+          {rentalDrafts.filter((r) => r.propertyAccountId).map((r) => {
             const preview = rentalPreview(r);
+            const acct = plan.propertyAccounts.find((a) => a.id === r.propertyAccountId);
             return (
-              // items-start: Rent and Costs carry a cost line under the box,
-              // so the boxes line up by their tops.
-              <div key={r.key} className="grid grid-cols-2 items-start gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-4">
-                <LineField label="Name" className="col-span-2">
-                  <input value={r.name} onChange={(e) => updateRental(r.key, { name: e.target.value })} className={lineInput} />
-                </LineField>
-                <LineField label="Property" className="col-span-2">
-                  <select
-                    value={r.propertyAccountId}
-                    onChange={(e) => updateRental(r.key, { propertyAccountId: e.target.value, loanAccountId: "" })}
-                    className={lineInput}
-                  >
-                    <option value="">Planned purchase</option>
-                    {plan.propertyAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>Owned: {a.name}</option>
-                    ))}
-                  </select>
-                </LineField>
-                {owned ? (
-                  <>
-                    {(() => {
-                      const linkedLoan = plan.propertyAccounts.find((a) => a.id === r.propertyAccountId)?.loanCents ?? null;
-                      return linkedLoan != null ? (
-                        <p className="col-span-2 self-center text-xs sm:text-sm text-foreground">
-                          <span className="font-semibold">Loan {formatMoneyWhole(linkedLoan, currency)}</span> — the
-                          mortgage linked to this property on Accounts.
-                        </p>
-                      ) : (
-                        <LineField label="Loan balance" className="col-span-2 sm:col-span-1">
-                          <input inputMode="decimal" value={r.loanBalance} onChange={(e) => updateRental(r.key, { loanBalance: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
-                        </LineField>
-                      );
-                    })()}
-                    <LineField label="Years left">
-                      <input inputMode="numeric" value={r.loanYears} onChange={(e) => updateRental(r.key, { loanYears: e.target.value })} className={`${lineInput}`} />
-                    </LineField>
-                  </>
-                ) : (
-                  <>
-                    <LineField label="Buy in">
-                      <input inputMode="numeric" value={r.purchaseYear} onChange={(e) => updateRental(r.key, { purchaseYear: e.target.value })} className={`${lineInput}`} />
-                    </LineField>
-                    <LineField label="Price">
-                      <input inputMode="decimal" value={r.value} onChange={(e) => updateRental(r.key, { value: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
-                    </LineField>
-                    <LineField label="Down %">
-                      <input inputMode="decimal" value={r.downPaymentPct} onChange={(e) => updateRental(r.key, { downPaymentPct: e.target.value })} className={`${lineInput}`} />
-                    </LineField>
-                    <LineField label="Closing %">
-                      <input inputMode="decimal" value={r.closingCostPct} onChange={(e) => updateRental(r.key, { closingCostPct: e.target.value })} className={`${lineInput}`} />
-                    </LineField>
-                    <LineField label="Loan years">
-                      <input inputMode="numeric" value={r.loanYears} onChange={(e) => updateRental(r.key, { loanYears: e.target.value })} className={`${lineInput}`} />
-                    </LineField>
-                  </>
-                )}
-                <LineField label="Loan rate %">
-                  <input inputMode="decimal" value={r.loanRatePct} onChange={(e) => updateRental(r.key, { loanRatePct: e.target.value })} className={`${lineInput}`} />
-                </LineField>
-                <LineField label="Rent">
-                  <span className="flex gap-1">
-                    <input inputMode="decimal" value={r.rent} onChange={(e) => updateRental(r.key, { rent: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
-                    <PerSelect value={r.rentPer} onChange={(rentPer) => updateRental(r.key, { rentPer })} />
+              // Laid out like an income card: name and the linked property
+              // head it; the numbers sit centred in one row, rent and costs
+              // under them (Victor, 2026-10-25).
+              <div key={r.key} className="space-y-2 rounded-lg bg-background p-2 ring-1 ring-line">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <label className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+                    <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Name</span>
+                    <input value={r.name} onChange={(e) => updateRental(r.key, { name: e.target.value })} className={`${lineInput} sm:w-56`} />
+                  </label>
+                  <span className="text-xs sm:text-sm text-foreground max-sm:basis-full max-sm:text-center">
+                    Value <span className="font-semibold">{formatMoneyWhole(acct?.valueCents ?? 0, currency)}</span> from Accounts
                   </span>
-                  <OtherWayCost amount={r.rent} per={r.rentPer} currency={currency} label="rent" />
-                </LineField>
-                <LineField label="Costs">
-                  <span className="flex gap-1">
-                    <input inputMode="decimal" value={r.costs} onChange={(e) => updateRental(r.key, { costs: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
-                    <PerSelect value={r.costsPer} onChange={(costsPer) => updateRental(r.key, { costsPer })} />
-                  </span>
-                  <OtherWayCost amount={r.costs} per={r.costsPer} currency={currency} />
-                </LineField>
-                <LineField label="Value growth %">
-                  <input inputMode="decimal" value={r.appreciationPct} onChange={(e) => updateRental(r.key, { appreciationPct: e.target.value })} className={`${lineInput}`} />
-                </LineField>
-                <button
-                  type="button"
-                  onClick={() => setRentalDrafts((prev) => prev.filter((x) => x.key !== r.key))}
-                  className="h-[34px] self-end rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                >
-                  Remove
-                </button>
-                <p className="col-span-2 text-xs sm:text-sm text-foreground sm:col-span-4">
-                  {preview ? (
-                    <>
-                      {preview.first}:{" "}
-                      <span className="font-semibold">
-                        {preview.cashMonthly >= 0 ? "+" : "−"}
-                        {formatMoneyWhole(Math.abs(preview.cashMonthly), currency)}/mo
-                      </span>{" "}
-                      after a {formatMoneyWhole(preview.payMonthly, currency)}/mo loan payment
-                      {preview.purchaseCash > 0 ? ` · ${formatMoneyWhole(preview.purchaseCash, currency)} down + closing from savings` : ""}
-                      {" "}· equity {formatMoneyWhole(preview.equity, currency)} by year end. Costs = taxes, insurance, management, repairs, vacancy. Value growth is on top of inflation.
-                    </>
+                </div>
+                <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
+                  {acct?.loanCents != null ? (
+                    <p className="self-center text-center text-xs sm:text-sm text-foreground">
+                      <span className="font-semibold">Loan {formatMoneyWhole(acct.loanCents, currency)}</span>
+                      <span className="block">from Accounts</span>
+                    </p>
                   ) : (
-                    "Enter the year and price to see the first year's cash flow."
+                    <LineField label="Loan balance">
+                      <input inputMode="decimal" value={r.loanBalance} onChange={(e) => updateRental(r.key, { loanBalance: e.target.value })} placeholder="0.00" className={`${lineInput} text-center`} />
+                    </LineField>
                   )}
-                </p>
+                  <LineField label="Years left">
+                    <input inputMode="numeric" value={r.loanYears} onChange={(e) => updateRental(r.key, { loanYears: e.target.value })} placeholder="0" className={`${lineInput} text-center`} />
+                  </LineField>
+                  <LineField label="Loan rate %">
+                    <input inputMode="decimal" value={r.loanRatePct} onChange={(e) => updateRental(r.key, { loanRatePct: e.target.value })} className={`${lineInput} text-center`} />
+                  </LineField>
+                  <LineField label="Value growth %">
+                    <input inputMode="decimal" value={r.appreciationPct} onChange={(e) => updateRental(r.key, { appreciationPct: e.target.value })} className={`${lineInput} text-center`} />
+                  </LineField>
+                </div>
+                {/* items-start: each carries a cost line under its box. */}
+                <div className="grid grid-cols-2 items-start gap-2 sm:mx-auto sm:max-w-md sm:gap-6">
+                  <LineField label="Rent">
+                    <span className="flex gap-1">
+                      <input inputMode="decimal" value={r.rent} onChange={(e) => updateRental(r.key, { rent: e.target.value })} placeholder="0.00" className={`${lineInput} text-center`} />
+                      <PerSelect value={r.rentPer} onChange={(rentPer) => updateRental(r.key, { rentPer })} />
+                    </span>
+                    <OtherWayCost amount={r.rent} per={r.rentPer} currency={currency} label="rent" />
+                  </LineField>
+                  <LineField label="Costs">
+                    <span className="flex gap-1">
+                      <input inputMode="decimal" value={r.costs} onChange={(e) => updateRental(r.key, { costs: e.target.value })} placeholder="0.00" className={`${lineInput} text-center`} />
+                      <PerSelect value={r.costsPer} onChange={(costsPer) => updateRental(r.key, { costsPer })} />
+                    </span>
+                    <OtherWayCost amount={r.costs} per={r.costsPer} currency={currency} />
+                  </LineField>
+                </div>
+                {preview ? (
+                  <p className="text-center text-xs sm:text-sm text-foreground">
+                    {preview.first}:{" "}
+                    <span className="font-semibold">
+                      {preview.cashMonthly >= 0 ? "+" : "−"}
+                      {formatMoneyWhole(Math.abs(preview.cashMonthly), currency)}/mo
+                    </span>{" "}
+                    after a {formatMoneyWhole(preview.payMonthly, currency)}/mo loan payment
+                    {" "}· equity {formatMoneyWhole(preview.equity, currency)} by year end. Costs = taxes, insurance, management, repairs, vacancy.
+                  </p>
+                ) : null}
               </div>
             );
           })}
-          <button
-            type="button"
-            onClick={addRental}
-            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-          >
-            + Add rental
-          </button>
         </div>
         </div>
 

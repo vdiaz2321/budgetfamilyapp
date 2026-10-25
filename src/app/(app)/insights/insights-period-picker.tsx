@@ -27,6 +27,7 @@ export function PeriodPicker({
   periodKey,
   label,
   minYear,
+  since,
   onSelect,
   granularities,
 }: {
@@ -34,6 +35,8 @@ export function PeriodPicker({
   periodKey: string;
   label: string;
   minYear: number;
+  // Earliest date with data: weeks / months / quarters before it aren't listed.
+  since?: string | null;
   onSelect?: (granularity: Granularity, periodKey: string) => void;
   // Optional subset of granularities. Defaults to all four. Accounts, for
   // example, drops "weekly" — weekly account balances don't make sense.
@@ -132,7 +135,7 @@ export function PeriodPicker({
                   Back
                 </button>
                 <div className="max-h-72 overflow-y-auto py-1">
-                  {periodOptions(submenu, minYear).map((o) => {
+                  {periodOptions(submenu, minYear, undefined, since).map((o) => {
                     const selected = submenu === granularity && o.key === periodKey;
                     return (
                       <button
