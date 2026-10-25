@@ -170,9 +170,9 @@ const pinAge = "sm:sticky sm:left-[4.75rem] sm:z-10 sm:shadow-[1px_0_0_0_var(--c
 const pinAgeWithSpouse = "sm:w-[4.5rem] sm:min-w-[4.5rem] sm:shadow-none";
 const pinSpouseAge = "sm:sticky sm:left-[9.25rem] sm:z-10 sm:shadow-[1px_0_0_0_var(--color-line)]";
 // Opaque versions of the row's this-year wash and hover.
-const pinNowBg = "bg-sky-100 dark:bg-[color-mix(in_srgb,var(--color-sky-900)_50%,var(--color-background))]";
+const pinNowBg = "bg-[var(--viz-sel)]";
 // Fades at the same speed as the row, so the pinned cells don't change ahead of it.
-const pinHover = "transition-colors group-hover:bg-sky-200 dark:group-hover:bg-sky-900";
+const pinHover = "transition-colors group-hover:bg-sky-50 dark:group-hover:bg-[color-mix(in_srgb,var(--color-sky-950)_40%,var(--color-surface))]";
 
 export function ProjectionSection({
   years,
@@ -309,7 +309,7 @@ export function ProjectionSection({
   }
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-line">
       <div className="px-4 py-3">
         <button
           type="button"
@@ -347,8 +347,10 @@ export function ProjectionSection({
                   {/* How the latest month stands against this year's
                       projection: ahead reads Up in green, behind Down in red.
                       Its own line, apart from Current NW. */}
-                  <span className={`block whitespace-nowrap font-semibold ${currentNwCents >= current.eoyCents ? "text-positive" : "text-negative"}`}>
-                    {currentNwCents >= current.eoyCents ? "Up" : "Down"}: {formatMoneyWhole(Math.abs(currentNwCents - current.eoyCents), currency)}
+                  <span className="block">
+                    <ChangePill up={currentNwCents >= current.eoyCents}>
+                      {currentNwCents >= current.eoyCents ? "Up" : "Down"}: {formatMoneyWhole(Math.abs(currentNwCents - current.eoyCents), currency)}
+                    </ChangePill>
                   </span>
                 </>
               }
@@ -363,8 +365,10 @@ export function ProjectionSection({
                 gapIsPace ? (
                   <>
                     {/* Only the Up/Down figure carries the colour, like the card beside it. */}
-                    <span className={`block font-semibold ${gap >= 0 ? "text-positive" : "text-negative"}`}>
-                      {gap >= 0 ? "Up" : "Down"}: {formatMoneyWhole(Math.abs(gap), currency)}
+                    <span className="block">
+                      <ChangePill up={gap >= 0}>
+                        {gap >= 0 ? "Up" : "Down"}: {formatMoneyWhole(Math.abs(gap), currency)}
+                      </ChangePill>
                     </span>
                     <span className="block whitespace-nowrap">from Proj EOY NW</span>
                   </>
@@ -390,7 +394,7 @@ export function ProjectionSection({
                         aria-label="Pick an age"
                         value={target.year}
                         onChange={(e) => pickYear(Number(e.target.value))}
-                        className="cursor-pointer rounded-md bg-sky-100 py-0.5 pl-1.5 pr-1 font-semibold text-foreground outline-none ring-1 ring-sky-300 focus:ring-brand dark:bg-sky-900/50 dark:ring-sky-700"
+                        className="cursor-pointer rounded-md bg-surface py-0.5 pl-1.5 pr-1 font-semibold text-foreground outline-none ring-1 ring-line focus:ring-brand"
                       >
                         {pickYears.map((y) => (
                           <option key={y.year} value={y.year}>
@@ -455,17 +459,17 @@ export function ProjectionSection({
               against a bounded height, which is what gives the header row
               somewhere to freeze. Boxed like the stat cards above it, so the
               header cards and the table read as one set. */}
-          <div className="mx-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
+          <div className="mx-4 overflow-hidden">
           <div className="max-h-[70vh] overflow-auto">
             <table className="w-full min-w-[1000px] text-sm sm:text-lg">
-              <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
+              <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
                 <tr className="max-sm:text-[12px] sm:text-base uppercase tracking-wide text-foreground">
                   {/* Year and Age stay pinned on the left so a row can be
                       read while scrolling across to the NW columns. */}
-                  <th className={`${pinYear} bg-background px-2.5 py-2 text-center font-semibold`}>Year</th>
-                  <th className={`${pinAge} ${spouseBirthYear ? pinAgeWithSpouse : ""} bg-background px-2.5 py-2 text-center font-semibold`}>Age</th>
+                  <th className={`${pinYear} bg-surface px-2.5 py-2 text-center font-semibold`}>Year</th>
+                  <th className={`${pinAge} ${spouseBirthYear ? pinAgeWithSpouse : ""} bg-surface px-2.5 py-2 text-center font-semibold`}>Age</th>
                   {spouseBirthYear ? (
-                    <th className={`${pinSpouseAge} bg-background px-2.5 py-2 text-center font-semibold`}>Spouse<br />Age</th>
+                    <th className={`${pinSpouseAge} bg-surface px-2.5 py-2 text-center font-semibold`}>Spouse<br />Age</th>
                   ) : null}
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Income</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Spending</th>
@@ -485,20 +489,20 @@ export function ProjectionSection({
                     <tr
                       key={y.year}
                       onClick={() => setEditingYear(y.year)}
-                      className={`group cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-sky-200 dark:hover:bg-sky-900 ${
-                        y.year === thisYear ? "bg-sky-100 dark:bg-sky-900/50" : ""
+                      className={`group cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-sky-50 dark:hover:bg-[color-mix(in_srgb,var(--color-sky-950)_40%,var(--color-surface))] ${
+                        y.year === thisYear ? "bg-[var(--viz-sel)]" : ""
                       }`}
                     >
                       {/* Pinned cells need a solid fill or the scrolled
                           columns show through; it matches the row's wash. */}
-                      <td className={`${pinYear} ${y.year === thisYear ? pinNowBg : "bg-background"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
+                      <td className={`${pinYear} ${y.year === thisYear ? pinNowBg : "bg-surface"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
                         {y.year}
                       </td>
-                      <td className={`${pinAge} ${spouseBirthYear ? pinAgeWithSpouse : ""} ${y.year === thisYear ? pinNowBg : "bg-background"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
+                      <td className={`${pinAge} ${spouseBirthYear ? pinAgeWithSpouse : ""} ${y.year === thisYear ? pinNowBg : "bg-surface"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
                         {y.age ?? "—"}
                       </td>
                       {spouseBirthYear ? (
-                        <td className={`${pinSpouseAge} ${y.year === thisYear ? pinNowBg : "bg-background"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
+                        <td className={`${pinSpouseAge} ${y.year === thisYear ? pinNowBg : "bg-surface"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
                           {y.year - spouseBirthYear}
                         </td>
                       ) : null}
@@ -536,8 +540,7 @@ export function ProjectionSection({
                         {/* Negative in retirement: the year's spending is coming
                             out of savings, so it reads as a draw, in red. */}
                         <span
-                          className={y.incomeCents - y.spendingCents < 0 ? "text-negative" : undefined}
-                          style={y.incomeCents - y.spendingCents < 0 ? undefined : { color: "var(--viz-savings)" }}
+                          className={y.incomeCents - y.spendingCents < 0 ? "text-negative" : "text-positive"}
                         >
                           {formatMoneyWhole(y.incomeCents - y.spendingCents, currency)}
                         </span>
@@ -749,7 +752,7 @@ function LeftOverBreakdown({ row, currency }: { row: ProjectionYear; currency: s
   const cashCents = leftCents - contributedCents - debtCents;
   const savings = { color: "var(--viz-savings)" };
   return (
-    <div className="sm:col-span-2 space-y-0.5 rounded-md bg-sky-100 px-3 py-2 text-xs sm:text-sm tabular-nums text-foreground dark:bg-sky-900/50">
+    <div className="sm:col-span-2 space-y-0.5 rounded-xl px-3 py-2 text-xs sm:text-sm tabular-nums text-foreground ring-1 ring-line">
       <Line label={row.inProgress ? "Left over so far" : "Left over"}>
         Income <span className="text-positive">{$(row.actualIncomeCents ?? 0)}</span> − Spending{" "}
         <span className="text-negative">{$(row.actualSpendingCents ?? 0)}</span> ={" "}
@@ -866,7 +869,7 @@ function GroupBreakdown({
   // on a phone. Solid backgrounds, or the scrolled cells show through.
   const pin = "sticky left-0 z-10 text-left";
   const box =
-    "mx-auto block w-20 rounded-md bg-background px-1.5 py-1 text-center text-xs sm:text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+    "mx-auto block w-20 rounded-md bg-surface px-1.5 py-1 text-center text-xs sm:text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
   // A percent box: narrower, with its "%" shown inside (see PctBox).
   const pctWrap = "mx-auto block w-16";
   const pctText = "text-xs sm:text-sm";
@@ -882,9 +885,9 @@ function GroupBreakdown({
       </p>
       <div className="mt-1 overflow-x-auto rounded-md ring-1 ring-line">
         <table className={`w-full text-xs sm:text-sm min-w-[980px]`}>
-          <thead className="bg-sky-100 dark:bg-sky-900">
+          <thead className="border-b border-line">
             <tr className="uppercase tracking-normal text-foreground">
-              <th className={`${cell} ${pin} bg-sky-100 font-semibold dark:bg-sky-900`}>Account Type</th>
+              <th className={`${cell} ${pin} bg-surface font-semibold`}>Account Type</th>
               <th className={`${cell} font-semibold`}>Start</th>
               {/* What actually went in, then what the plan puts in (Victor, 2026-10-18). */}
               <th className={`${cell} font-semibold`}>Actual<br />Contributed</th>
@@ -1073,8 +1076,8 @@ function GroupBreakdown({
                 </Fragment>
               );
             })}
-            <tr className="border-t border-line font-semibold">
-              <td className={`${cell} ${pin} bg-surface`}>Total</td>
+            <tr className="border-t border-line font-bold bg-sky-50 dark:bg-[color-mix(in_srgb,var(--color-sky-950)_40%,var(--color-surface))]">
+              <td className={`${cell} ${pin} bg-sky-50 dark:bg-[color-mix(in_srgb,var(--color-sky-950)_40%,var(--color-surface))]`}>Total</td>
               <td className={cell}>{$(sum((g) => g.start))}</td>
               <td className={cell} style={anyActual ? { color: "var(--viz-savings)" } : undefined}>
                 {anyActual ? $(sum((g) => g.actualAdd ?? 0)) : "—"}
@@ -1429,7 +1432,7 @@ function YearModal({
         {/* What the rest of the app recorded for this year — the figures to
             copy in at year end, shown where they are needed rather than on
             another page. */}
-        <div className="sm:col-span-2 rounded-md bg-sky-100 px-3 py-2 dark:bg-sky-900/50">
+        <div className="sm:col-span-2 rounded-xl px-3 py-2 ring-1 ring-line">
           <p className="text-center max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
             {row.inProgress ? "Total Current Amounts From Pages" : `${row.year}: actual from other pages`}
           </p>
@@ -1581,7 +1584,7 @@ function YearModal({
                   onClick={onEditIncome}
                   className={`mx-auto mt-1 block rounded-md px-2.5 py-1 text-xs font-semibold transition sm:text-sm ${
                     row.incomeCents > 0
-                      ? "text-foreground ring-1 ring-sky-400 hover:bg-sky-100 dark:hover:bg-sky-950/40"
+                      ? "text-foreground ring-1 ring-line hover:ring-brand"
                       : "bg-brand text-white hover:bg-brand-strong"
                   }`}
                 >
@@ -1737,14 +1740,14 @@ function YearModal({
         {/* The plan and the forecast worked out together, so neither is a
             black box — under the footnotes (Victor, 2026-09-29). Month-end
             figures, so the forecast only changes on the 1st. */}
-        <div className="sm:col-span-2 space-y-0.5 rounded-md bg-sky-100 px-3 py-2 text-xs sm:text-sm tabular-nums text-foreground dark:bg-sky-900/50">
+        <div className="sm:col-span-2 space-y-0.5 rounded-xl px-3 py-2 text-xs sm:text-sm tabular-nums text-foreground ring-1 ring-line">
           <Line label="Proj EOY NW">Start of NW + Income - Spending + Est. Gains + One-off.</Line>
           {forecast ? <ForecastBreakdown forecast={forecast} currency={currency} planCents={predictedEoyCents} /> : null}
         </div>
 
         {/* Exactly what would change, before it changes. */}
         {preview ? (
-          <div className="sm:col-span-2 rounded-md bg-sky-100 px-3 py-2 dark:bg-sky-900/50">
+          <div className="sm:col-span-2 rounded-xl px-3 py-2 ring-1 ring-line">
             <p className="text-xs font-semibold">
               Replace your estimates for {row.year} with what was recorded?
             </p>
@@ -1842,7 +1845,7 @@ function ProjectionEmpty({
   const savedCents = seed.incomeCents - seed.spendingCents;
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-line">
       <div className="px-4 py-3">
         <p className="text-sm font-semibold sm:text-lg">Current and Projected Net Worth</p>
         <p className="mt-1 text-xs text-muted">
@@ -1896,7 +1899,7 @@ function ProjectionEmpty({
 
 function SeedTile({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
-    <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+    <div className="rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
       <p className="max-sm:text-[12px] sm:text-sm font-semibold uppercase tracking-wide text-foreground">{label}</p>
       <p className="text-sm font-bold tabular-nums">{value}</p>
       <p className="max-sm:text-[12px] sm:text-sm text-foreground">{sub}</p>
@@ -2000,7 +2003,7 @@ function valueTone(tone: Tone | undefined, cents: number | null): { className: s
 }
 
 const inputClass =
-  "mx-auto block w-28 sm:w-32 rounded-md bg-background px-2 py-1.5 text-center text-sm sm:text-base tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  "mx-auto block w-28 sm:w-32 rounded-md bg-surface px-2 py-1.5 text-center text-sm sm:text-base tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 // Boxes sized to what goes in them: six-figure dollars fit w-28, an age or a
 // tax rate is two digits (Victor, 2026-09-28: full-width boxes for small
 // values read as a form to fill, not a sum to check).
@@ -2068,7 +2071,7 @@ function Figure({
   subClassName?: string;
 }) {
   return (
-    <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
+    <div className={`min-w-0 rounded-lg bg-surface px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
       {/* The number is sized like the Accounts page's summary cards
           (Victor, 2026-10-25); the label and lines stay readable. */}
       <p className="max-sm:text-[12px] sm:text-sm font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</p>
@@ -2086,5 +2089,19 @@ function Figure({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** A gain or a fall as a small tinted pill — green up, red down — the one
+ *  place the summary cards use colour beyond the number (Victor, 2026-10-25). */
+function ChangePill({ up, children }: { up: boolean; children: React.ReactNode }) {
+  const color = up ? "var(--positive)" : "var(--negative)";
+  return (
+    <span
+      className="mt-1 inline-block whitespace-nowrap rounded-full px-2 py-0.5 font-semibold"
+      style={{ color, backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)` }}
+    >
+      {children}
+    </span>
   );
 }

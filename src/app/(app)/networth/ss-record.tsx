@@ -6,6 +6,7 @@
 // its numbers go to the server (lib/ssa-statement-pdf, lib/ssa-statement).
 
 import { Fragment, useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { ModalShell } from "@/components/modal-shell";
 import { displayToCents, formatMoneyWhole } from "@/lib/money";
 import { spousalFactor, statementBenefitCents, type SsRecord, type SsStatementFigures } from "@/lib/ssa";
@@ -15,7 +16,7 @@ import { clearSsRecord, deleteSsYear, importSsStatement, saveSsBenefits, saveSsY
 
 const box = "rounded-md bg-surface px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 const label = "block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground";
-const chip = "rounded-md px-3 py-1.5 text-sm font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40";
+const chip = "rounded-md px-3 py-1.5 text-sm font-semibold text-foreground ring-1 ring-line transition hover:ring-brand";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function SsRecordSection({
@@ -26,6 +27,8 @@ export function SsRecordSection({
   thisYear,
   startYear,
   currency,
+  toolbarTarget,
+  onPlanChange,
 }: {
   record: SsRecord | null;
   birthYear: number | null;
@@ -35,6 +38,12 @@ export function SsRecordSection({
   /** The year his Social Security line starts, as typed in the plan form. */
   startYear: number | null;
   currency: string;
+  /** The open popup's header: Import / SSA Website / Remove sit there,
+   *  pinned at the top (Victor, 2026-10-25). Null keeps them inline. */
+  toolbarTarget?: HTMLElement | null;
+  /** The spousal start age rides on the plan form in a hidden field, which
+   *  fires no change event: this tells the plan popup to re-check Save. */
+  onPlanChange?: () => void;
 }) {
   const [importing, setImporting] = useState(false);
   const [year, setYear] = useState("");
@@ -44,7 +53,11 @@ export function SsRecordSection({
   const [adding, setAdding] = useState(false);
   const [why, setWhy] = useState(false);
   const [survivorWhy, setSurvivorWhy] = useState(false);
-  const [claimAge, setClaimAge] = useState(spouseClaimAge == null ? "" : String(spouseClaimAge));
+  const [claimAge, setClaimAgeState] = useState(spouseClaimAge == null ? "" : String(spouseClaimAge));
+  const setClaimAge = (v: string) => {
+    setClaimAgeState(v);
+    onPlanChange?.();
+  };
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -162,9 +175,48 @@ export function SsRecordSection({
     setAdding(true);
   };
 
+  // The two benefit tables share one header: the label, then the year and
+  // age for 62 / 67 / 70, so their columns line up (Victor, 2026-10-25).
+  const benefitHead = (label: string) => (
+    <>
+      {/* Full width to line up with the earnings tables, so on desktop the
+          label column is fixed and the three ages share the rest — a fixed
+          age width left a wide empty gap after the label (Victor, 2026-10-25). */}
+      <colgroup>
+        <col className="sm:w-72" />
+        {AGES.map((age) => (
+          <col key={age} className="w-[4.75rem] sm:w-auto" />
+        ))}
+      </colgroup>
+      <thead>
+        <tr className="border-b border-line">
+          <th className="px-2 py-1.5 text-left font-bold sm:px-3">{label}</th>
+          {/* The year each age lands in, "2048:" over "Age 67" — two
+              lines everywhere, which leaves the label column room for
+              its line (Victor, 2026-10-23). */}
+          {AGES.map((age) => (
+            <th key={age} className="px-1.5 py-1.5 text-center font-bold sm:px-3">
+              {birthYear != null ? (
+                <>
+                  <span className="block whitespace-nowrap">{birthYear + age}</span>
+                  <span className="block whitespace-nowrap">Age {age}</span>
+                </>
+              ) : (
+                `Age ${age}`
+              )}
+            </th>
+          ))}
+        </tr>
+      </thead>
+    </>
+  );
+
   return (
     <div className="space-y-3 sm:col-span-2">
-      <div className="flex max-w-2xl flex-wrap items-center gap-2">
+      {(() => {
+        const toolbar = (
+      <>
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setImporting(true)}
@@ -181,6 +233,18 @@ export function SsRecordSection({
         >
           SSA Website
         </a>
+        {/* Up here with Import, beside Close's header (Victor, 2026-10-25);
+            what they open shows right under them, not at the popup's end. */}
+        {adding ? null : (
+          <button type="button" onClick={openAdd} className={chip}>
+            Add SSA Year
+          </button>
+        )}
+        {spouseOk && !claimAge ? (
+          <button type="button" onClick={() => setClaimAge("67")} className={chip}>
+            Add Spousal Benefit
+          </button>
+        ) : null}
         {record && !confirmRemove ? (
           <button
             type="button"
@@ -208,38 +272,73 @@ export function SsRecordSection({
           onKeep={() => setConfirmRemove(false)}
         />
       ) : null}
+      {adding ? (
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="w-24">
+            <span className={label}>Year</span>
+            <input autoFocus={!year} value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" className={`${box} mt-1 w-full text-center`} />
+          </label>
+          <label className="w-36">
+            <span className={label}>Earnings</span>
+            <input autoFocus={!!year} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" className={`${box} mt-1 w-full text-center`} />
+          </label>
+          <button
+            type="button"
+            disabled={pending || !yearOk || !amount.trim()}
+            onClick={saveYear}
+            className="h-[34px] rounded-md bg-brand px-3 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-50"
+          >
+            {pending ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdding(false)}
+            className="h-[34px] rounded-md px-3 text-sm font-semibold ring-1 ring-line transition hover:ring-brand"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
+      {/* The spousal benefit's start age, once added. */}
+      {spouseOk && claimAge ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className={label}>Spousal benefit</span>
+          <select
+            value={claimAge}
+            onChange={(e) => setClaimAge(e.target.value)}
+            aria-label="Spousal benefit starts at age"
+            className={`${box} cursor-pointer`}
+          >
+            {[62, 63, 64, 65, 66, 67].map((a) => (
+              <option key={a} value={a}>From age {a} ({spouseBirthYear! + a})</option>
+            ))}
+          </select>
+          {spousal != null ? (
+            <span className="text-sm font-semibold" style={{ color: "var(--viz-income)" }}>
+              {money(spousal)}/mo
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setClaimAge("")}
+            className="rounded-md px-2 py-1 text-sm font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+          >
+            Remove
+          </button>
+        </div>
+      ) : null}
+      </>
+        );
+        return toolbarTarget ? createPortal(toolbar, toolbarTarget) : toolbar;
+      })()}
 
       {record ? (
-        <div className="max-w-2xl overflow-x-auto rounded-lg ring-1 ring-line">
+        <div className="space-y-3">
+        <div className="overflow-x-auto rounded-lg ring-1 ring-line">
           {/* Fixed column widths, so opening the edit boxes doesn't shift
               the columns (Victor, 2026-10-23). */}
           <table className="w-full table-fixed text-sm tabular-nums">
-            <colgroup>
-              <col />
-              {AGES.map((age) => (
-                <col key={age} className="w-[4.75rem] sm:w-32" />
-              ))}
-            </colgroup>
-            <thead>
-              <tr className="bg-sky-50 dark:bg-sky-950/40">
-                <th className="px-2 py-1.5 text-left font-bold sm:px-3">Monthly benefit</th>
-                {/* The year each age lands in, "2048:" over "Age 67" — two
-                    lines everywhere, which leaves the label column room for
-                    its line (Victor, 2026-10-23). */}
-                {AGES.map((age) => (
-                  <th key={age} className="px-1.5 py-1.5 text-center font-bold sm:px-3">
-                    {birthYear != null ? (
-                      <>
-                        <span className="block whitespace-nowrap">{birthYear + age}:</span>
-                        <span className="block whitespace-nowrap">Age {age}</span>
-                      </>
-                    ) : (
-                      `Age ${age}`
-                    )}
-                  </th>
-                ))}
-              </tr>
-            </thead>
+            {benefitHead("Monthly benefit")}
             <tbody>
               {editingBenefits ? (
                 <>
@@ -286,7 +385,7 @@ export function SsRecordSection({
                         <button
                           type="button"
                           onClick={() => setEditingBenefits(false)}
-                          className="rounded-md px-2.5 py-1 text-sm font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+                          className="rounded-md px-2.5 py-1 text-sm font-semibold ring-1 ring-line transition hover:ring-brand"
                         >
                           Cancel
                         </button>
@@ -313,13 +412,18 @@ export function SsRecordSection({
                   ))}
                 </tr>
               )}
-              {/* A year's worth of each, the monthly figure × 12 (Victor,
-                  2026-10-23). Read-only: it follows the row above. */}
-              <tr className="border-t border-line">
-                <td className="px-2 py-1.5 font-semibold sm:px-3">
-                  Annual total
-                  <span className="block text-xs font-normal sm:text-sm">Monthly benefit × 12</span>
-                </td>
+            </tbody>
+          </table>
+        </div>
+        {/* A year's worth of each, the monthly figure × 12 (Victor,
+            2026-10-23) — its own table since 2026-10-25. Read-only: it
+            follows the statement row above. */}
+        <div className="overflow-x-auto rounded-lg ring-1 ring-line">
+          <table className="w-full table-fixed text-sm tabular-nums">
+            {benefitHead("Annual total")}
+            <tbody>
+              <tr>
+                <td className="px-2 py-1.5 font-semibold sm:px-3">Monthly benefit × 12</td>
                 {atAge.map((a) => (
                   <td key={a.age} className="px-1.5 py-1.5 text-center font-semibold sm:px-3" style={{ color: "var(--viz-income)" }}>
                     {a.cents == null ? "—" : money(a.cents * 12)}
@@ -328,6 +432,7 @@ export function SsRecordSection({
               </tr>
             </tbody>
           </table>
+        </div>
         </div>
       ) : null}
 
@@ -345,7 +450,7 @@ export function SsRecordSection({
                     <col className="w-1/2" />
                   </colgroup>
                   <thead className={i > 0 ? "max-sm:hidden" : ""}>
-                    <tr className="bg-sky-50 dark:bg-sky-950/40">
+                    <tr className="border-b border-line">
                       <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Year</th>
                       <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Age</th>
                       <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Earnings</th>
@@ -400,7 +505,7 @@ export function SsRecordSection({
                                 <button
                                   type="button"
                                   onClick={() => setEditing(null)}
-                                  className="rounded-md px-2.5 py-1 text-sm font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+                                  className="rounded-md px-2.5 py-1 text-sm font-semibold ring-1 ring-line transition hover:ring-brand"
                                 >
                                   Cancel
                                 </button>
@@ -433,23 +538,13 @@ export function SsRecordSection({
         </>
       ) : null}
 
-      {/* Total · add year · spousal benefit — one row, the two buttons side
-          by side (Victor, 2026-10-22). */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+      {/* The total, with the explanations under it. Add SSA Year and Add
+          Spousal Benefit moved to the header (Victor, 2026-10-25). */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-line pt-3">
         {record ? (
           <p className="text-sm font-semibold">
             Total Earnings So Far: <span className="ml-1 tabular-nums" style={{ color: "var(--viz-income)" }}>{money(posted)}</span>
           </p>
-        ) : null}
-        {adding ? null : (
-          <button type="button" onClick={openAdd} className={chip}>
-            Add SSA Year
-          </button>
-        )}
-        {spouseOk && !claimAge ? (
-          <button type="button" onClick={() => setClaimAge("67")} className={chip}>
-            Add Spousal Benefit
-          </button>
         ) : null}
         {/* The two explanation links side by side on their own line under
             the buttons, spousal first (Victor, 2026-10-23). */}
@@ -481,65 +576,11 @@ export function SsRecordSection({
         ) : null}
       </div>
 
-      {adding ? (
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="w-24">
-            <span className={label}>Year</span>
-            <input autoFocus={!year} value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" className={`${box} mt-1 w-full text-center`} />
-          </label>
-          <label className="w-36">
-            <span className={label}>Earnings</span>
-            <input autoFocus={!!year} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" className={`${box} mt-1 w-full text-center`} />
-          </label>
-          <button
-            type="button"
-            disabled={pending || !yearOk || !amount.trim()}
-            onClick={saveYear}
-            className="h-[34px] rounded-md bg-brand px-3 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-50"
-          >
-            {pending ? "Saving…" : "Save"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setAdding(false)}
-            className="h-[34px] rounded-md px-3 text-sm font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
-          >
-            Cancel
-          </button>
-        </div>
-      ) : null}
 
       {spouseOk ? (
         <>
           {/* Saved with the plan form; the select below only shows once it's added. */}
           <input type="hidden" name="spouseSsClaimAge" value={claimAge} />
-          {claimAge ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className={label}>Spousal benefit</span>
-              <select
-                value={claimAge}
-                onChange={(e) => setClaimAge(e.target.value)}
-                aria-label="Spousal benefit starts at age"
-                className={`${box} cursor-pointer`}
-              >
-                {[62, 63, 64, 65, 66, 67].map((a) => (
-                  <option key={a} value={a}>From age {a} ({spouseBirthYear! + a})</option>
-                ))}
-              </select>
-              {spousal != null ? (
-                <span className="text-sm font-semibold" style={{ color: "var(--viz-income)" }}>
-                  {money(spousal)}/mo
-                </span>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setClaimAge("")}
-                className="rounded-md px-2 py-1 text-sm font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-              >
-                Remove
-              </button>
-            </div>
-          ) : null}
           {why ? (
             <div className="space-y-2 rounded-lg px-4 py-3 text-sm text-foreground ring-1 ring-line">
               <p>
@@ -578,7 +619,7 @@ export function SsRecordSection({
           <div className="overflow-hidden rounded-lg ring-1 ring-line">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-sky-50 dark:bg-sky-950/40">
+                <tr className="border-b border-line">
                   <th className="px-2 py-1.5 text-left font-bold sm:px-3">Situation</th>
                   <th className="px-2 py-1.5 text-left font-bold sm:px-3">What she gets on your record</th>
                 </tr>
@@ -670,7 +711,7 @@ function ConfirmStrip({
           type="button"
           autoFocus
           onClick={onKeep}
-          className="rounded-md bg-surface px-3 py-1.5 text-sm font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+          className="rounded-md bg-surface px-3 py-1.5 text-sm font-semibold text-foreground ring-1 ring-line transition hover:ring-brand"
         >
           Keep
         </button>
@@ -800,7 +841,7 @@ function SsImportModal({
       }
       headerEnd={
         <>
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ring-line transition hover:ring-brand">
             Cancel
           </button>
           <button

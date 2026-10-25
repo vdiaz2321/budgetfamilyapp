@@ -10,6 +10,7 @@ import { currentMonthFirst } from "@/lib/snapshots";
 import { unwrap } from "@/lib/supabase-result";
 import { inflationGrowth, parseInflationHistory, recordInflationChange } from "@/lib/inflation";
 import { applySsRecord, parseSsEarnings, toSsRecord, type SsStatementFigures } from "@/lib/ssa";
+import { applyFers } from "@/lib/fers";
 import {
   estimatePension,
   healthcareForYear,
@@ -561,6 +562,10 @@ export async function saveRetirementPlan(formData: FormData) {
     /** "yr" = the amount is per year; else per month. */
     per?: string;
     taxable?: boolean;
+    /** FERS only: whose GS career, the survivor share, an early start. */
+    owner?: string;
+    survivorPct?: string;
+    startEarly?: boolean;
   };
   let linesIn: LineIn[] = [];
   try {
@@ -588,6 +593,9 @@ export async function saveRetirementPlan(formData: FormData) {
     annual_cents: number | null;
     pia_cents: number | null;
     taxable: boolean;
+    owner: "self" | "spouse";
+    survivor_pct: 0 | 25 | 50;
+    fers_start_early: boolean;
     sort_order: number;
   }> = [];
   for (const [i, l] of linesIn.entries()) {
@@ -612,8 +620,12 @@ export async function saveRetirementPlan(formData: FormData) {
     if (start != null && end != null && end * 12 + (endMonth ?? 12) < start * 12 + (startMonth ?? 1)) {
       return { error: `${label}: the end can't be before the start.` };
     }
+    // A GS pension is worked out from the career: both ends of it are needed.
+    if (kind === "fers" && (start == null || end == null)) {
+      return { error: `${label}: enter the year the GS job starts and the year it ends.` };
+    }
     const raiseRaw = String(l.raisePct ?? "").trim();
-    const raise = kind !== "va" && kind !== "social_security" && raiseRaw ? Number(raiseRaw) : null;
+    const raise = kind !== "va" && kind !== "social_security" && kind !== "fers" && raiseRaw ? Number(raiseRaw) : null;
     if (raise != null && !(Number.isFinite(raise) && raise >= 0 && raise <= 20)) {
       return { error: `${label}: raise has to be between 0% and 20%.` };
     }
@@ -634,8 +646,11 @@ export async function saveRetirementPlan(formData: FormData) {
       end_month: end == null ? null : endMonth,
       raise_pct: raise,
       pia_cents: kind === "social_security" && String(l.piaCents ?? "").trim() ? Math.max(0, displayToCents(String(l.piaCents))) || null : null,
-      // VA disability is never taxed, whatever the box says.
-      taxable: kind === "va" ? false : !!l.taxable,
+      // VA disability is never taxed, whatever the box says; a GS pension always is.
+      taxable: kind === "va" ? false : kind === "fers" ? true : !!l.taxable,
+      owner: kind === "fers" && l.owner === "spouse" ? "spouse" : "self",
+      survivor_pct: kind === "fers" && (l.survivorPct === "25" || l.survivorPct === "50") ? (Number(l.survivorPct) as 25 | 50) : 0,
+      fers_start_early: kind === "fers" && !!l.startEarly,
       sort_order: i,
     });
   }
@@ -918,6 +933,9 @@ export async function saveRetirementPlan(formData: FormData) {
           annual_cents: l.annual_cents,
           pia_cents: l.pia_cents,
           taxable: l.taxable,
+          owner: l.owner,
+          survivor_pct: l.survivor_pct,
+          fers_start_early: l.fers_start_early,
           sort_order: l.sort_order,
         })),
       );
@@ -998,7 +1016,7 @@ export async function saveRetirementPlan(formData: FormData) {
   return { error: null };
 }
 
-const LINE_KINDS: IncomeLineKind[] = ["pay", "va", "social_security", "job", "spouse", "other"];
+const LINE_KINDS: IncomeLineKind[] = ["pay", "va", "social_security", "fers", "job", "spouse", "other"];
 // ---- Recompute the plan table from the retirement inputs.
 //
 // income_cents is each year's TOTAL take-home: the pay typed for the year
@@ -1071,14 +1089,21 @@ async function recomputeRetirementIncome(
       raisePct: l.raise_pct == null ? null : Number(l.raise_pct),
       piaCents: l.pia_cents == null ? null : Number(l.pia_cents),
       taxable: l.taxable,
+      owner: l.owner === "spouse" ? "spouse" : "self",
+      survivorPct: [25, 50].includes(Number(l.survivor_pct)) ? (Number(l.survivor_pct) as 25 | 50) : 0,
+      fersStartEarly: !!l.fers_start_early,
     }));
-  // With an earnings record saved, Social Security is worked out from it.
-  const lines = applySsRecord(typedLines, toSsRecord(ssRes.data), {
-    birthYear: plan.birth_year ?? null,
-    spouseBirthYear: plan.spouse_birth_year ?? null,
-    spouseClaimAge: plan.spouse_ss_claim_age ?? null,
-    thisYear,
-  });
+  // With an earnings record saved, Social Security is worked out from it;
+  // a GS career becomes the pension it pays.
+  const lines = applyFers(
+    applySsRecord(typedLines, toSsRecord(ssRes.data), {
+      birthYear: plan.birth_year ?? null,
+      spouseBirthYear: plan.spouse_birth_year ?? null,
+      spouseClaimAge: plan.spouse_ss_claim_age ?? null,
+      thisYear,
+    }),
+    { birthYear: plan.birth_year ?? null, spouseBirthYear: plan.spouse_birth_year ?? null },
+  );
   const pension = estimatePension(
     {
       retireYear,

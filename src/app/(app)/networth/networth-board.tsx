@@ -253,7 +253,7 @@ export function NetworthBoard({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[110rem] space-y-4">
+    <div className="mx-auto w-full max-w-[110rem] space-y-5 sm:space-y-8">
       <h1 className="text-lg font-bold sm:text-2xl">Net Worth</h1>
 
       {/* The household's own year-by-year plan, how the record compares, and
@@ -364,7 +364,7 @@ function GraphToggle({ open, onToggle }: { open: boolean; onToggle: (v: boolean)
       className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 max-sm:text-[12px] sm:text-sm font-semibold transition ${
         open
           ? "bg-brand text-white"
-          : "bg-sky-100 text-foreground hover:bg-sky-200 dark:bg-sky-900/50"
+          : "text-foreground ring-1 ring-line hover:ring-brand"
       }`}
     >
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
@@ -425,7 +425,7 @@ function ChartSection({
             className={`shrink-0 rounded-full px-2.5 py-1 max-sm:text-[12px] sm:text-sm font-semibold transition ${
               showPlan
                 ? "bg-positive text-white"
-                : "bg-sky-100 text-muted hover:text-foreground dark:bg-sky-900/50"
+                : "text-foreground ring-1 ring-line hover:ring-brand"
             }`}
           >
             Plan
@@ -469,7 +469,7 @@ function ChartSection({
             Each month freezes automatically; check back as months pass.
           </p>
         ) : (
-          <div className="mt-2 overflow-hidden rounded-lg bg-background ring-1 ring-line">
+          <div className="mt-2 overflow-hidden rounded-lg bg-surface ring-1 ring-line">
             {selectedRows.length > 0 ? (
               <AccountChart rows={selectedRows} months={gridMonths} currency={currency} colors={CHART_COLORS} />
             ) : (
@@ -1388,7 +1388,7 @@ function BalanceGrid({
   // always red, even on Debt where it means the balance fell.
   const growthTd = (v: number | null, bold: boolean) => (
     <td
-      className={`whitespace-nowrap border-x border-line bg-sky-50 dark:bg-sky-950/40 px-2 text-center tabular-nums sm:px-3 ${bold ? "py-2" : "py-1"} ${
+      className={`whitespace-nowrap px-2 text-center tabular-nums sm:px-3 ${bold ? "py-2" : "py-1"} ${
         bold ? "font-bold" : ""
       } ${v == null || v === 0 ? "text-muted" : v > 0 ? "text-positive" : "text-negative"}`}
     >
@@ -1497,7 +1497,7 @@ function BalanceGrid({
   }, [gridOpen]);
 
   return (
-    <section style={{ overflow: "clip" }} className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section style={{ overflow: "clip" }} className="rounded-2xl bg-surface shadow-sm ring-1 ring-line">
       {/* Title, then the year picker and graph button right beside it —
           Victor keeps a section's controls on the left, next to its name. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
@@ -1528,7 +1528,7 @@ function BalanceGrid({
         <p className="px-4 pb-2 text-xs font-medium text-negative">{reorderError}</p>
       ) : null}
       {/* Boxed like the Current and Projected Net Worth table and the stat cards on this page. */}
-      <div className="mx-4 mb-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
+      <div className="mx-4 mb-4 overflow-hidden">
       <div ref={scrollBoxRef} className={`max-h-[70vh] overflow-auto${wideLayout ? "" : " overflow-x-auto"}`}>
         <table
           className={`table-fixed border-collapse max-sm:text-[12px] sm:text-sm ${
@@ -1558,19 +1558,19 @@ function BalanceGrid({
             )}
           </colgroup>
           <thead
-            className="sticky z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]"
+            className="sticky z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]"
             style={{ top: "var(--grid-sticky-top, 0px)" }}
           >
             <tr className="border-b border-line">
-              <th className={`${stickyCls} bg-background px-3 py-2 text-left max-sm:text-[11px] font-medium uppercase tracking-wide text-muted sm:px-4 sm:text-xs`}>
+              <th className={`${stickyCls} bg-surface px-3 py-2 text-left max-sm:text-[11px] font-medium uppercase tracking-wide text-muted sm:px-4 sm:text-xs`}>
                 Account
               </th>
-              <th className="border-x border-line bg-sky-50 dark:bg-sky-950 px-2 leading-tight py-2 text-center max-sm:text-[11px] font-medium uppercase tracking-wide text-muted sm:text-xs">
+              <th className="px-2 leading-tight py-2 text-center max-sm:text-[11px] font-medium uppercase tracking-wide text-muted sm:text-xs">
                 Growth
                 {growthRange ? <span className="block whitespace-nowrap">{growthRange}</span> : null}
               </th>
               {months.map((m) => (
-                <th key={m} className={`${wideLayout ? "" : "w-20 sm:w-24"} bg-background whitespace-nowrap px-2 py-2 text-center max-sm:text-[11px] font-medium uppercase tracking-wide text-muted sm:px-3 sm:text-xs`}>
+                <th key={m} className={`${wideLayout ? "" : "w-20 sm:w-24"} bg-surface whitespace-nowrap px-2 py-2 text-center max-sm:text-[11px] font-medium uppercase tracking-wide text-muted sm:px-3 sm:text-xs`}>
                   {monthLabel(m)}
                   {m >= lockedFromMonth ? <span className="block normal-case">so far</span> : null}
                 </th>
@@ -1584,8 +1584,8 @@ function BalanceGrid({
               // "Not counted" divider (or at the end if there's no Kids Funding).
               const netTotals = months.map((_, i) => netAt(i));
               const totalRow = (
-                <tr className="border-t-2 border-brand/40 bg-brand/10 dark:bg-brand/20">
-                  <td className="sticky left-0 z-10 bg-background px-3 py-2 pr-2 sm:px-4 sm:pr-3">
+                <tr className="border-t border-line bg-sky-50 dark:bg-[color-mix(in_srgb,var(--color-sky-950)_40%,var(--color-surface))]">
+                  <td className="sticky left-0 z-10 bg-sky-50 dark:bg-[color-mix(in_srgb,var(--color-sky-950)_40%,var(--color-surface))] px-3 py-2 pr-2 sm:px-4 sm:pr-3">
                     <span className="whitespace-nowrap max-sm:text-[12px] font-bold uppercase tracking-wide text-foreground sm:text-sm sm:tracking-wider">
                       Total Net Worth
                     </span>
@@ -1607,13 +1607,13 @@ function BalanceGrid({
               );
               // How Total Net Worth moved from the month before.
               const changeRow = (
-                <tr className="border-b-2 border-brand/40 bg-brand/10 dark:bg-brand/20">
-                  <td className="sticky left-0 z-10 bg-background px-3 py-1.5 pr-2 sm:px-4 sm:pr-3">
+                <tr className="border-b border-line bg-sky-50 dark:bg-[color-mix(in_srgb,var(--color-sky-950)_40%,var(--color-surface))]">
+                  <td className="sticky left-0 z-10 bg-sky-50 dark:bg-[color-mix(in_srgb,var(--color-sky-950)_40%,var(--color-surface))] px-3 py-1.5 pr-2 sm:px-4 sm:pr-3">
                     <span className="whitespace-nowrap max-sm:text-[12px] font-semibold uppercase tracking-wide text-muted sm:text-sm">
                       Change
                     </span>
                   </td>
-                  <td className="border-x border-line bg-sky-50 dark:bg-sky-950/40" />
+                  <td />
                   {months.map((m, i) => {
                     const c = changeAt(i);
                     const cls = c == null ? "text-muted" : tone(c.amount);
@@ -1659,18 +1659,18 @@ function BalanceGrid({
                             </tr>
                           </>
                         ) : null}
-                  <tr className="border-b border-line bg-brand-soft/50 dark:bg-brand-soft/15">
-                    <td className="sticky left-0 z-10 overflow-hidden bg-background p-0 pr-2 sm:pr-3">
+                  <tr className="border-b border-line">
+                    <td className="sticky left-0 z-10 overflow-hidden bg-surface p-0 pr-2 sm:pr-3">
                       <button
                         type="button"
                         onClick={() => toggle(g.section)}
                         aria-expanded={isOpen}
-                        className="flex w-full min-w-0 items-center gap-1.5 px-3 py-2 text-left transition hover:bg-brand-soft/70 dark:hover:bg-brand-soft/25"
+                        className="flex w-full min-w-0 items-center gap-1.5 px-3 py-2 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                       >
                         <svg
                           width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                           strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-                          className={`shrink-0 text-brand transition-transform ${isOpen ? "rotate-90" : ""}`}
+                          className={`shrink-0 text-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
                           aria-hidden
                         >
                           <path d="M9 6l6 6-6 6" />
@@ -1723,7 +1723,7 @@ function BalanceGrid({
                               }`}
                             >
                               <td
-                                className={`${stickyCls} ${r.indent ? "bg-surface" : "bg-background"} whitespace-nowrap ${
+                                className={`${stickyCls} ${r.indent ? "bg-surface" : "bg-surface"} whitespace-nowrap ${
                                   r.hasChildren
                                     ? "p-0"
                                     : r.indent
@@ -1743,7 +1743,7 @@ function BalanceGrid({
                                       <button
                                         type="button"
                                         onClick={() => onSelectAccount?.(r)}
-                                        className={`min-w-0 whitespace-normal rounded px-1 py-0.5 text-left text-xs font-medium leading-tight transition hover:text-brand sm:text-[13px] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
+                                        className={`min-w-0 whitespace-normal rounded px-1 py-0.5 text-left text-xs font-medium leading-tight transition hover:underline sm:text-[13px] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
                                       >
                                         {r.name}
                                       </button>
@@ -1765,7 +1765,7 @@ function BalanceGrid({
                                     <button
                                       type="button"
                                       onClick={() => onSelectAccount?.(r)}
-                                      className={`min-w-0 whitespace-normal rounded px-1 py-0.5 text-left text-xs font-medium leading-tight transition hover:text-brand sm:text-[13px] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
+                                      className={`min-w-0 whitespace-normal rounded px-1 py-0.5 text-left text-xs font-medium leading-tight transition hover:underline sm:text-[13px] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
                                     >
                                       {r.name}
                                     </button>
@@ -1784,7 +1784,7 @@ function BalanceGrid({
                                     <button
                                       type="button"
                                       onClick={() => onSelectAccount?.(r)}
-                                      className={`min-w-0 whitespace-normal rounded px-1 py-0.5 text-left text-xs font-medium leading-tight transition hover:text-brand sm:text-[13px] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
+                                      className={`min-w-0 whitespace-normal rounded px-1 py-0.5 text-left text-xs font-medium leading-tight transition hover:underline sm:text-[13px] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
                                     >
                                       {r.name}
                                     </button>
@@ -1793,7 +1793,7 @@ function BalanceGrid({
                                   <>
                                     {r.name}
                                     {r.linked ? (
-                                      <span className="ml-1.5 rounded bg-brand-soft px-1 py-0.5 text-[10px] font-semibold uppercase text-brand">
+                                      <span className="ml-1.5 rounded px-1 py-0.5 text-[10px] font-semibold uppercase text-foreground ring-1 ring-line">
                                         linked
                                       </span>
                                     ) : null}
@@ -1865,7 +1865,7 @@ function YearPicker({
         aria-label="Year"
         value={year}
         onChange={(e) => onYearChange(e.target.value)}
-        className="cursor-pointer rounded-lg bg-sky-50 dark:bg-background px-2 py-1 text-sm font-semibold sm:text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="cursor-pointer rounded-lg bg-surface px-2 py-1 text-sm font-semibold sm:text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       >
         <option value="all">All</option>
         {years.map((y) => (
@@ -2009,7 +2009,7 @@ function MonthlyTraction({
   const shown = monthlyRows(points, year);
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-line">
       {/* Wraps on mobile: the year picker + Show Details would otherwise
           squeeze the title into three lines. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
@@ -2021,14 +2021,14 @@ function MonthlyTraction({
               <button
                 type="button"
                 onClick={() => setShowChanges((v) => !v)}
-                className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+                className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-line transition hover:ring-brand dark:ring-white/15"
               >
                 {showChanges ? "Hide Details" : "Show Details"}
               </button>
               <button
                 type="button"
                 onClick={() => downloadMonthlyNetWorthCsv(shown, currency)}
-                className="hidden rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft sm:block dark:ring-white/15"
+                className="hidden rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-line transition hover:ring-brand sm:block dark:ring-white/15"
               >
                 Download CSV
               </button>
@@ -2059,7 +2059,7 @@ function MonthlyTable({
   const span = showChanges ? 4 : 2;
 
   return (
-      <div className="mx-4 mb-4 max-h-[520px] overflow-auto rounded-lg bg-background ring-1 ring-line">
+      <div className="mx-4 mb-4 max-h-[520px] overflow-auto">
         <table
           className={`border-collapse whitespace-nowrap max-sm:text-[12px] sm:text-sm ${!showChanges ? "w-full table-fixed" : ""}`}
           style={!showChanges ? { minWidth: NW_TABLE_MIN_WIDTH } : undefined}
@@ -2071,10 +2071,10 @@ function MonthlyTable({
               ))}
             </colgroup>
           ) : null}
-          <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
+          <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
             {/* Grouped metric names, centered over their columns */}
             <tr className="max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-muted">
-              <th className="sticky left-0 z-30 bg-brand-soft px-2 pt-1.5 pb-1.5 text-center" rowSpan={2}>
+              <th className="sticky left-0 z-30 bg-surface px-2 pt-1.5 pb-1.5 text-center" rowSpan={2}>
                 Month
               </th>
               {METRICS.map((m) => (
@@ -2104,7 +2104,7 @@ function MonthlyTable({
           <tbody>
             {shown.map((r) => (
               <tr key={r.month} className="border-b border-line last:border-0">
-                <td className="sticky left-0 z-20 border-b border-line bg-brand-soft px-2 py-1 text-center font-medium">
+                <td className="sticky left-0 z-20 border-b border-line bg-surface px-2 py-1 text-center font-medium">
                   {monthLabel(r.month)}
                   {r.month >= lockedFromMonth ? <span className="block text-[10px] font-normal">so far</span> : null}
                 </td>
@@ -2206,7 +2206,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
 
   // Column groups: label | value | y2y  (Actual NW group has an extra Debt column)
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-line">
       <div className="flex items-center gap-2 px-4 py-2.5">
         <button
           type="button"
@@ -2232,7 +2232,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
         />
       ) : null}
       {!collapsed && (
-        <div className="mx-4 mb-4 overflow-x-auto rounded-lg bg-background ring-1 ring-line">
+        <div className="mx-4 mb-4 overflow-x-auto">
           <table
             className="w-full border-collapse whitespace-nowrap max-sm:text-[12px] table-fixed sm:text-sm"
             style={{ minWidth: NW_TABLE_MIN_WIDTH }}
@@ -2243,8 +2243,8 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
               ))}
             </colgroup>
             <thead>
-              <tr className="border-b border-line bg-brand-soft/25 max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">
-                <th rowSpan={2} className="sticky left-0 z-20 border-r border-line bg-brand-soft px-2 py-1 text-center align-middle">
+              <tr className="border-b border-line max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">
+                <th rowSpan={2} className="sticky left-0 z-20 bg-surface px-2 py-1 text-center align-middle">
                   Date
                 </th>
                 <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">
@@ -2275,7 +2275,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
                 const actual = r.p.net;
                 return (
                   <tr key={r.year} className="border-b border-line last:border-0">
-                    <td className="sticky left-0 z-20 border-b border-r border-line bg-brand-soft px-2 py-1 text-center font-bold">
+                    <td className="sticky left-0 z-20 border-b border-line bg-surface px-2 py-1 text-center font-bold">
                       {/* A year that came from the imported history is the one
                           kind of row nothing on this page could correct: the
                           balances grid only covers months with per-account
@@ -2357,7 +2357,7 @@ function HistoryMonthEditor({
   const bankCents = displayToCents(nwWithoutInvest) - point.savings;
 
   const field =
-    "w-full rounded-md bg-background px-2 py-1.5 text-center text-sm font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+    "w-full rounded-md bg-surface px-2 py-1.5 text-center text-sm font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
   const label = "mb-0.5 block text-center text-[10px] font-semibold uppercase tracking-wide text-foreground";
 
   return (
@@ -2480,7 +2480,7 @@ function AddPastYear({ currency }: { currency: string }) {
         min={1990}
         max={new Date().getFullYear() - 1}
         required
-        className="w-20 rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-20 rounded-md bg-surface px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
       <span className="text-xs text-muted">Net worth</span>
       <div className="flex items-center gap-0.5">
@@ -2492,7 +2492,7 @@ function AddPastYear({ currency }: { currency: string }) {
           inputMode="decimal"
           placeholder="0.00"
           required
-          className="w-28 rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-28 rounded-md bg-surface px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       </div>
       <button

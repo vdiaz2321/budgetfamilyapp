@@ -208,7 +208,7 @@ export default async function NetworthPage() {
     // Retirement income that switches on and off by year (VA, SS, a job…).
     supabase
       .from("retirement_income_lines")
-      .select("id, name, kind, monthly_cents, start_year, start_month, end_year, end_month, raise_pct, annual_cents, pia_cents, taxable")
+      .select("id, name, kind, monthly_cents, start_year, start_month, end_year, end_month, raise_pct, annual_cents, pia_cents, taxable, owner, survivor_pct, fers_start_early")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("created_at"),
@@ -1264,6 +1264,9 @@ export default async function NetworthPage() {
           raisePct: l.raise_pct == null ? null : Number(l.raise_pct),
           piaCents: l.pia_cents == null ? null : Number(l.pia_cents),
           taxable: l.taxable,
+          owner: l.owner === "spouse" ? ("spouse" as const) : ("self" as const),
+          survivorPct: [25, 50].includes(Number(l.survivor_pct)) ? (Number(l.survivor_pct) as 25 | 50) : (0 as const),
+          fersStartEarly: !!l.fers_start_early,
         })),
       }}
       fiMeasured={{

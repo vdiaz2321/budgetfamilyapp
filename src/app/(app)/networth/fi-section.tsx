@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { ModalShell } from "@/components/modal-shell";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { ModalShell, useCloseOnEscape } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, displayToCents, formatMoney, formatMoneyWhole } from "@/lib/money";
 import {
@@ -58,6 +58,7 @@ import {
 import type { GroupInputs } from "@/lib/account-groups-load";
 import { PctBox } from "@/components/pct-box";
 import { applySsRecord, recordDeathPia, statementBenefitCents, type SsRecord } from "@/lib/ssa";
+import { applyFers, estimateFers, fersMraMonths, mraLabel, type FersEstimate } from "@/lib/fers";
 import { SsRecordSection } from "./ss-record";
 
 export type FiPlan = {
@@ -265,12 +266,16 @@ export function FiSection({
   // and a spouse without a record of her own gets the spousal benefit.
   const modelLines = useMemo(
     () =>
-      applySsRecord(plan.incomeLines, plan.ssRecord, {
-        birthYear: plan.birthYear,
-        spouseBirthYear: plan.spouseBirthYear,
-        spouseClaimAge: plan.spouseSsClaimAge,
-        thisYear,
-      }),
+      // A GS career becomes the pension it pays (lib/fers).
+      applyFers(
+        applySsRecord(plan.incomeLines, plan.ssRecord, {
+          birthYear: plan.birthYear,
+          spouseBirthYear: plan.spouseBirthYear,
+          spouseClaimAge: plan.spouseSsClaimAge,
+          thisYear,
+        }),
+        { birthYear: plan.birthYear, spouseBirthYear: plan.spouseBirthYear },
+      ),
     [plan.incomeLines, plan.ssRecord, plan.birthYear, plan.spouseBirthYear, plan.spouseSsClaimAge, thisYear],
   );
   // Income is gross: taxes are budgeted as spending.
@@ -632,7 +637,7 @@ export function FiSection({
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div className="flex flex-col gap-3">
             {retireIncome ? (
-              <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+              <div className="rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
                 {/* A year picker in the title, like the survivor card's. */}
                 <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-lg">
                   Income in
@@ -716,7 +721,7 @@ export function FiSection({
               </div>
             ) : null}
 
-            <div className="flex-1 rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+            <div className="flex-1 rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
               <p className="text-center text-sm font-bold sm:text-lg">Investments</p>
               <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
                 {mile ? (
@@ -788,7 +793,7 @@ export function FiSection({
 
             {/* What-if: the same plan with Victor's income gone from the
                 year picked. */}
-            <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+            <div className="rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
               {/* Title and the remarry pick share one line, so this card is
                   no taller than the two beside it (Victor, 2026-10-25). */}
               <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
@@ -1018,7 +1023,7 @@ export function FiSection({
                 className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 transition ${
                   chartView === v
                     ? "bg-sky-100 text-foreground ring-sky-400 dark:bg-sky-900/50"
-                    : "bg-surface text-foreground ring-line hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+                    : "bg-surface text-foreground ring-line hover:ring-brand"
                 }`}
               >
                 {label}
@@ -1043,7 +1048,7 @@ export function FiSection({
                     ? pct == null
                       ? "bg-sky-100 text-foreground ring-sky-400 dark:bg-sky-900/50"
                       : "bg-negative/15 text-foreground ring-negative/30"
-                    : "bg-surface text-foreground ring-line hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+                    : "bg-surface text-foreground ring-line hover:ring-brand"
                 }`}
               >
                 {pct == null ? "Off" : `−${pct}%`}
@@ -1450,7 +1455,7 @@ function FiChart({
           come from the NW Projections grid — the same figures that table
           shows, so this answers the question without the scroll. */}
       {selected ? (
-        <div className="mt-2 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line">
+        <div className="mt-2 rounded-lg bg-surface px-3 py-2 text-center ring-1 ring-line">
           <p className="text-sm font-bold">
             {selected.year}
             {birthYear ? ` · age ${selected.year - birthYear}` : ""}
@@ -1600,7 +1605,9 @@ function ValueRow({
   bold?: boolean;
 }) {
   return (
-    <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "font-semibold" : ""}`}>
+    // A bold line is the list's sum: the page's one tint marks it
+    // (Victor, 2026-10-25).
+    <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "-mx-2 rounded-md bg-sky-50 px-2 font-bold dark:bg-sky-950/40" : ""}`}>
       <span className="min-w-0">
         {label}
         {note ? <span className="block text-xs font-normal text-foreground sm:text-sm">{note}</span> : null}
@@ -1639,6 +1646,12 @@ type LineDraft = {
   /** What `monthly` is typed per: a month or a year. */
   per: "mo" | "yr";
   taxable: boolean;
+  /** GS pension only: whose career, the survivor share ("0" / "25" / "50"),
+   *  and an early, reduced start. Its start/end are the GS job's, and
+   *  `monthly` the high-3 per year. */
+  owner: "self" | "spouse";
+  survivorPct: "0" | "25" | "50";
+  startEarly: boolean;
 };
 
 /** A health or dental & vision plan row as typed. */
@@ -1703,6 +1716,7 @@ const DEFAULT_LINE_NAME: Record<IncomeLineKind, string> = {
   pay: "Pay",
   va: "VA disability",
   social_security: "Social Security",
+  fers: "GS pension",
   job: "Add'l Job",
   spouse: "Spouse income",
   other: "Other income",
@@ -1740,20 +1754,17 @@ function PlanModal({
   const [error, setError] = useState<string | null>(null);
   // Save keeps the popup open (Victor, 2026-10-16); the button says Saved for a moment instead.
   const [justSaved, setJustSaved] = useState(false);
-  // Every section opens collapsed — the header and its footnote only — so
-  // the popup isn't a wall of numbers (Victor, 2026-10-16). Collapsed fields
-  // stay in the form, hidden, so Save still sends them.
-  const [openSections, setOpenSections] = useState<Set<string>>(
-    () => new Set(focus === "sbp" ? ["military"] : focus === "income" ? ["income"] : []),
+  // The popup lists the section headers only; clicking one opens that
+  // section in its own popup on top (Victor, 2026-10-25). Closed sections'
+  // fields stay in the form, hidden, so Save still sends them.
+  const [openSection, setOpenSection] = useState<string | null>(
+    focus === "sbp" ? "military" : focus === "income" ? "income" : null,
   );
-  const isOpen = (id: string) => openSections.has(id);
-  const toggleSection = (id: string) =>
-    setOpenSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const isOpen = (id: string) => openSection === id;
+  const toggleSection = (id: string) => setOpenSection((prev) => (prev === id ? null : id));
+  const closeSection = () => setOpenSection(null);
+  // The Social Security popup's header row its toolbar portals into.
+  const [ssToolbar, setSsToolbar] = useState<HTMLElement | null>(null);
 
   // The retired-pay inputs are live so the estimate under them updates as
   // they're typed.
@@ -1899,6 +1910,9 @@ function PlanModal({
   const infoLink = "whitespace-nowrap font-semibold underline underline-offset-2";
 
   const toYear = (v: string) => (/^\d{4}$/.test(v.trim()) ? Number(v) : null);
+  // Retired from active duty with retired pay: that decides what the GS
+  // pension explainer says about the military years (Victor, 2026-10-25).
+  const hasMilitaryRetirement = toYear(retireYear) != null && toYear(serviceStart) != null;
   const retireMonthNum = retireMonth ? Number(retireMonth) : null;
   // The year TRICARE For Life starts — where a health plan's blank end lands.
   // Medicare (and with it TFL) starts at 65, so there's no age to type.
@@ -1983,6 +1997,9 @@ function PlanModal({
       raisePct: l.raisePct ? String(l.raisePct) : "",
       pia: l.piaCents ? centsToDisplay(l.piaCents).replace(/\.00$/, "") : "",
       taxable: l.taxable,
+      owner: l.owner ?? "self",
+      survivorPct: String(l.survivorPct ?? 0) as LineDraft["survivorPct"],
+      startEarly: !!l.fersStartEarly,
     }));
     // Opened from a year's Add income with no Pay yet: start one at this
     // year's pay — per year, the way pay is thought of — ending when you stop
@@ -2002,6 +2019,9 @@ function PlanModal({
         raisePct: "",
         pia: "",
         taxable: true,
+        owner: "self",
+        survivorPct: "0",
+        startEarly: false,
       });
     }
     return byLineDates(saved, thisYear);
@@ -2191,33 +2211,45 @@ function PlanModal({
   const updateLine = (key: string, patch: Partial<LineDraft>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const [withdrawStartDraft, setWithdrawStartDraft] = useState(plan.withdrawStartYear?.toString() ?? "");
-  const addLine = (kind: IncomeLineKind) =>
+  // A line added from the header's menu lands at the bottom: bring it into view.
+  const [addedKey, setAddedKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (addedKey) document.querySelector(`[data-line-key="${addedKey}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [addedKey]);
+  const addLine = (kind: IncomeLineKind, owner: "self" | "spouse" = "self") => {
+    const key = `new-${Date.now()}`;
+    setAddedKey(key);
     setLines((prev) => [
       ...prev,
       {
-        key: `new-${Date.now()}`,
+        key,
         id: null,
         // Blank: the type's name shows as a hint and is saved if left blank.
         name: "",
         kind,
         monthly: "",
-        // Pay runs from now; a blank end never stops.
-        ...(kind === "pay"
+        // Pay runs from now; a blank end never stops. A GS career's dates
+        // are typed from scratch.
+        ...(kind === "pay" || kind === "fers"
           ? { startYear: "", startMonth: "", endYear: "", endMonth: "" }
           : // Retired pay's own start month, so VA lines up with it by default.
             { startYear: retireYear, startMonth: retireMonth, endYear: "", endMonth: "" }),
         raisePct: "",
         pia: "",
         // Pay is thought of per year; benefits are paid and quoted per month.
-        per: kind === "pay" || kind === "job" || kind === "spouse" ? "yr" : "mo",
+        per: kind === "pay" || kind === "job" || kind === "spouse" || kind === "fers" ? "yr" : "mo",
         taxable: kind !== "va",
+        owner,
+        survivorPct: "0",
+        startEarly: false,
       },
     ]);
+  };
 
   // onSubmit, not <form action>: a rejected save must keep what was typed.
-  function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
+  // Everything Save sends: the form's own fields plus the rows held in state.
+  function planFormData(form: HTMLFormElement): FormData {
+    const formData = new FormData(form);
     const planJson = <K extends string>(rows: PlanDraft<K>[]) =>
       JSON.stringify(
         rows.map((r) => ({
@@ -2247,7 +2279,8 @@ function PlanModal({
         lines.map((l) => ({
           id: l.id,
           // A cleared name falls back to the type's.
-          name: l.name.trim() || DEFAULT_LINE_NAME[l.kind],
+          // A GS pension is named for whose it is.
+          name: l.kind === "fers" ? (l.owner === "spouse" ? "Spouse's GS pension" : "GS pension") : l.name.trim() || DEFAULT_LINE_NAME[l.kind],
           kind: l.kind,
           // A record's line saves the amount worked out from it.
           monthly: fromRecord(l) ? (fromRecord(l)!.monthly / 100).toFixed(2) : l.monthly,
@@ -2257,8 +2290,11 @@ function PlanModal({
           endMonth: l.endMonth,
           raisePct: l.raisePct,
           piaCents: fromRecord(l) ? (fromRecord(l)!.pia / 100).toFixed(2) : l.kind === "social_security" ? l.pia : "",
-          per: fromRecord(l) ? "mo" : l.per,
+          per: fromRecord(l) ? "mo" : l.kind === "fers" ? "yr" : l.per,
           taxable: l.taxable,
+          owner: l.owner,
+          survivorPct: l.survivorPct,
+          startEarly: l.startEarly,
         })),
       ),
     );
@@ -2289,6 +2325,35 @@ function PlanModal({
       "accountGroups",
       JSON.stringify(GROUP_KINDS.map((kind) => ({ kind, ...groupDrafts[kind] }))),
     );
+    return formData;
+  }
+
+  // Save shows only once something differs from what's saved (Victor,
+  // 2026-10-25): every render compares what Save would send with the
+  // snapshot taken on opening and after each save. Typing in a field that
+  // isn't held in state re-renders through the form's onChange.
+  const formRef = useRef<HTMLFormElement>(null);
+  const savedSnapshot = useRef<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [, setTyped] = useState(0);
+  const snapshotOf = (form: HTMLFormElement) =>
+    JSON.stringify([...planFormData(form).entries()].map(([k, v]) => [k, typeof v === "string" ? v : v.name]));
+  // No deps on purpose: any render may have changed what Save would send,
+  // and setDirty with an unchanged value doesn't re-render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const now = snapshotOf(form);
+    if (savedSnapshot.current == null) savedSnapshot.current = now;
+    setDirty(now !== savedSnapshot.current);
+  });
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const formData = planFormData(form);
+    const sent = snapshotOf(form);
     start(async () => {
       const result = await saveRetirementPlan(formData);
       if (result?.error) setError(result.error);
@@ -2296,6 +2361,8 @@ function PlanModal({
         setError(null);
         // No router.refresh(): saveRetirementPlan's revalidatePath already
         // returns the re-rendered page — the refresh was a second ~2s load.
+        savedSnapshot.current = sent;
+        setDirty(false);
         setJustSaved(true);
         window.setTimeout(() => setJustSaved(false), 2000);
       }
@@ -2307,6 +2374,21 @@ function PlanModal({
   const closeButtonClass =
     "shrink-0 rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/30 transition hover:bg-negative/20";
 
+  // Outside the <form> (or in a section popup inside it), so it points at
+  // the form by id.
+  // Hidden while nothing has changed; "Saved" stays a moment after a save.
+  const saveButton =
+    dirty || pending || justSaved ? (
+      <button
+        type="submit"
+        form="fi-plan-form"
+        disabled={pending || !dirty}
+        className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+      >
+        {pending ? "Saving…" : justSaved && !dirty ? "Saved" : "Save"}
+      </button>
+    ) : null;
+
   return (
     <ModalShell
       title={
@@ -2315,15 +2397,7 @@ function PlanModal({
         // 1px ring inside it instead of clipped at the edges.
         <span className="flex min-w-0 max-w-[calc(100vw-2.5rem)] items-center gap-2 py-0.5 pr-0.5 text-base sm:max-w-none sm:gap-3 sm:text-lg">
           <span className="min-w-0 whitespace-normal leading-tight sm:truncate">Edit Future Projections</span>
-          {/* Outside the <form>, so it points at it by id. */}
-          <button
-            type="submit"
-            form="fi-plan-form"
-            disabled={pending}
-            className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
-          >
-            {pending ? "Saving…" : justSaved ? "Saved" : "Save"}
-          </button>
+          {saveButton}
           {/* A worded Close in place of the X, beside Save rather than at the
               far edge (Victor, 2026-10-15). */}
           <button type="button" onClick={onClose} className={closeButtonClass}>
@@ -2342,19 +2416,39 @@ function PlanModal({
     >
       <form
         id="fi-plan-form"
+        ref={formRef}
         onSubmit={submit}
-        className="grid grid-cols-1 gap-x-8 gap-y-4 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
+        onChange={() => setTyped((n) => n + 1)}
+        className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2 lg:grid-cols-3"
       >
-        {/* Also up here, so a rejected save from the top Save is seen. */}
+        {/* A rejected save shows here, under the header's Save. */}
         {error ? <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p> : null}
-        <SectionHead title="General Profile Data" open={isOpen("info")} onToggle={() => toggleSection("info")} />
+        <SectionHead title="General Profile Data" onToggle={() => toggleSection("info")} />
         {/* You and your spouse side by side on one row on a wide screen,
             each under their own heading so the labels can stay short
             (Victor, 2026-10-20). A blank spouse birth year hides Spouse Age. */}
-        <div className={isOpen("info") ? "grid grid-cols-1 gap-y-4 sm:col-span-2" : "hidden"}>
+        <SectionPopup
+          open={isOpen("info")}
+          title="General Profile Data"
+          onClose={closeSection}
+          actions={saveButton}
+          error={error}
+          // In the header with the other add buttons (Victor, 2026-10-25).
+          extra={
+            <button
+              type="button"
+              onClick={() => setChildDrafts((rows) => [...rows, { key: `child-new-${Date.now()}`, birthYear: "", college: false }])}
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-line transition hover:ring-brand"
+            >
+              + Add child
+            </button>
+          }
+        >
+        {/* Spans both columns of the popup body, as it did in the plan popup. */}
+        <div className="grid grid-cols-1 gap-y-4 sm:col-span-2">
         <div className="grid grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-2">
         <div className="rounded-lg px-3 pb-3 pt-2 ring-1 ring-line">
-        <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line bg-sky-50 px-3 py-1.5 text-center text-sm font-bold sm:text-base dark:bg-sky-950/40">You</p>
+        <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line px-3 py-1.5 text-center text-sm font-bold sm:text-base">You</p>
         <div className="grid grid-cols-1 items-end gap-x-2 gap-y-4 sm:grid-cols-3">
         <Field center label={<>Birth <br className="max-sm:hidden" /> year</>}>
           <input name="birthYear" inputMode="numeric" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} className={`${inputClass} sm:!w-20`} />
@@ -2378,7 +2472,7 @@ function PlanModal({
         </div>
         </div>
         <div className="rounded-lg px-3 pb-3 pt-2 ring-1 ring-line">
-        <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line bg-sky-50 px-3 py-1.5 text-center text-sm font-bold sm:text-base dark:bg-sky-950/40">Spouse</p>
+        <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line px-3 py-1.5 text-center text-sm font-bold sm:text-base">Spouse</p>
         <div className="grid grid-cols-1 items-end gap-x-2 gap-y-4 sm:grid-cols-3">
         <Field center label={<>Birth <br className="max-sm:hidden" /> year</>}>
           <input name="spouseBirthYear" inputMode="numeric" defaultValue={plan.spouseBirthYear ?? ""} className={`${inputClass} sm:!w-20`} />
@@ -2400,9 +2494,9 @@ function PlanModal({
         {/* Children: their ages set the survivor benefits — DIC per child,
             SBP and TRICARE age limits (Victor, 2026-10-20). */}
         <div className="rounded-lg px-3 pb-3 pt-2 ring-1 ring-line">
-          <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line bg-sky-50 px-3 py-1.5 text-center text-sm font-bold sm:text-base dark:bg-sky-950/40">Children</p>
-          {/* Every child on one line with + Add child, wrapping when it runs
-              out of room (Victor, 2026-10-20). */}
+          <p className="-mx-3 -mt-2 mb-2 rounded-t-lg border-b border-line px-3 py-1.5 text-center text-sm font-bold sm:text-base">Children</p>
+          {/* Every child on one line, wrapping when it runs out of room
+              (Victor, 2026-10-20). + Add child is in the header. */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {childDrafts.map((c, i) => (
             <div key={c.key} className="inline-flex items-center gap-1.5">
@@ -2413,6 +2507,8 @@ function PlanModal({
                 onChange={(e) => updateChild(c.key, { birthYear: e.target.value })}
                 placeholder="Year"
                 aria-label={`Child ${i + 1} birth year`}
+                // Added from the header: focus it, which scrolls it into view.
+                autoFocus={c.key.startsWith("child-new-")}
                 className={`${inputClass} !w-20`}
               />
               <button
@@ -2425,42 +2521,62 @@ function PlanModal({
               </button>
             </div>
           ))}
-            <button
-              type="button"
-              onClick={() => setChildDrafts((rows) => [...rows, { key: `child-new-${Date.now()}`, birthYear: "", college: false }])}
-              className="shrink-0 rounded-md bg-surface px-2.5 py-1 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 sm:text-sm dark:hover:bg-sky-900/50"
-            >
-              + Add child
-            </button>
+          {childDrafts.length === 0 ? <span className="text-sm text-foreground">None — use + Add child above.</span> : null}
           </div>
         </div>
         </div>
+        </SectionPopup>
 
         <SectionHead
           id="fi-income"
           title="Income"
-          open={isOpen("income")}
+         
           onToggle={() => toggleSection("income")}
-          note={
+        />
+        <SectionPopup
+          open={isOpen("income")}
+          title="Income"
+          onClose={closeSection}
+          actions={saveButton}
+          error={error}
+          extra={
             <>
-              Before tax, at today&rsquo;s rates.{" "}
-              <button type="button" onClick={() => setInfo("income")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
-                How it works
-              </button>
+              {/* In the header beside Close, so its list opens down into
+                  the popup instead of off its bottom edge (Victor,
+                  2026-10-25). Picking a type adds a line, then resets. */}
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) addLine(e.target.value as IncomeLineKind);
+                }}
+                aria-label="Add income"
+                className="cursor-pointer rounded-md bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:ring-brand focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">+ Add income</option>
+                {INCOME_LINE_KINDS.filter((k) => k.value !== "fers").map((k) => (
+                  <option key={k.value} value={k.value}>{k.label}</option>
+                ))}
+              </select>
             </>
           }
-        />
-        <div className={isOpen("income") ? "contents" : "hidden"}>
+          aside={
+            <button type="button" onClick={() => setInfo("income")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
+              How it works
+            </button>
+          }
+        >
         <div className="space-y-2 sm:col-span-2">
-          {lines.map((l) => (
+          {/* The GS pension has its own tile (Victor, 2026-10-25). */}
+          {lines.filter((l) => l.kind !== "fers").map((l) => (
             <div
               key={l.key}
+              data-line-key={l.key}
               // Re-sorted once you leave the row, not while typing a year.
               onBlur={(e) => {
                 if (!e.currentTarget.contains(e.relatedTarget as Node | null))
                   setLines((prev) => byLineDates(prev, thisYear));
               }}
-              className="space-y-2 rounded-lg bg-background p-2 ring-1 ring-line">
+              className="space-y-2 rounded-lg bg-surface p-2 ring-1 ring-line">
               {/* Name and type head the card with Remove at the far end; the
                   fields below are sized to their values, not stretched to
                   fill columns (Victor, 2026-10-22). */}
@@ -2485,13 +2601,13 @@ function PlanModal({
                     value={l.kind}
                     onChange={(e) => {
                       const kind = e.target.value as IncomeLineKind;
-                      updateLine(l.key, { kind, taxable: kind !== "va" });
+                      updateLine(l.key, { kind, taxable: kind !== "va", ...(kind === "fers" ? { per: "yr" as const } : {}) });
                     }}
                     // Wide enough for "Spouse income", the longest type, with
                     // room to spare.
                     className={`${lineInput} sm:w-44`}
                   >
-                    {INCOME_LINE_KINDS.map((k) => (
+                    {INCOME_LINE_KINDS.filter((k) => k.value !== "fers").map((k) => (
                       <option key={k.value} value={k.value}>{k.label}</option>
                     ))}
                   </select>
@@ -2626,33 +2742,18 @@ function PlanModal({
               ) : null}
             </div>
           ))}
-          {/* Picking a type adds a line of that type, then resets. */}
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) addLine(e.target.value as IncomeLineKind);
-            }}
-            aria-label="Add income"
-            className="cursor-pointer rounded-md bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 focus:outline-none focus:ring-2 focus:ring-brand dark:hover:bg-sky-950/40"
-          >
-            <option value="">+ Add income</option>
-            {INCOME_LINE_KINDS.map((k) => (
-              <option key={k.value} value={k.value}>{k.label}</option>
-            ))}
-          </select>
         </div>
-        </div>
+        </SectionPopup>
 
         {/* Social Security worked out from the SSA earnings record instead
             of one typed amount (Victor, 2026-10-22). */}
         <SectionHead
           id="fi-ss"
           title="Social Security record"
-          note="Your SSA earnings, year by year."
-          open={isOpen("ss")}
+         
           onToggle={() => toggleSection("ss")}
         />
-        <div className={isOpen("ss") ? "contents" : "hidden"}>
+        <SectionPopup open={isOpen("ss")} title="Social Security record" onClose={closeSection} actions={saveButton} error={error} toolbarRef={setSsToolbar}>
           <SsRecordSection
             record={plan.ssRecord}
             birthYear={Number(birthYear) || plan.birthYear}
@@ -2661,11 +2762,13 @@ function PlanModal({
             thisYear={thisYear}
             startYear={toYear(lines.find((l) => l.key === recordKey)?.startYear ?? "")}
             currency={currency}
+            toolbarTarget={ssToolbar}
+            onPlanChange={() => setTyped((n) => n + 1)}
           />
-        </div>
+        </SectionPopup>
 
-        <SectionHead title="Return, Withdrawal, & Inflation Rates" open={isOpen("rates")} onToggle={() => toggleSection("rates")} />
-        <div className={isOpen("rates") ? "contents" : "hidden"}>
+        <SectionHead title="Return, Withdrawal, & Inflation Rates" onToggle={() => toggleSection("rates")} />
+        <SectionPopup open={isOpen("rates")} title="Return, Withdrawal, & Inflation Rates" onClose={closeSection} actions={saveButton} error={error}>
         <input type="hidden" name="investmentReturnPct" value={investDefault} />
         {/* Each category's own rate, side by side, Savings APY first;
             the year popup can still change one year. */}
@@ -2688,7 +2791,7 @@ function PlanModal({
                 className={`shrink-0 rounded-full px-2.5 py-1 max-sm:text-[12px] sm:text-sm font-semibold transition ${
                   rateAccountsOpen
                     ? "bg-negative/10 text-negative ring-1 ring-negative/30 hover:bg-negative/20"
-                    : "bg-sky-100 text-foreground hover:bg-sky-200 dark:bg-sky-900/50"
+                    : "text-foreground ring-1 ring-line hover:ring-brand"
                 }`}
               >
                 {rateAccountsOpen ? "Hide Accounts" : "Show Accounts"}
@@ -2776,10 +2879,10 @@ function PlanModal({
           ) : null}
         </div>
 
-        </div>
+        </SectionPopup>
 
-        <SectionHead title="Military retirement" note="Optional. Leave blank if none." open={isOpen("military")} onToggle={() => toggleSection("military")} />
-        <div className={isOpen("military") ? "contents" : "hidden"}>
+        <SectionHead title="Military retirement income" onToggle={() => toggleSection("military")} />
+        <SectionPopup open={isOpen("military")} title="Military retirement income" onClose={closeSection} actions={saveButton} error={error}>
         <Field label="Month & Year expected to retire" hint="Active-duty pay stops and retired pay starts that month.">
           <MonthYear
             monthName="targetRetireMonth"
@@ -2926,7 +3029,7 @@ function PlanModal({
           </span>
         </div>
         {estimate ? (
-          <p className="rounded-md bg-background px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
+          <p className="rounded-md bg-surface px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
             <span className="block">
               <span className="font-semibold">High-3: {formatMoney(high3Cents ?? 0, currency)}/mo</span>, the average of
               those 36 months.
@@ -2941,17 +3044,84 @@ function PlanModal({
             </span>
           </p>
         ) : null}
-        </div>
+        </SectionPopup>
+
+        {/* The GS pension on its own tile, with how it works and OPM's pages
+            right there: it's complicated and few people know it (Victor,
+            2026-10-25). Its lines save with the income lines. */}
+        <SectionHead title="GS retirement pension (FERS)" onToggle={() => toggleSection("fers")} />
+        <SectionPopup
+          open={isOpen("fers")}
+          title="GS retirement pension (FERS)"
+          onClose={closeSection}
+          actions={saveButton}
+          error={error}
+          // A menu like Income's + Add income, at the header's right — two
+          // buttons wrapped under this long title. One pension per person.
+          aside={
+            lines.some((l) => l.kind === "fers" && l.owner === "self") &&
+            lines.some((l) => l.kind === "fers" && l.owner === "spouse") ? null : (
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) addLine("fers", e.target.value as "self" | "spouse");
+                }}
+                aria-label="Add GS pension"
+                className="cursor-pointer rounded-md bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:ring-brand focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">+ Add pension</option>
+                {!lines.some((l) => l.kind === "fers" && l.owner === "self") ? <option value="self">Yours</option> : null}
+                {!lines.some((l) => l.kind === "fers" && l.owner === "spouse") ? <option value="spouse">Spouse&rsquo;s</option> : null}
+              </select>
+            )
+          }
+        >
+          {/* The pensions first, how it works under them (Victor, 2026-10-25). */}
+          <div className="space-y-3 sm:col-span-2">
+            {!lines.some((l) => l.kind === "fers") ? (
+              <p className="text-sm text-foreground">No GS pension yet — pick + Add pension above.</p>
+            ) : null}
+            {lines.filter((l) => l.kind === "fers").map((l) => (
+              <div key={l.key} data-line-key={l.key} className="space-y-2 rounded-xl bg-surface p-3 ring-1 ring-line">
+                <div className="flex items-center gap-3">
+                  <p className="text-sm font-bold uppercase tracking-wide sm:text-base">
+                    {l.owner === "spouse" ? "Spouse's GS pension" : "Your GS pension"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
+                    className="ml-auto h-[34px] shrink-0 rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <FersLineFields
+                  line={l}
+                  onChange={(patch) => updateLine(l.key, patch)}
+                  birthYear={toYear(birthYear)}
+                  spouseBirthYear={plan.spouseBirthYear}
+                  hasMilitaryRetirement={hasMilitaryRetirement}
+                  ssKnown={lines.some((x) => x.kind === "social_security" && (!!fromRecord(x) || !!x.pia.trim()))}
+                  currency={currency}
+                />
+              </div>
+            ))}
+          </div>
+          <FersGuide
+            hasMilitaryRetirement={hasMilitaryRetirement}
+            birthYear={toYear(birthYear)}
+            spouseBirthYear={plan.spouseBirthYear}
+          />
+        </SectionPopup>
 
         {/* What the family gets on a death on active duty (Victor,
             2026-10-20): SGLI is the member's choice; the rest is automatic. */}
         <SectionHead
           title="Military survivor benefits"
-          note="Paid if you die on active duty."
-          open={isOpen("survivor")}
+         
           onToggle={() => toggleSection("survivor")}
         />
-        <div className={isOpen("survivor") ? "contents" : "hidden"}>
+        <SectionPopup open={isOpen("survivor")} title="Military survivor benefits" onClose={closeSection} actions={saveButton} error={error}>
         <Field
           label="SGLI coverage"
           hint={
@@ -3010,7 +3180,7 @@ function PlanModal({
             <span className="block text-xs text-foreground sm:text-sm">Keeps SBP to 22, DIC and TRICARE to 23.</span>
           </div>
         ) : null}
-        <p className="rounded-md bg-background px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
+        <p className="rounded-md bg-surface px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
           <span className="block">
             <span className="font-semibold">Death gratuity:</span> $100,000 lump sum, tax-free.
           </span>
@@ -3022,17 +3192,38 @@ function PlanModal({
             <span className="font-semibold">DIC (VA):</span> $1,699/mo, +$421 per child under 18, +$359 the first 2 years.
           </span>
         </p>
-        </div>
+        </SectionPopup>
 
         {colaStarts.military != null || colaStarts.va != null || colaStarts.socialSecurity != null ? (
           <>
             <SectionHead
               title="COLA (yearly raise)"
-              open={isOpen("cola")}
+             
               onToggle={() => toggleSection("cola")}
-              note={<>Raises retired pay, VA and Social Security every January.</>}
             />
-            <div className={isOpen("cola") ? "contents" : "hidden"}>
+            <SectionPopup
+              open={isOpen("cola")}
+              title="COLA (yearly raise)"
+              onClose={closeSection}
+              actions={saveButton}
+              error={error}
+              // In the header with the other add buttons (Victor, 2026-10-25);
+              // only once some income gets a COLA, as before.
+              extra={
+                firstCola != null ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const y = nextColaYear();
+                      setColaRows((prev) => [...prev, { key: `cola-new-${Date.now()}`, year: String(y), pct: "" }]);
+                    }}
+                    className="rounded-md px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-line transition hover:ring-brand"
+                  >
+                    + Change a year
+                  </button>
+                ) : null
+              }
+            >
             {/* Two columns on desktop: which incomes rise and any year the COLA
                 differs on the left; the yearly rate on the right. */}
             <div className="space-y-2">
@@ -3076,6 +3267,8 @@ function PlanModal({
                         onChange={(e) => setColaRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, pct: e.target.value } : x)))}
                         placeholder={colaPct}
                         aria-label={`COLA ${r.year} %`}
+                        // Added from the header: focus it, which scrolls it into view.
+                        autoFocus={r.key.startsWith("cola-new-")}
                         className={`${lineInput} pr-6 text-center tabular-nums`}
                       />
                       <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-foreground">%</span>
@@ -3089,19 +3282,9 @@ function PlanModal({
                     </button>
                   </div>
                 ))}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const y = nextColaYear();
-                      setColaRows((prev) => [...prev, { key: `cola-new-${Date.now()}`, year: String(y), pct: "" }]);
-                    }}
-                    className="shrink-0 rounded-md bg-surface px-2.5 py-1 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 sm:text-sm dark:hover:bg-sky-900/50"
-                  >
-                    + Change a year
-                  </button>
-                  <span className="min-w-0 text-xs sm:flex-1 sm:text-sm text-foreground">Replaces Every year COLA (%/yr) for that year.</span>
-                </div>
+                <p className="text-xs sm:text-sm text-foreground">
+                  {colaRows.length === 0 ? "None — use + Change a year above. " : ""}A year here replaces Every year COLA (%/yr) for that year.
+                </p>
               </div>
             )}
             </div>
@@ -3111,7 +3294,7 @@ function PlanModal({
               <input name="colaPct" inputMode="decimal" value={colaPct} onChange={(e) => setColaPct(e.target.value)} className={`${inputClass} text-center`} />
             </Field>
             </div>
-            </div>
+            </SectionPopup>
 
           </>
         ) : null}
@@ -3123,8 +3306,32 @@ function PlanModal({
           <input type="hidden" name="colaPct" value={colaPct} />
         ) : null}
 
-        <SectionHead title="Healthcare / Insurance Plan" open={isOpen("health")} onToggle={() => toggleSection("health")} />
-        <div className={isOpen("health") ? "contents" : "hidden"}>
+        <SectionHead title="Healthcare / Insurance Plan" onToggle={() => toggleSection("health")} />
+        <SectionPopup
+          open={isOpen("health")}
+          title="Healthcare / Insurance Plan"
+          onClose={closeSection}
+          actions={saveButton}
+          error={error}
+          // In the header like Income's + Add income (Victor, 2026-10-25).
+          aside={
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value === "health")
+                  setHealthPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "private", amount: "", per: "mo", ...newPlanDates() }]);
+                else if (e.target.value === "dental")
+                  setDentalPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "fedvip_vision", amount: "", per: "mo", ...newPlanDates() }]);
+              }}
+              aria-label="Add a plan"
+              className="cursor-pointer rounded-md bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:ring-brand focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="">+ Add plan</option>
+              <option value="health">Health plan</option>
+              <option value="dental">Dental or vision plan</option>
+            </select>
+          }
+        >
         {/* One row per plan; two can run side by side (a TRICARE plan plus a
             private supplement). All of them stop when TFL starts. */}
         <div className="space-y-2 sm:col-span-2">
@@ -3133,15 +3340,6 @@ function PlanModal({
           ) : null}
           {healthPlans.filter((r) => !planEnded(r)).map(healthRow)}
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                setHealthPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "private", amount: "", per: "mo", ...newPlanDates() }])
-              }
-              className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/30"
-            >
-              + Add health plan
-            </button>
             <ArchiveToggle count={healthPlans.filter(planEnded).length} open={archiveOpen.has("health")} onToggle={() => toggleArchive("health")} />
           </div>
           {archiveOpen.has("health") ? healthPlans.filter(planEnded).map(healthRow) : null}
@@ -3155,15 +3353,6 @@ function PlanModal({
           ) : null}
           {dentalPlans.filter((r) => !planEnded(r)).map(dentalRow)}
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                setDentalPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "fedvip_vision", amount: "", per: "mo", ...newPlanDates() }])
-              }
-              className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/30"
-            >
-              + Add dental or vision plan
-            </button>
             <ArchiveToggle count={dentalPlans.filter(planEnded).length} open={archiveOpen.has("dental")} onToggle={() => toggleArchive("dental")} />
           </div>
           {archiveOpen.has("dental") ? dentalPlans.filter(planEnded).map(dentalRow) : null}
@@ -3200,28 +3389,42 @@ function PlanModal({
             <OtherWayCost amount={tfl.amount} per={tfl.per} currency={currency} />
           </span>
         </Field>
-        </div>
+        </SectionPopup>
 
         <SectionHead
           title="Rental properties"
-          open={isOpen("rentals")}
+         
           onToggle={() => toggleSection("rentals")}
-          note={
-            <>
-              Prices, rent and costs at today&rsquo;s rates.{" "}
-              <button type="button" onClick={() => setInfo("rentals")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
-                How it works
-              </button>
-            </>
-          }
         />
-        <div className={isOpen("rentals") ? "contents" : "hidden"}>
+        <SectionPopup
+          open={isOpen("rentals")}
+          title="Rental properties"
+          onClose={closeSection}
+          actions={saveButton}
+          error={error}
+          // Rentals come only from Accounts, so its add button opens the
+          // Accounts page's Add property on a Rental property (Victor,
+          // 2026-10-25).
+          extra={
+            <a
+              href="/accounts?add=rental"
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-line transition hover:ring-brand"
+            >
+              + Add property
+            </a>
+          }
+          aside={
+            <button type="button" onClick={() => setInfo("rentals")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
+              How it works
+            </button>
+          }
+        >
         <div className="space-y-2 sm:col-span-2">
           {/* Only properties on the Accounts page; a planned purchase was
               too much guessing (Victor, 2026-10-25). */}
           {rentalDrafts.filter((r) => r.propertyAccountId).length === 0 ? (
             <p className="text-center text-xs sm:text-sm text-foreground">
-              No rentals yet. Add a property on Accounts with Type: Rental property and it shows here.
+              No rentals yet. + Add property opens Accounts with Type: Rental property; it shows here once added.
             </p>
           ) : null}
           {rentalDrafts.filter((r) => r.propertyAccountId).map((r) => {
@@ -3231,7 +3434,7 @@ function PlanModal({
               // Laid out like an income card: name and the linked property
               // head it; the numbers sit centred in one row, rent and costs
               // under them (Victor, 2026-10-25).
-              <div key={r.key} className="space-y-2 rounded-lg bg-background p-2 ring-1 ring-line">
+              <div key={r.key} className="space-y-2 rounded-lg bg-surface p-2 ring-1 ring-line">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                   <label className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
                     <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Name</span>
@@ -3294,24 +3497,11 @@ function PlanModal({
             );
           })}
         </div>
-        </div>
+        </SectionPopup>
 
-        <div className="sm:col-span-full flex items-center justify-start gap-2 border-t border-line pt-3">
-          <button
-            type="submit"
-            disabled={pending}
-            className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
-          >
-            {pending ? "Saving…" : justSaved ? "Saved" : "Save"}
-          </button>
-          <button type="button" onClick={onClose} className={closeButtonClass}>
-            Close
-          </button>
-        </div>
-        {error ? (
-          <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p>
-        ) : null}
       </form>
+      {/* Opened from inside a section popup (z-60), so they stack above it. */}
+      <div className="relative z-[70]">
       {tflInfoOpen ? <TflInfo tflYear={tflYear} onClose={() => setTflInfoOpen(false)} /> : null}
       {info === "income" ? (
         <InfoPopup
@@ -3333,8 +3523,7 @@ function PlanModal({
           items={[
             ["Prices", "Price, rent and costs at today's rates; they rise with inflation each year."],
             ["Counts as", "Net rent is income. Equity (value − loan) is net worth."],
-            ["Planning to buy", "Fill it in here."],
-            ["Already own one", "Add it on Accounts under Property, then pick it here."],
+            ["Adding one", "+ Add property opens Accounts on a Rental property; it shows here once added."],
           ]}
         />
       ) : null}
@@ -3353,6 +3542,7 @@ function PlanModal({
           onClose={() => setColaWhyOpen(false)}
         />
       ) : null}
+      </div>
     </ModalShell>
   );
 }
@@ -3383,63 +3573,174 @@ function PayoutSelect({
   );
 }
 
-/** A popup section's header: tap to open or fold what's under it. */
+// Each tile's colour and icon, from the --viz-* palette (no purple, orange
+// or grey) — colour that tells the sections apart at a glance (Victor,
+// 2026-10-25). Keyed by the tile's title.
+const SECTION_TILE: Record<string, { color: string; icon: React.ReactNode }> = {
+  "General Profile Data": {
+    color: "var(--viz-savings)",
+    icon: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></>,
+  },
+  Income: {
+    color: "var(--positive)",
+    icon: <path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
+  },
+  "Social Security record": {
+    color: "var(--viz-income)",
+    icon: <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" />,
+  },
+  "Return, Withdrawal, & Inflation Rates": {
+    color: "var(--viz-bills)",
+    icon: <><path d="M19 5 5 19" /><circle cx="6.5" cy="6.5" r="2.5" /><circle cx="17.5" cy="17.5" r="2.5" /></>,
+  },
+  "Military retirement income": {
+    color: "var(--viz-income)",
+    icon: <path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" />,
+  },
+  "GS retirement pension (FERS)": {
+    color: "var(--viz-savings)",
+    icon: <><path d="M3 21h18M4 10h16M12 3l8 5H4z" /><path d="M6 10v8M10 10v8M14 10v8M18 10v8" /></>,
+  },
+  "Military survivor benefits": {
+    color: "var(--viz-debt)",
+    icon: <path d="M12 20s-7-4.4-9-8.8A5 5 0 0 1 12 7a5 5 0 0 1 9 4.2C19 15.6 12 20 12 20z" />,
+  },
+  "COLA (yearly raise)": {
+    color: "var(--positive)",
+    icon: <><path d="M3 17l6-6 4 4 8-8" /><path d="M14 7h7v7" /></>,
+  },
+  "Healthcare / Insurance Plan": {
+    color: "var(--viz-expenses)",
+    icon: <path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z" />,
+  },
+  "Rental properties": {
+    color: "var(--viz-bills)",
+    icon: <><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" /></>,
+  },
+};
+
+/** A section's tile in the plan popup's grid: tap to open that section in
+ *  its own popup. Three across on desktop (Victor, 2026-10-25). */
 function SectionHead({
   title,
-  open,
   onToggle,
-  note,
   id,
 }: {
   title: string;
-  open: boolean;
   onToggle: () => void;
-  /** The section's one-line footnote: beside the title on desktop, under it
-   *  on a phone (Victor, 2026-10-16). */
-  note?: React.ReactNode;
   id?: string;
 }) {
+  const tile = SECTION_TILE[title];
   return (
-    <h3
-      id={id}
-      className="sm:col-span-2 flex scroll-mt-2 flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 first:border-t-0 first:pt-0"
-    >
+    <h3 id={id} className="scroll-mt-2">
       <button
         type="button"
         onClick={onToggle}
-        aria-expanded={open}
-        className={`flex items-center gap-2 text-left text-sm font-bold uppercase tracking-wide ${note ? "shrink-0 max-sm:w-full" : "w-full"}`}
+        aria-haspopup="dialog"
+        style={{ "--tile": tile?.color ?? "var(--brand)" } as React.CSSProperties}
+        className="flex h-full w-full items-center gap-3 rounded-xl bg-surface px-4 py-3 text-left text-sm sm:flex-col sm:justify-center sm:gap-2 sm:py-4 sm:text-center font-bold uppercase leading-snug tracking-wide shadow-sm ring-1 ring-line transition hover:-translate-y-0.5 hover:bg-[color-mix(in_srgb,var(--tile)_6%,var(--color-surface))] hover:shadow-md hover:ring-[var(--tile)]"
       >
-        <svg
+        {/* The icon in its colour on a light wash of the same colour. On a
+            phone it sits left of the title, so the list stays short. */}
+        <span
           aria-hidden
-          viewBox="0 0 20 20"
-          className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+          style={{ color: "var(--tile)", backgroundColor: "color-mix(in srgb, var(--tile) 14%, transparent)" }}
         >
-          <path d="M5 7.5 10 12.5 15 7.5" />
-        </svg>
+          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {tile?.icon}
+          </svg>
+        </span>
         {title}
       </button>
-      {/* The rest of the row opens the section too — only the title did, so a
-          click beside it did nothing (Victor, 2026-10-16). A link or button
-          inside the note ("How it works") keeps its own click. */}
-      {note ? (
-        <span
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest("button, a")) return;
-            onToggle();
-          }}
-          className="min-w-0 flex-1 cursor-pointer self-stretch text-xs font-normal text-foreground sm:flex sm:items-center sm:text-sm"
-        >
-          <span>{note}</span>
-        </span>
-      ) : null}
     </h3>
   );
+}
+
+/** One section's fields, shown in a popup over the plan popup while it's
+ *  open. Closed, the same tree stays mounted but hidden — never unmounted —
+ *  so typed values survive and Save still sends every section. */
+function SectionPopup({
+  open,
+  title,
+  onClose,
+  actions,
+  error,
+  toolbarRef,
+  extra,
+  aside,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  actions: React.ReactNode;
+  error: string | null;
+  /** A section's own tools (the SSA record's Import / Remove) get a row
+   *  under the title, in the non-scrolling header. */
+  toolbarRef?: (el: HTMLDivElement | null) => void;
+  /** Beside Close — Income's + Add income menu (Victor, 2026-10-25). */
+  extra?: React.ReactNode;
+  /** At the header's right edge — the section's "How it works" link. */
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={open ? "fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4" : "hidden"}>
+      {open ? <SectionPopupBackdrop onClose={onClose} /> : null}
+      <div
+        role={open ? "dialog" : undefined}
+        aria-label={open ? title : undefined}
+        className={
+          open
+            ? "relative flex max-h-[95vh] w-full flex-col overflow-hidden rounded-t-2xl bg-surface shadow-lg ring-1 ring-black/5 dark:ring-white/10 sm:max-h-[85vh] sm:max-w-[54rem] sm:rounded-2xl"
+            : "contents"
+        }
+      >
+        {open ? (
+          // Save · Close at the left, the title centered across the popup
+          // (Victor, 2026-10-25). The empty third column balances the buttons
+          // so the title sits at the true center; on a phone the title gets
+          // its own line under the buttons. A line and a larger title mark it
+          // as the header — no colored band (Victor, 2026-10-25).
+          <div className="grid shrink-0 grid-cols-1 items-center gap-x-3 gap-y-2 border-b border-line bg-surface px-5 pb-3 pt-4 sm:grid-cols-[1fr_auto_1fr]">
+            <div className="flex flex-wrap items-center gap-3">
+              {actions}
+              <button
+                type="button"
+                onClick={onClose}
+                className="shrink-0 rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/30 transition hover:bg-negative/20"
+              >
+                Close
+              </button>
+              {extra}
+            </div>
+            <h2 className="min-w-0 text-center text-base font-bold leading-tight tracking-tight sm:text-xl">{title}</h2>
+            {aside ? <div className="flex justify-center sm:justify-end">{aside}</div> : null}
+            {toolbarRef ? <div ref={toolbarRef} className="space-y-2 sm:col-span-3" /> : null}
+            {error ? <p className="text-sm font-medium text-negative sm:col-span-3">{error}</p> : null}
+          </div>
+        ) : null}
+        <div
+          data-column-tab-scope
+          className={
+            open
+              ? "grid grid-cols-1 content-start gap-x-8 gap-y-4 overflow-y-auto px-5 pt-5 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
+              : "contents"
+          }
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Mounted only while a section popup is open, so Escape closes just that
+ *  section and leaves the plan popup standing. */
+function SectionPopupBackdrop({ onClose }: { onClose: () => void }) {
+  useCloseOnEscape(onClose);
+  return <button type="button" aria-label="Close" onClick={onClose} className="fixed inset-0 bg-black/30" />;
 }
 
 /** A COLA checkbox, with the year that income's first raise lands. */
@@ -3551,6 +3852,242 @@ function ColaWhy({
 }
 
 /** A section's longer notes: one bold label and a short line each. */
+/** A GS pension card's fields: the GS job's dates, the high-3 and the
+ *  survivor share — and, under them, the pension they earn (lib/fers). */
+function FersLineFields({
+  line,
+  onChange,
+  birthYear,
+  spouseBirthYear,
+  hasMilitaryRetirement,
+  ssKnown,
+  currency,
+}: {
+  line: LineDraft;
+  onChange: (patch: Partial<LineDraft>) => void;
+  birthYear: number | null;
+  spouseBirthYear: number | null;
+  hasMilitaryRetirement: boolean;
+  /** His Social Security has a full benefit (PIA): the supplement can be worked out. */
+  ssKnown: boolean;
+  currency: string;
+}) {
+  const yr = (v: string) => (/^\d{4}$/.test(v.trim()) ? Number(v) : null);
+  const born = line.owner === "spouse" ? spouseBirthYear : birthYear;
+  const start = yr(line.startYear);
+  const end = yr(line.endYear);
+  const high3 = Math.max(0, displayToCents(line.monthly || "0"));
+  const est: FersEstimate | null =
+    start != null && end != null
+      ? estimateFers(
+          {
+            owner: line.owner,
+            gsStartYear: start,
+            gsStartMonth: Number(line.startMonth) || null,
+            gsEndYear: end,
+            gsEndMonth: Number(line.endMonth) || null,
+            high3AnnualCents: high3,
+            survivorPct: Number(line.survivorPct) as 0 | 25 | 50,
+            startEarly: line.startEarly,
+          },
+          born,
+        )
+      : null;
+  const $ = (c: number) => formatMoneyWhole(c, currency);
+  const whose = line.owner === "spouse" ? "your spouse's" : "your";
+  const result = (() => {
+    if (born == null) return `Add ${whose} birth year in General Profile Data.`;
+    if (start == null || end == null) return "Enter when the GS job starts and ends.";
+    if (!high3) return "Enter the best 3-year average salary.";
+    if (!est) return "The end can't be before the start.";
+    const service = `${est.serviceYears} yrs${est.serviceMonths ? ` ${est.serviceMonths} mo` : ""}`;
+    if (!est.path) return `${service} of GS — under 5 years earns no pension.`;
+    return null;
+  })();
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 items-end gap-2 sm:flex sm:justify-between sm:gap-4">
+        <LineField label="GS starts" className="sm:w-[8.75rem]">
+          <MonthYearBox
+            label="GS start"
+            blankMonth="Jan"
+            month={line.startMonth}
+            onMonth={(v) => onChange({ startMonth: v })}
+            year={line.startYear}
+            onYear={(v) => onChange({ startYear: v })}
+            yearPlaceholder="Year"
+          />
+        </LineField>
+        <LineField label="GS ends" className="sm:w-[8.75rem]">
+          <MonthYearBox
+            label="GS end"
+            blankMonth="Dec"
+            month={line.endMonth}
+            onMonth={(v) => onChange({ endMonth: v })}
+            year={line.endYear}
+            onYear={(v) => onChange({ endYear: v })}
+            yearPlaceholder="Year"
+          />
+        </LineField>
+        <LineField label="Best 3-yr salary /yr">
+          <input
+            inputMode="decimal"
+            value={line.monthly}
+            onChange={(e) => onChange({ monthly: e.target.value })}
+            placeholder="0"
+            className={`${lineInput} block text-center sm:mx-auto sm:w-28`}
+          />
+        </LineField>
+        <LineField label="Survivor">
+          <select
+            value={line.survivorPct}
+            onChange={(e) => onChange({ survivorPct: e.target.value as LineDraft["survivorPct"] })}
+            className={`${lineInput} cursor-pointer sm:w-44`}
+          >
+            <option value="0">None</option>
+            <option value="25">25% (costs 5%)</option>
+            <option value="50">50% (costs 10%)</option>
+          </select>
+        </LineField>
+      </div>
+      {est?.canStartEarly ? (
+        <label className="flex flex-wrap items-center justify-center gap-2">
+          <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Pension starts</span>
+          <select
+            value={line.startEarly ? "early" : "62"}
+            onChange={(e) => onChange({ startEarly: e.target.value === "early" })}
+            className={`${lineInput} w-auto cursor-pointer`}
+          >
+            <option value="62">At 62, full amount</option>
+            <option value="early">At {mraLabel(est.mraMonths)}, 5% less per year under 62</option>
+          </select>
+        </label>
+      ) : null}
+      <div className="text-center text-xs text-foreground sm:text-sm">
+        {result ? (
+          <p>{result}</p>
+        ) : est && est.path ? (
+          <>
+            <p>
+              <span className="font-semibold">
+                Pension from {MONTHS[est.startMonth - 1]} {est.startYear} (age {est.startAge}):{" "}
+                <span style={{ color: "var(--positive)" }}>{$(est.annualCents)}/yr</span>
+              </span>{" "}
+              · {est.serviceYears} yrs{est.serviceMonths ? ` ${est.serviceMonths} mo` : ""} × {est.multiplierPct}% of {$(high3)}
+              {est.reductionPct ? ` − ${est.reductionPct}% early start` : ""}
+              {line.survivorPct !== "0" ? ` − ${line.survivorPct === "50" ? 10 : 5}% survivor` : ""}
+            </p>
+            {line.survivorPct !== "0" ? (
+              <p>
+                {line.owner === "spouse" ? "You get" : "Your spouse gets"} {$(est.survivorAnnualCents)}/yr after{" "}
+                {line.owner === "spouse" ? "your spouse's" : "your"} death.
+              </p>
+            ) : null}
+            {/* Counted only when that person's Social Security is known
+                (lib/fers: his, from a Social Security line with a PIA). */}
+            {est.supplement ? (
+              <p>
+                Plus the FERS supplement until 62
+                {line.owner === "self" && ssKnown ? "." : " — not in the plan: it needs this person's Social Security."}
+              </p>
+            ) : null}
+            {line.owner === "self" && hasMilitaryRetirement ? (
+              <p>Military years not counted: you keep your military retired pay.</p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** One "Label: text" line of the GS pension guide. */
+function FersPoint({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <p>
+      <span className="font-semibold">{label}:</span> {children}
+    </p>
+  );
+}
+
+/** How the GS pension works, shown at the top of its popup with OPM's pages
+ *  — worded by status: someone retiring from the military with retired pay
+ *  can't count those years, and a full GS career follows the usual rules
+ *  (Victor, 2026-10-25). Rules from OPM, checked 2026-10-25. */
+function FersGuide({
+  hasMilitaryRetirement,
+  birthYear,
+  spouseBirthYear,
+}: {
+  hasMilitaryRetirement: boolean;
+  birthYear: number | null;
+  spouseBirthYear: number | null;
+}) {
+  const mraOf = (y: number | null) => (y != null ? mraLabel(fersMraMonths(y)) : "57");
+  const links: [string, string][] = [
+    ["Who qualifies", "https://www.opm.gov/retirement-center/fers-information/eligibility/"],
+    ["How it's worked out", "https://www.opm.gov/retirement-center/fers-information/computation/"],
+    ["Military retired pay & FERS", "https://www.opm.gov/retirement-center/fers-information/military-retired-pay/"],
+    ["Buying back military time", "https://www.opm.gov/retirement-center/fers-information/service-credit/"],
+    ["Health insurance in retirement", "https://www.opm.gov/healthcare-insurance/life-events/retirement/im-thinking-about-retiring/tabs/health/"],
+    ["Survivor benefits", "https://www.opm.gov/retirement-center/survivor-benefits/"],
+    ["Retirement quick guide", "https://www.opm.gov/retirement-center/apply/quick-guide/"],
+  ];
+  const fullCareer = (whose: string, mra: string) => (
+    <>
+      <FersPoint label="Full pension">at 62 with 5 GS years, at 60 with 20, or at {mra} with 30.</FersPoint>
+      <FersPoint label="Early">with 10–29 years {whose} can start at {mra}, cut 5% for each year under 62.</FersPoint>
+      <FersPoint label="Supplement">leaving before 62 with no cut adds a FERS supplement until 62 — about Social Security at 62 × GS years ÷ 40.</FersPoint>
+    </>
+  );
+  return (
+    <div className="space-y-3 rounded-xl p-4 ring-1 ring-line sm:col-span-2">
+      <p className="text-base font-bold sm:text-lg">How the GS pension works</p>
+      <div className="grid gap-4 text-sm leading-relaxed md:grid-cols-2">
+        {hasMilitaryRetirement ? (
+          <div className="space-y-2">
+            <p className="font-bold uppercase tracking-wide">You — after military retirement</p>
+            <FersPoint label="Your military years">
+              don&rsquo;t count while you get military retired pay. Counting them means giving up retired pay for life — so you
+              keep retired pay and earn a GS pension on your GS years only.
+            </FersPoint>
+            <FersPoint label="GS years needed">5 earns a pension at 62. With 10+ you can start at {mraOf(birthYear)}, cut 5% a year under 62.</FersPoint>
+            <FersPoint label="Health insurance">be on FEHB for the 5 years before retiring — TRICARE years count, but be in an FEHB plan on your retirement date.</FersPoint>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="font-bold uppercase tracking-wide">You — a GS career</p>
+            {fullCareer("you", mraOf(birthYear))}
+            <FersPoint label="Military time">active-duty years without a military retirement can be bought back (3% of basic pay plus interest) before leaving GS; then they count.</FersPoint>
+          </div>
+        )}
+        <div className="space-y-2">
+          <p className="font-bold uppercase tracking-wide">{spouseBirthYear != null ? "Your spouse — a GS career" : "For everyone"}</p>
+          {spouseBirthYear != null ? fullCareer("your spouse", mraOf(spouseBirthYear)) : null}
+          <FersPoint label="How much">1% of the best 3-year average salary for each GS year — 1.1% when leaving at 62+ with 20+ years.</FersPoint>
+          <FersPoint label="Raises">a COLA each January from 62, a little less than Social Security&rsquo;s when inflation is over 2%.</FersPoint>
+          <FersPoint label="Survivor">leaving your spouse 50% costs 10% of the pension; 25% costs 5%.</FersPoint>
+        </div>
+      </div>
+      {/* OPM's own pages, right here rather than behind a link. */}
+      <div className="flex flex-wrap gap-2 border-t border-line pt-3">
+        {links.map(([label, href]) => (
+          <a
+            key={href}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-line transition hover:ring-brand sm:text-sm"
+            style={{ color: "var(--viz-savings)" }}
+          >
+            {label} ↗
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function InfoPopup({ title, items, onClose }: { title: string; items: [string, string][]; onClose: () => void }) {
   return (
     <ModalShell title={title} onClose={onClose} className="sm:max-w-lg">
@@ -3625,7 +4162,7 @@ function ArchiveToggle({ count, open, onToggle }: { count: number; open: boolean
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      className="inline-flex items-center gap-1.5 rounded-md bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-sky-300 transition hover:bg-sky-200 dark:bg-sky-900/50 dark:ring-sky-700 dark:hover:bg-sky-900"
+      className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-line transition hover:ring-brand"
     >
       <svg
         aria-hidden
@@ -3666,7 +4203,7 @@ function PlanRow<K extends string>({
   currency: string;
 }) {
   return (
-    <div className="space-y-1.5 rounded-lg bg-background p-2 ring-1 ring-line">
+    <div className="space-y-1.5 rounded-lg bg-surface p-2 ring-1 ring-line">
       <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_9.5rem_9.5rem_auto]">
         <LineField label="Plan" className="col-span-2 sm:col-span-1">
           <select
@@ -3933,7 +4470,9 @@ function IncomeRow({
   bold?: boolean;
 }) {
   return (
-    <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "font-semibold" : ""}`}>
+    // A bold line is the list's sum: the page's one tint marks it
+    // (Victor, 2026-10-25).
+    <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "-mx-2 rounded-md bg-sky-50 px-2 font-bold dark:bg-sky-950/40" : ""}`}>
       <span className="min-w-0">
         {label}
         {note ? <span className="block text-xs font-normal text-foreground sm:text-sm">{note}</span> : null}

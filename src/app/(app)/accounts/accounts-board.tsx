@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import React, { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
@@ -460,7 +460,20 @@ export function AccountsBoard({
   estate = { accounts: {}, guide: { executor: null, willLocation: null, attorney: null, powerOfAttorney: null, instructions: null }, items: [] },
   freeNightStays = [],
 }: Props) {
-  const [addOpen, setAddOpen] = useState(false);
+  // Net Worth's Rental properties "+ Add property" lands here with
+  // ?add=rental: open Add account on a Rental property (Victor, 2026-10-25),
+  // then drop the query so a refresh doesn't reopen it.
+  const searchParams = useSearchParams();
+  const [addPreset, setAddPreset] = useState<{ section: string; subtype: string } | null>(() =>
+    searchParams.get("add") === "rental" ? { section: "property", subtype: "Rental property" } : null,
+  );
+  const [addOpen, setAddOpen] = useState(() => searchParams.get("add") === "rental");
+  useEffect(() => {
+    if (!searchParams.get("add")) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("add");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, [searchParams]);
   const [estateOpen, setEstateOpen] = useState(false);
   const estateToFill = estateToFillCount(accounts, estate);
   const [monthEndOpen, setMonthEndOpen] = useState(false);
@@ -751,7 +764,7 @@ export function AccountsBoard({
     { label: estateToFill > 0 ? `Estate guide (${estateToFill} to fill in)` : "Estate guide", onSelect: () => setEstateOpen(true) },
     { label: "Add account", onSelect: () => setAddOpen(true) },
     { label: "Transfer Funds", onSelect: () => setTransferOpen("banking") },
-    { label: "Withdraw from investment", onSelect: () => setTransferOpen("investment") },
+    { label: "Withdraw Investment", onSelect: () => setTransferOpen("investment") },
     { label: "Transfer Activity", onSelect: () => setActivityOpen(true) },
   ]);
 
@@ -820,7 +833,7 @@ export function AccountsBoard({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" />
             </svg>
-            Withdraw
+            Withdraw Investment
           </button>
           <button
             type="button"
@@ -986,7 +999,7 @@ export function AccountsBoard({
             headerBadge={section.kidsGroup ? "Not in Net Worth" : undefined}
             onAddAccount={() => setAddOpen(true)}
             onTransfer={() => setTransferOpen(section.key === "investments" ? "investment" : "banking")}
-            transferLabel={section.key === "investments" ? "Withdraw" : undefined}
+            transferLabel={section.key === "investments" ? "Withdraw Investment" : undefined}
           />
           </div>
         );
@@ -1063,7 +1076,16 @@ export function AccountsBoard({
           </div>
         ) : null}
       </div>
-      {addOpen ? <AddAccountModal estateNames={estateNames(accounts, estate)} onClose={() => setAddOpen(false)} /> : null}
+      {addOpen ? (
+        <AddAccountModal
+          estateNames={estateNames(accounts, estate)}
+          preset={addPreset}
+          onClose={() => {
+            setAddOpen(false);
+            setAddPreset(null);
+          }}
+        />
+      ) : null}
       {monthEndOpen ? (
         <MonthEndUpdateModal
           accounts={accounts}
@@ -1085,7 +1107,7 @@ export function AccountsBoard({
         <TransferModal
           accounts={accounts}
           allBuckets={accounts.flatMap((a) => a.buckets)}
-          startFrom={transferOpen}
+          mode={transferOpen}
           onClose={() => setTransferOpen(false)}
         />
       ) : null}
@@ -1643,13 +1665,16 @@ function PickCardModal({
 function TransferModal({
   accounts,
   allBuckets,
-  startFrom = "banking",
+  mode = "banking",
   onClose,
 }: {
   accounts: AccountData[];
   allBuckets: BucketData[];
-  // Opened from the Investments popup it starts on an investment account.
-  startFrom?: "banking" | "investment";
+  // Each button has one job, so From only lists what fits it: Transfer Funds
+  // moves money between bank accounts, Withdraw takes it out of an
+  // investment. One popup listing both let a Fundrise move slip in under the
+  // wrong button (Victor, 2026-10-25).
+  mode?: "banking" | "investment";
   onClose: () => void;
 }) {
   useScrollLock();
@@ -1667,14 +1692,15 @@ function TransferModal({
   const kids = live.filter((a) => a.isKidsAccount && a.kind !== "property" && a.kind !== "debt_loan");
   const destinations = [...banking, ...kids.filter((a) => a.kind !== "investment")];
 
-  const firstFrom = (startFrom === "investment" ? investments[0] : undefined) ?? banking[0] ?? investments[0];
+  const kidsCash = kids.filter((a) => a.kind !== "investment");
+  const sources = mode === "investment" ? investments : [...banking, ...kidsCash];
+  const firstFrom = sources[0];
   const [fromId, setFromId] = useState<string>(firstFrom?.id ?? "");
   const [toId, setToId] = useState<string>(destinations.find((a) => a.id !== firstFrom?.id)?.id ?? "");
   const [fromBucketId, setFromBucketId] = useState("");
   const [toBucketId, setToBucketId] = useState("");
 
-  const fromAccount = live.find((a) => a.id === fromId);
-  const fromIsInvestment = fromAccount?.kind === "investment";
+  const fromIsInvestment = mode === "investment";
   const fromBuckets = allBuckets.filter((b) => b.accountId === fromId);
   const toBuckets = allBuckets.filter((b) => b.accountId === toId);
   const toOptions = destinations.filter((a) => a.id !== fromId);
@@ -1750,15 +1776,19 @@ function TransferModal({
           }}
           className="space-y-2"
         >
-          <LabeledInput label="Amount" name="amount" type="number" step="0.01" min="0" required autoFocus />
-          <LabeledInput
-            label="Date"
-            name="date"
-            type="date"
-            defaultValue={new Date().toISOString().slice(0, 10)}
-            required
-          />
-
+          {/* Amount and Date share a row; From and To each get a full line
+              so long account names aren't cut off at this width (Victor,
+              2026-10-25). Stacks on a phone. */}
+          <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2">
+            <LabeledInput label="Amount" name="amount" type="number" step="0.01" min="0" required autoFocus />
+            <LabeledInput
+              label="Date"
+              name="date"
+              type="date"
+              defaultValue={new Date().toISOString().slice(0, 10)}
+              required
+            />
+          </div>
           <label className="block">
             <span className={labelClass}>From</span>
             <select
@@ -1775,7 +1805,9 @@ function TransferModal({
               required
               className={selectClass}
             >
-              {optionGroups([["Banking", banking], ["Investments", investments], ["Kids Funding", kids]])}
+              {mode === "investment"
+                ? optionGroups([["Investments", investments]])
+                : optionGroups([["Banking", banking], ["Kids Funding", kidsCash]])}
             </select>
           </label>
           {fromBuckets.length > 0 ? (
@@ -1795,7 +1827,6 @@ function TransferModal({
               </select>
             </label>
           ) : null}
-
           <label className="block">
             <span className={labelClass}>To</span>
             <select
@@ -2022,7 +2053,7 @@ function AccountSection({
   // new account doesn't mean closing the section first. They open above it.
   onAddAccount?: () => void;
   onTransfer?: () => void;
-  /** The transfer button's words — "Withdraw" on Investments. */
+  /** The transfer button's words — "Withdraw Investment" on Investments. */
   transferLabel?: string;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -2223,7 +2254,7 @@ function AccountSection({
               className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                {transferLabel === "Withdraw" ? <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" /> : <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />}
+                {transferLabel === "Withdraw Investment" ? <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" /> : <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />}
               </svg>
               {transferLabel}
             </button>
@@ -3328,7 +3359,18 @@ function BalanceInput({
   );
 }
 
-function AddAccountForm({ section, onDone, estateNames: names = [] }: { section: Section; onDone: (newId?: string | null) => void; estateNames?: string[] }) {
+function AddAccountForm({
+  section,
+  onDone,
+  estateNames: names = [],
+  subtype = null,
+}: {
+  section: Section;
+  onDone: (newId?: string | null) => void;
+  estateNames?: string[];
+  /** The Type to start on. */
+  subtype?: string | null;
+}) {
   const [pending, start] = useTransition();
   const router = useRouter();
   // The form closes in the same transition as the refresh, so it stays on
@@ -3523,7 +3565,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
                 <FixedSubtypeSelect
                   name="subtype"
                   options={section.subtypeOptions}
-                  value={null}
+                  value={subtype}
                   className="mt-1 w-full font-normal normal-case tracking-normal text-foreground"
                 />
               </label>
@@ -3659,9 +3701,18 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
   );
 }
 
-function AddAccountModal({ onClose, estateNames = [] }: { onClose: () => void; estateNames?: string[] }) {
+function AddAccountModal({
+  onClose,
+  estateNames = [],
+  preset = null,
+}: {
+  onClose: () => void;
+  estateNames?: string[];
+  /** Opens straight on a section with its Type picked (a Rental property). */
+  preset?: { section: string; subtype: string } | null;
+}) {
   useScrollLock();
-  const [sectionKey, setSectionKey] = useState<string | null>(null);
+  const [sectionKey, setSectionKey] = useState<string | null>(preset?.section ?? null);
   const choices = SECTIONS.filter((section) =>
     ["banking", "investments", "property", "credit", "loans", "kids"].includes(section.key),
   );
@@ -3711,7 +3762,12 @@ function AddAccountModal({ onClose, estateNames = [] }: { onClose: () => void; e
             <div className="px-5 pt-4">
               <button type="button" onClick={() => setSectionKey(null)} className="text-sm font-medium text-brand hover:text-brand-strong">← Choose another type</button>
             </div>
-            <AddAccountForm section={section} estateNames={estateNames} onDone={() => onClose()} />
+            <AddAccountForm
+              section={section}
+              estateNames={estateNames}
+              subtype={preset?.section === section.key ? preset.subtype : null}
+              onDone={() => onClose()}
+            />
             {section.key !== "credit" && section.key !== "loans" ? (
               <p className="px-5 pb-5 text-xs leading-relaxed text-muted">
                 You can add buckets after the account is created. Account totals will always be calculated from their buckets.

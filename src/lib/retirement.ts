@@ -17,6 +17,8 @@
  * slightly optimistic.
  */
 
+import { fersColaGrowth, type FersEstimate, type FersOwner } from "./fers";
+
 /**
  * One year taken from the household's own projection grid.
  * Supplying these is what lets the projection say "the kids move out in 2036"
@@ -363,12 +365,13 @@ export function inflateTo(year: number, thisYear: number, pct: number): number {
   return Math.pow(1 + pct / 100, Math.max(0, year - thisYear));
 }
 
-export type IncomeLineKind = "pay" | "va" | "social_security" | "job" | "spouse" | "other";
+export type IncomeLineKind = "pay" | "va" | "social_security" | "fers" | "job" | "spouse" | "other";
 
 export const INCOME_LINE_KINDS: { value: IncomeLineKind; label: string }[] = [
   { value: "pay", label: "Pay (work)" },
   { value: "va", label: "VA disability" },
   { value: "social_security", label: "Social Security" },
+  { value: "fers", label: "GS pension (FERS)" },
   { value: "job", label: "Add'l Job" },
   { value: "spouse", label: "Spouse income" },
   { value: "other", label: "Other income" },
@@ -439,11 +442,21 @@ export type IncomeLine = {
   fromRecord?: boolean;
   /** A spouse's spousal benefit on the worker's record: it ends at his death. */
   spousal?: boolean;
+  /** FERS only — whose GS career, the survivor share elected (%), and an
+   *  early (reduced) start with 10–29 years. As stored, a FERS line's start
+   *  and end are the GS job's and `annualCents` the high-3 (lib/fers). */
+  owner?: FersOwner;
+  survivorPct?: 0 | 25 | 50;
+  fersStartEarly?: boolean;
+  /** Set by applyFers: the annuity worked out — the line then pays it. */
+  fers?: FersEstimate;
+  /** Set by applyFers: the FERS supplement, flat until 62. */
+  fersSupplement?: boolean;
 };
 
 /** Income that arrives whether or not anyone works: it lowers the FI goal.
  *  A second job or a spouse's pay can stop, so it only helps cash flow. */
-const GUARANTEED_KINDS = new Set<IncomeLineKind | "pension">(["pension", "va", "social_security"]);
+const GUARANTEED_KINDS = new Set<IncomeLineKind | "pension">(["pension", "va", "social_security", "fers"]);
 
 export type MilitaryPension = {
   /** Year active-duty pay stops and retired pay starts. */
@@ -665,6 +678,9 @@ export function lineColaBase(line: IncomeLine, cola: ColaPlan, when: ColaWhen): 
 
 /** A line's monthly amount in `year`, with every COLA paid after its base. */
 function lineIn(line: IncomeLine, year: number, cola: ColaPlan, when: ColaWhen): number {
+  // The GS pension rises by the FERS COLA from 62; its supplement never does.
+  if (line.fers) return Math.round(line.monthlyCents * fersColaGrowth(cola, line.fers.colaFromYear, year));
+  if (line.fersSupplement) return line.monthlyCents;
   // Pay-like income rises by its own raise each January after its start
   // year (or this year, if already arriving); VA and Social Security rise by
   // the COLA instead.
@@ -1144,6 +1160,28 @@ export function survivorIncomeForYear(
   }
   for (const line of live) {
     if (line.kind === "pay" || line.kind === "va" || line.kind === "job") continue;
+    // His GS pension stops at his death; she draws the survivor share he
+    // elected — none after a death on active duty (he never worked GS) or
+    // if she remarries before 55. Hers carries on.
+    if (line.kind === "fers" && line.owner !== "spouse") {
+      const remarriedYoung =
+        survivors?.remarryYear != null &&
+        survivors.spouseBirthYear != null &&
+        year >= survivors.remarryYear &&
+        survivors.remarryYear - survivors.spouseBirthYear < SBP_DIC_REMARRY_AGE;
+      if (line.fers && line.fers.survivorAnnualCents > 0 && !activeDuty && !remarriedYoung) {
+        const monthly = Math.round((line.fers.survivorAnnualCents / 12) * fersColaGrowth(cola, line.fers.colaFromYear, year));
+        parts.push({
+          name: `${line.name} survivor (${line.survivorPct}%)`,
+          kind: "fers",
+          monthlyAfterTaxCents: Math.round(monthly * keep),
+          monthlyBeforeTaxCents: monthly,
+          months: lineMonths(line, year),
+          firstMonth: 13 - lineMonths(line, year),
+        });
+      }
+      continue;
+    }
     if (line.kind === "social_security") {
       if (worker ? line === worker || drawsOnRecord : line !== largestSs) continue;
     }
