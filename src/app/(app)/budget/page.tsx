@@ -11,6 +11,7 @@ import { attachSplitParts } from "@/lib/split-parts";
 import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
 import { fetchTripPlans } from "@/lib/trip-budget-plans";
 import { buildPlanResolver, subscriptionChargesIn } from "@/lib/planned-by-sub";
+import { sourceBucketsByAccount } from "@/lib/source-buckets";
 
 export const metadata = { title: "Budget · Capitall" };
 
@@ -98,7 +99,7 @@ export default async function BudgetPage({
     supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, source_bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id",
       )
       .eq("household_id", household.id)
       .gte("occurred_on", prevFirstOfMonth)
@@ -606,6 +607,7 @@ export default async function BudgetPage({
   const propertyOptions: AccountOption[] = (accounts ?? [])
     .filter((a) => a.kind === "property" && a.active !== false)
     .map((a) => ({ id: a.id, name: a.name }));
+  const sourceBuckets = sourceBucketsByAccount(accounts ?? [], buckets ?? []);
   const accountOptions: AccountOption[] = (accounts ?? []).filter((a) => a.kind !== "property").map((a) => ({
     id: a.id,
     name:
@@ -614,6 +616,7 @@ export default async function BudgetPage({
         : a.name,
     group: accountGroupFor(a),
     balanceCents: pickerBalanceCents(a, cardOwed),
+    sourceBuckets: sourceBuckets.get(a.id),
   }));
 
   // Liability accounts a Budget debt can link to (credit cards, loans).
@@ -682,6 +685,7 @@ export default async function BudgetPage({
               ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
               : "Uncategorized",
       accountId: t.account_id ?? null,
+      sourceBucketId: t.source_bucket_id ?? null,
       propertyId: t.property_id ?? null,
       tripId: (t as { trip_id?: string | null }).trip_id ?? null,
       travelCategory: (t as { travel_category?: string | null }).travel_category ?? null,

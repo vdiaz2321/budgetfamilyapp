@@ -227,6 +227,17 @@ export function TransactionsTable({
   }
 
   const accountName = new Map(accountOptions.map((a) => [a.id, a.name]));
+  // "Amex Savings · Real Estate" when the money came out of one of a bank
+  // account's buckets — the bucket names ride on the account options.
+  const sourceBucketName = new Map(
+    accountOptions.flatMap((a) => (a.sourceBuckets ?? []).map((b) => [b.id, b.name] as const)),
+  );
+  const accountText = (t: TxData) => {
+    const name = t.accountId ? accountName.get(t.accountId) : undefined;
+    if (!name) return undefined;
+    const bucket = t.sourceBucketId ? sourceBucketName.get(t.sourceBucketId) : undefined;
+    return bucket ? `${name} · ${bucket}` : name;
+  };
   const propertyName = new Map(propertyOptions.map((p) => [p.id, p.name]));
 
   function exportCsv() {
@@ -252,7 +263,7 @@ export function TransactionsTable({
           qf(t.isTransfer ? "Transfer" : t.isInvestmentTransfer ? "Investment Transfer" : t.isCardPayment ? "Card Payment" : (t.kind ? KIND_LABEL[t.kind] : "")),
           qf(t.subName),
           qf(t.payee),
-          qf(t.accountId ? accountName.get(t.accountId) : ""),
+          qf(accountText(t) ?? ""),
           ...(withProperty ? [qf(t.propertyId ? propertyName.get(t.propertyId) : "")] : []),
           qf(cellText(t, "trip")),
           qf(cellText(t, "paysFor")),
@@ -295,7 +306,7 @@ export function TransactionsTable({
       case "type": return typeLabel(t);
       case "category": return t.subName;
       case "payee": return t.payee ?? "";
-      case "account": return t.accountId ? accountName.get(t.accountId) ?? "" : "";
+      case "account": return accountText(t) ?? "";
       case "trip": return travel?.trip ?? "";
       case "paysFor": return travel?.paysFor ?? "";
       case "points": return pointsLabel(travel);
@@ -309,7 +320,7 @@ export function TransactionsTable({
   // hidden — as Excel's does.
   const passesFilters = (t: TxData, skipCol?: ColKey) => {
     const amountText = (t.amountCents / 100).toFixed(2);
-    const accountLabel = t.accountId ? accountName.get(t.accountId) ?? "" : "";
+    const accountLabel = accountText(t) ?? "";
     const travel = travelCells[t.id];
     const searchableText = [t.payee, t.subName, t.memo, accountLabel, travel?.trip, travel?.paysFor].filter(Boolean).join(" ").toLowerCase();
     const matchesSearch = searchTerms.every((term) => {
@@ -743,7 +754,7 @@ export function TransactionsTable({
                     key={t.id}
                     tx={t}
                     currency={currency}
-                    accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
+                    accountName={accountText(t) ?? "—"}
                     travel={travelCells[t.id]}
                     selectMode={selectMode}
                     selected={selectedIds.has(t.id)}
@@ -775,7 +786,7 @@ export function TransactionsTable({
                 key={t.id}
                 tx={t}
                 currency={currency}
-                accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
+                accountName={accountText(t) ?? "—"}
                 selectMode={selectMode}
                 selected={selectedIds.has(t.id)}
                 onSelect={() => toggleSelected(t.id)}

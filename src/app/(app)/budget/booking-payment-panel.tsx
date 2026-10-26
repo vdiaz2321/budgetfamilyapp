@@ -190,12 +190,13 @@ export function BookingPaymentPanel({
             ) : null}
             <span className={`${label} text-center`}>Points</span>
           </div>
-          <ul className="space-y-1.5">
+          <ul className="space-y-1.5" onKeyDown={tabDownColumn}>
             {rows.map((r) => (
               <li key={r.name} className={grid}>
                 <span className={`${nameSpan} truncate text-sm font-medium`}>{r.name}</span>
                 <input
                   aria-label={`${r.name} spent USD`}
+                  data-col="usd"
                   value={r.cents}
                   onChange={(e) => onRow(r.name, { cents: e.target.value })}
                   {...calcProps(r.cents, (v) => onRow(r.name, { cents: v }))}
@@ -206,6 +207,7 @@ export function BookingPaymentPanel({
                 {foreign ? (
                   <input
                     aria-label={`${r.name} spent ${foreignCurrency}`}
+                    data-col="foreign"
                     value={r.foreign}
                     onChange={(e) => typeForeign(r.name, e.target.value)}
                     {...calcProps(r.foreign, (v) => typeForeign(r.name, v))}
@@ -216,6 +218,7 @@ export function BookingPaymentPanel({
                 ) : null}
                 <input
                   aria-label={`${r.name} points`}
+                  data-col="points"
                   value={r.points}
                   onChange={(e) => onRow(r.name, { points: e.target.value })}
                   {...calcProps(r.points, (v) => onRow(r.name, { points: v }), true)}
@@ -341,6 +344,25 @@ function Stat({ label: text, value, color }: { label: string; value: string; col
       </span>
     </div>
   );
+}
+
+// Tab in the passenger grid runs DOWN a column (Johana → Alba → Jessica),
+// then to the top of the next column; Shift+Tab walks it backwards. Off either
+// end of the grid, Tab falls through to the browser so it leaves the grid as
+// normal.
+function tabDownColumn(e: React.KeyboardEvent<HTMLUListElement>) {
+  if (e.key !== "Tab") return;
+  const target = e.target as HTMLElement;
+  const col = target.dataset.col;
+  if (!col) return;
+  const cols = ["usd", "foreign", "points"];
+  const ordered = cols.flatMap((c) =>
+    Array.from(e.currentTarget.querySelectorAll<HTMLInputElement>(`input[data-col="${c}"]`)),
+  );
+  const next = ordered[ordered.indexOf(target as HTMLInputElement) + (e.shiftKey ? -1 : 1)];
+  if (!next) return;
+  e.preventDefault();
+  next.focus();
 }
 
 // The payment boxes double as a calculator: type "38+9" and press Enter (or

@@ -1496,6 +1496,52 @@ function UndoRolloverButton({ monthFirstOfMonth }: { monthFirstOfMonth: string }
   );
 }
 
+// "$X Added · Undo" once a rollover is in. The amount is a button that
+// reopens the amount box, so a partial rollover can be changed later.
+function RolloverAddedLine({
+  rolloverCents,
+  liveAvailableCents,
+  monthFirstOfMonth,
+  currency,
+}: {
+  rolloverCents: number;
+  liveAvailableCents: number;
+  monthFirstOfMonth: string;
+  currency: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (editing) {
+    return (
+      <RolloverAmountForm
+        monthFirstOfMonth={monthFirstOfMonth}
+        currentCents={Math.min(rolloverCents, liveAvailableCents)}
+        liveAvailableCents={liveAvailableCents}
+        currency={currency}
+        submitLabel="Save"
+        onDone={() => setEditing(false)}
+      />
+    );
+  }
+  return (
+    // <div> (not <p>) because UndoRolloverButton renders a <form>, and forms
+    // inside paragraphs are invalid HTML.
+    <div className="flex items-center gap-1.5 text-xs text-foreground">
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="cursor-pointer whitespace-nowrap rounded-full px-1 py-0.5 transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+        aria-label={`Change rollover amount, now ${formatMoney(rolloverCents, currency)}`}
+      >
+        <span className="font-semibold text-positive underline decoration-positive/40 decoration-dotted underline-offset-2">
+          {formatMoney(rolloverCents, currency)}
+        </span>{" "}
+        Added
+      </button>
+      <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />
+    </div>
+  );
+}
+
 function SummaryHeroCard({
   displayLeft,
   incomePlanned,
@@ -1550,17 +1596,12 @@ function SummaryHeroCard({
             <div className="mt-1.5 flex flex-col items-start gap-1.5 @3xl:items-center">
               <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
               {rolloverCents > 0 && (
-                // <div> (not <p>) because UndoRolloverButton renders a <form>,
-                // and forms inside paragraphs are invalid HTML.
-                <div className="flex items-baseline gap-1.5 text-xs text-muted">
-                  <span className="whitespace-nowrap">
-                    <span className="font-semibold text-positive">
-                      {formatMoney(rolloverCents, currency)}
-                    </span>{" "}
-                    Added
-                  </span>
-                  <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />
-                </div>
+                <RolloverAddedLine
+                  rolloverCents={rolloverCents}
+                  liveAvailableCents={rollover.liveAvailableCents}
+                  monthFirstOfMonth={monthFirstOfMonth}
+                  currency={currency}
+                />
               )}
             </div>
           </div>
@@ -1796,86 +1837,152 @@ function RolloverControl({
   rollover,
   monthFirstOfMonth,
   currency,
-  centered = false,
 }: {
   rollover: Props["rollover"];
   monthFirstOfMonth: string;
   currency: string;
-  centered?: boolean;
 }) {
-  const [pending, start] = useTransition();
-  const [editing, setEditing] = useState(false);
-  const { availableCents, liveAvailableCents, enabled, prevMonthLabel } = rollover;
-  const hasRollover = availableCents > 0 || enabled || liveAvailableCents > 0;
+  const [choosing, setChoosing] = useState(false);
+  const { liveAvailableCents, enabled, prevMonthLabel } = rollover;
 
-  if (!hasRollover) return null;
   // Once the rollover has been rolled in, the hero card already displays
-  // "+$X rollover · Undo" under Income Left — rendering the pill here too
-  // would double it up in the footer. Keep this control only when the user
-  // still has to opt in (enabled=false).
-  if (enabled) return null;
+  // "$X Added · Undo" under Income Planned — rendering the pill here too
+  // would double it up. Keep this control only while it's still opt-in.
+  if (enabled || liveAvailableCents <= 0) return null;
 
-  const amount = formatMoney(Math.max(0, availableCents), currency);
+  const amount = formatMoney(liveAvailableCents, currency);
   const prevMonthName = shortMonth(prevMonthLabel);
-  const rolloverPillContent = (
-    <>
+
+  // The pill no longer rolls the whole leftover in on one click: it opens an
+  // amount box prefilled with the full leftover, so part of it can stay out.
+  if (choosing) {
+    return (
+      <RolloverAmountForm
+        monthFirstOfMonth={monthFirstOfMonth}
+        currentCents={liveAvailableCents}
+        liveAvailableCents={liveAvailableCents}
+        currency={currency}
+        submitLabel="Roll over"
+        onDone={() => setChoosing(false)}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setChoosing(true)}
+      className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-positive/25 bg-positive/10 px-2 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive sm:gap-1.5 sm:px-2.5"
+      aria-label={`Rollover ${prevMonthName}: ${amount}`}
+    >
       <span className="size-1.5 rounded-full bg-positive" aria-hidden />
       <span className="whitespace-nowrap text-[10px] font-semibold opacity-80 sm:text-[11px]">Rollover {prevMonthName}:</span>
       <span className="whitespace-nowrap text-[10px] font-bold tabular-nums sm:text-[11px]">{amount}</span>
-    </>
+    </button>
   );
+}
+
+// Inline "how much to roll over" box, used both before rolling over (from the
+// pill) and after (clicking the Added amount). Saving the full leftover
+// stores no override, so the amount keeps tracking late transactions.
+function RolloverAmountForm({
+  monthFirstOfMonth,
+  currentCents,
+  liveAvailableCents,
+  currency,
+  submitLabel,
+  onDone,
+}: {
+  monthFirstOfMonth: string;
+  currentCents: number;
+  liveAvailableCents: number;
+  currency: string;
+  submitLabel: string;
+  onDone: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const [value, setValue] = useState((currentCents / 100).toFixed(2));
+  const [error, setError] = useState<string | null>(null);
+  const parseCents = (v: string) => Math.round(parseFloat(v.replace(/[$,\s]/g, "")) * 100);
+  // What stays behind (not rolled over) as he types — blank or bad input
+  // counts as rolling over nothing.
+  const typedCents = parseCents(value);
+  const leftCents = Math.max(0, liveAvailableCents - (isNaN(typedCents) ? 0 : typedCents));
+
+  const save = () => {
+    const cents = parseCents(value);
+    if (isNaN(cents) || cents <= 0) {
+      setError("Enter an amount above $0.");
+      return;
+    }
+    if (cents > liveAvailableCents) {
+      setError(`Max is ${formatMoney(liveAvailableCents, currency)}.`);
+      return;
+    }
+    const fd = new FormData();
+    fd.set("month", monthFirstOfMonth);
+    fd.set("override", cents === liveAvailableCents ? "" : (cents / 100).toFixed(2));
+    start(async () => {
+      const res = await setRolloverOverride(fd);
+      if (res.error) setError(res.error);
+      else onDone();
+    });
+  };
 
   return (
-    <div className="relative flex min-w-0 items-center gap-1.5 text-xs text-muted">
-      {enabled ? (
-        <>
-          {editing ? (
-            <OverrideInput
-              monthFirstOfMonth={monthFirstOfMonth}
-              currentCents={availableCents}
-              liveLabel={formatMoney(liveAvailableCents, currency)}
-              onDone={() => setEditing(false)}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-positive/25 bg-positive/10 px-2.5 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive"
-              aria-label={`${amount} rolled over from ${prevMonthName}`}
-            >
-              {rolloverPillContent}
-            </button>
-          )}
-          <form
-            action={(fd) => start(() => setRollover(fd))}
-            className={centered ? "absolute left-full ml-1.5" : undefined}
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        save();
+      }}
+      className="flex flex-col items-start gap-1.5 @3xl:items-center"
+    >
+      <span className="text-[11px] font-semibold text-foreground">
+        Amount to roll over{" "}
+        <span className="font-normal">
+          (<span className="font-semibold tabular-nums">{formatMoney(leftCents, currency)}</span> left)
+        </span>
+      </span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={value}
+          autoFocus
+          aria-label="Amount to roll over"
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onDone();
+          }}
+          disabled={pending}
+          className="w-24 rounded-md border border-line bg-surface px-1.5 py-0.5 text-sm font-semibold tabular-nums text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+        />
+        {/* Cancel then the save, kept together so a narrow column wraps them
+            as one pair under the input instead of splitting them. */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={onDone}
+            className="shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-negative/10 px-2.5 py-1 text-[11px] font-semibold text-negative ring-1 ring-negative/30 transition hover:bg-negative/20 disabled:opacity-60"
           >
-            <input type="hidden" name="month" value={monthFirstOfMonth} />
-            <input type="hidden" name="enable" value="" />
-            <button
-              type="submit"
-              disabled={pending}
-              className="shrink-0 cursor-pointer whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-muted transition hover:border-brand/30 hover:text-brand disabled:cursor-wait disabled:opacity-60"
-            >
-              {pending ? "Saving…" : "Undo"}
-            </button>
-          </form>
-        </>
-      ) : (
-        <form action={(fd) => start(() => setRollover(fd))}>
-          <input type="hidden" name="month" value={monthFirstOfMonth} />
-          <input type="hidden" name="enable" value="on" />
+            Cancel
+          </button>
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-positive/25 bg-positive/10 px-2 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive disabled:cursor-wait disabled:opacity-60 sm:gap-1.5 sm:px-2.5"
-            aria-label={`Rollover ${prevMonthName}: ${amount}`}
+            className="shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-brand px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-brand-strong disabled:cursor-wait disabled:opacity-60"
           >
-            {pending ? "Rolling over…" : rolloverPillContent}
+            {pending ? "Saving…" : submitLabel}
           </button>
-        </form>
-      )}
-    </div>
+        </div>
+      </div>
+      {error && <span className="text-[11px] font-semibold text-negative">{error}</span>}
+    </form>
   );
 }
 
@@ -1967,64 +2074,6 @@ function RollInPlanControl({
             </button>
           )}
     </div>
-  );
-}
-
-function OverrideInput({
-  monthFirstOfMonth,
-  currentCents,
-  liveLabel,
-  onDone,
-}: {
-  monthFirstOfMonth: string;
-  currentCents: number;
-  liveLabel: string;
-  onDone: () => void;
-}) {
-  const [pending, start] = useTransition();
-  const initial = (currentCents / 100).toFixed(2);
-
-  const save = (value: string) => {
-    const fd = new FormData();
-    fd.set("month", monthFirstOfMonth);
-    fd.set("override", value.trim() === "" || value.trim() === liveLabel ? "" : value.trim());
-    start(async () => {
-      await setRolloverOverride(fd);
-      onDone();
-    });
-  };
-
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      {/* Editing label — swaps in for the "Rollover July:" pill copy so it's
-          obvious what the input is editing (the rolled-over amount, not
-          the month's spending or income). Sits before the input, muted so
-          the input itself stays the focal point. */}
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-        Amount rollover
-      </span>
-      <input
-        type="text"
-        inputMode="decimal"
-        defaultValue={initial}
-        autoFocus
-        onFocus={(e) => e.currentTarget.select()}
-        onBlur={(e) => save(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") { e.currentTarget.blur(); }
-          if (e.key === "Escape") { onDone(); }
-        }}
-        className="w-24 rounded border border-brand/40 bg-surface px-1.5 py-0.5 text-sm font-semibold tabular-nums text-foreground focus:outline-none focus:ring-1 focus:ring-brand"
-        disabled={pending}
-      />
-      <button
-        type="button"
-        onClick={() => save("")}
-        className="text-[10px] text-muted underline hover:text-foreground"
-      >
-        reset to {liveLabel}
-      </button>
-    </span>
   );
 }
 

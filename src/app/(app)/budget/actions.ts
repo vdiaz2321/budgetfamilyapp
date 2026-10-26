@@ -1806,6 +1806,32 @@ async function resolvePropertyId(
   return data?.id ?? null;
 }
 
+// The bank bucket a payment came out of — Amex Savings → Real Estate. A
+// bucketed bank account's balance is the sum of its buckets, so the account
+// ledger skips it (adjustAccountLedger) and the picked bucket moves instead,
+// on the ledger's own sign (ledgerDelta: income in, everything else out).
+// Only a bucket of the paying account, and only on a non-investment account —
+// an investment account's buckets are the fund itself (bucket_id). Null when
+// none was picked: the account doesn't move, as before.
+async function resolveSourceBucketId(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  raw: string,
+  accountId: string | null,
+): Promise<string | null> {
+  if (!raw || !accountId) return null;
+  const { data, error } = await supabase
+    .from("buckets")
+    .select("id, accounts!inner(kind)")
+    .eq("id", raw)
+    .eq("account_id", accountId)
+    .eq("household_id", householdId)
+    .neq("accounts.kind", "investment")
+    .maybeSingle();
+  if (error) throw new Error(`Could not verify the bucket it came from: ${error.message}`);
+  return (data?.id as string | undefined) ?? null;
+}
+
 type SaveOutcome = { bookingWarning: string | null; balancesMoved: boolean; touchedDebt: boolean };
 
 // One transaction written with all its side effects (bucket, debt, account
@@ -1825,6 +1851,7 @@ async function insertTransactionCore(
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
+  const sourceBucketIdRaw = String(formData.get("sourceBucketId") ?? "").trim();
   const propertyIdRaw = String(formData.get("propertyId") ?? "").trim();
   const tripIdRaw = String(formData.get("tripId") ?? "").trim();
   const bookingRefRaw = String(formData.get("bookingRef") ?? "").trim();
@@ -1935,6 +1962,7 @@ async function insertTransactionCore(
     if (bucketError) throw new Error(`Could not verify the bucket: ${bucketError.message}`);
     directBucketId = b?.id ?? null;
   }
+  const sourceBucketId = await resolveSourceBucketId(supabase, householdId, sourceBucketIdRaw, accountId);
 
   unwrap(await supabase.from("transactions").insert({
     household_id: householdId,
@@ -1945,6 +1973,7 @@ async function insertTransactionCore(
     payee_id: payeeId,
     account_id: accountId,
     bucket_id: directBucketId,
+    source_bucket_id: sourceBucketId,
     property_id: propertyId,
     trip_id: tripId,
     ...bookingColumns(booking),
@@ -1994,6 +2023,13 @@ async function insertTransactionCore(
   // chosen account's running ledger moves (income adds, everything else
   // spends out — skipped for investment/bucketed accounts, which stay
   // manual). Different tables, so the two run side by side.
+  // The bank bucket it came out of (see resolveSourceBucketId) — refunds
+  // included, as on the ledger: a refund puts the money back in it.
+  if (sourceBucketId) {
+    await adjustBucketBalance(supabase, householdId, sourceBucketId, ledgerDelta(sub.categories?.kind ?? null, amountCents));
+    balancesMoved = true;
+  }
+
   const [touchedDebt, touchedLedger] = await Promise.all([
     !isRefund ? adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents) : Promise.resolve(false),
     accountId
@@ -2159,6 +2195,7 @@ export async function updateTransaction(formData: FormData) {
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
+  const sourceBucketIdRaw = String(formData.get("sourceBucketId") ?? "").trim();
   const propertyIdRaw = String(formData.get("propertyId") ?? "").trim();
   const tripIdRaw = String(formData.get("tripId") ?? "").trim();
   const bookingRefRaw = String(formData.get("bookingRef") ?? "").trim();
@@ -2178,7 +2215,7 @@ export async function updateTransaction(formData: FormData) {
     await supabase
       .from("transactions")
       .select(
-        "subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal, subcategories(linked_bucket_id, linked_account_id), categories(kind)",
+        "subcategory_id, category_id, account_id, bucket_id, source_bucket_id, amount_cents, is_withdrawal, subcategories(linked_bucket_id, linked_account_id), categories(kind)",
       )
       .eq("id", id)
       .eq("household_id", householdId)
@@ -2187,6 +2224,7 @@ export async function updateTransaction(formData: FormData) {
         category_id: string;
         account_id: string | null;
         bucket_id: string | null;
+        source_bucket_id: string | null;
         amount_cents: number;
         is_withdrawal: boolean;
         subcategories: { linked_bucket_id: string | null; linked_account_id: string | null } | null;
@@ -2254,6 +2292,7 @@ export async function updateTransaction(formData: FormData) {
     if (bucketError) throw new Error(`Could not verify the bucket: ${bucketError.message}`);
     directBucketId = b?.id ?? null;
   }
+  const sourceBucketId = await resolveSourceBucketId(supabase, householdId, sourceBucketIdRaw, accountId);
 
   // The booking this payment was on before, so an unlinked or moved payment
   // is taken back off it.
@@ -2278,6 +2317,7 @@ export async function updateTransaction(formData: FormData) {
       payee_id: payeeId,
       account_id: accountId,
       bucket_id: directBucketId,
+      source_bucket_id: sourceBucketId,
       property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
       trip_id: tripId,
       ...bookingColumns(booking),
@@ -2373,6 +2413,16 @@ export async function updateTransaction(formData: FormData) {
     if (await adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(sub.categories?.kind ?? null, amountCents))) {
       touchedAccount = true;
     }
+  }
+  // Same for the bank bucket it came out of: put the old amount back in the
+  // old bucket, take the new amount out of the new one (often the same).
+  if (prevTx?.source_bucket_id) {
+    await adjustBucketBalance(supabase, householdId, prevTx.source_bucket_id, -ledgerDelta(prevKind, prevTx.amount_cents));
+    touchedAccount = true;
+  }
+  if (sourceBucketId) {
+    await adjustBucketBalance(supabase, householdId, sourceBucketId, ledgerDelta(sub.categories?.kind ?? null, amountCents));
+    touchedAccount = true;
   }
   if (touchedAccount) await captureSnapshots(supabase, householdId, { force: true });
 
@@ -2647,11 +2697,11 @@ async function deleteSingleTransaction(
   const tx = unwrap(
     await supabase
       .from("transactions")
-      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, amount_cents, is_withdrawal, movement_type, travel_stay_id, travel_flight_id, travel_car_id, reward_activity_id, subcategories(linked_bucket_id, linked_account_id), categories(kind)")
+      .select("subcategory_id, category_id, account_id, bucket_id, source_bucket_id, paid_to_account_id, paid_to_bucket_id, amount_cents, is_withdrawal, movement_type, travel_stay_id, travel_flight_id, travel_car_id, reward_activity_id, subcategories(linked_bucket_id, linked_account_id), categories(kind)")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle<{
-        subcategory_id: string | null; category_id: string | null; account_id: string | null; bucket_id: string | null;
+        subcategory_id: string | null; category_id: string | null; account_id: string | null; bucket_id: string | null; source_bucket_id: string | null;
         paid_to_account_id: string | null; paid_to_bucket_id: string | null; amount_cents: number; is_withdrawal: boolean | null; movement_type: string | null;
         travel_stay_id: string | null; travel_flight_id: string | null; travel_car_id: string | null; reward_activity_id: string | null;
         subcategories: { linked_bucket_id: string | null; linked_account_id: string | null } | null;
@@ -2726,6 +2776,12 @@ async function deleteSingleTransaction(
   // was the same bucket the savings-linked path already reversed.
   if (tx.bucket_id && tx.bucket_id !== linkedBucketId) {
     await adjustBucketBalance(supabase, householdId, tx.bucket_id, undoDelta);
+    balancesMoved = true;
+  }
+
+  // The bank bucket it came out of gets its money back.
+  if (tx.source_bucket_id) {
+    await adjustBucketBalance(supabase, householdId, tx.source_bucket_id, -ledgerDelta(tx.categories?.kind ?? null, tx.amount_cents));
     balancesMoved = true;
   }
 
@@ -2942,18 +2998,26 @@ export async function setRollover(formData: FormData) {
   revalidatePath("/budget");
 }
 
-export async function setRolloverOverride(formData: FormData) {
+// Rolls over a chosen amount (or the full live amount when `override` is
+// blank). Saving the row is what turns the rollover on, so the Rollover pill
+// calls this directly. The override also resets the carry from this month
+// on, so the part NOT rolled over doesn't reappear next month.
+export async function setRolloverOverride(formData: FormData): Promise<{ error?: string }> {
   const { supabase, householdId } = await requireHousehold();
   const month = String(formData.get("month") ?? "");
-  if (!/^\d{4}-\d{2}-01$/.test(month)) return;
-  const raw = String(formData.get("override") ?? "").trim();
+  if (!/^\d{4}-\d{2}-01$/.test(month)) return { error: "Bad month." };
+  const raw = String(formData.get("override") ?? "").replace(/[$,\s]/g, "");
   // Empty string = clear override (back to live calc). Number = cents override.
   const overrideCents = raw === "" ? null : Math.round(parseFloat(raw) * 100);
-  if (overrideCents !== null && isNaN(overrideCents)) return;
+  if (overrideCents !== null && (isNaN(overrideCents) || overrideCents <= 0)) {
+    return { error: "Enter an amount above $0." };
+  }
 
-  await supabase
+  const { error } = await supabase
     .from("budget_rollovers")
     .upsert({ household_id: householdId, month, override_cents: overrideCents }, { onConflict: "household_id,month" });
+  if (error) return { error: error.message };
 
   revalidatePath("/budget");
+  return {};
 }

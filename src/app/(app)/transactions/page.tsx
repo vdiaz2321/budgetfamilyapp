@@ -19,6 +19,7 @@ type TransactionQueryRow = {
   payee_id: string | null;
   account_id: string | null;
   bucket_id: string | null;
+  source_bucket_id: string | null;
   property_id: string | null;
   trip_id: string | null;
   travel_category: string | null;
@@ -70,7 +71,7 @@ export default async function TransactionsPage({
     let query = supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, source_bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id",
       )
       .eq("household_id", household.id);
     if (hasRange) {
@@ -154,6 +155,7 @@ export default async function TransactionsPage({
               ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
               : "Uncategorized",
       accountId: t.account_id ?? null,
+      sourceBucketId: t.source_bucket_id ?? null,
       propertyId: t.property_id ?? null,
       tripId: t.trip_id ?? null,
       travelCategory: t.travel_category ?? null,

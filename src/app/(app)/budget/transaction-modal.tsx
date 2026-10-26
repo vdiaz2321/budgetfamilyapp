@@ -15,7 +15,9 @@ import { EXPENSE_CATEGORIES } from "../travel/types";
 // Button label (short), plus tab labels.
 const KIND_SHORT: Record<CategoryKind, string> = {
   income: "Income",
-  savings: "Savings",
+  // Matches the Invest/Savings tab and Budget group — a Fidelity buy isn't
+  // only "savings" (Victor, 2026-10-26).
+  savings: "Invest/Savings",
   bills: "Bill",
   expenses: "Expense",
   debt: "Payment",
@@ -164,6 +166,19 @@ function TransactionModalForm({
   const [busy, setBusy] = useState<"save" | "clear" | "delete" | "toggle" | null>(null);
   const isEdit = editTx != null;
   const [txType, setTxType] = useState<CategoryKind>(editTx?.kind ?? initialKind ?? "expenses");
+  // Which list the item picker shows: Income, Expense (bills, expenses, debt
+  // and savings), or Invest/Savings alone — a Fidelity buy shouldn't mean
+  // scrolling past every bill. Separate from txType, which names the save
+  // button from the item picked ("Add Savings" under Expense too).
+  type ListTab = "income" | "expenses" | "savings";
+  const [listTab, setListTab] = useState<ListTab>(
+    txType === "income" ? "income" : txType === "savings" ? "savings" : "expenses",
+  );
+  const tabFits = (tab: ListTab, kind: CategoryKind) =>
+    tab === "income" ? kind === "income" : tab === "savings" ? kind === "savings" : kind !== "income";
+  // An auto-filled item (payee's usual) moves to the list that holds it.
+  const followItemKind = (kind: CategoryKind) =>
+    setListTab((tab) => (tabFits(tab, kind) ? tab : kind === "income" ? "income" : "expenses"));
   // A refund is stored as a NEGATIVE amount on the same subcategory/account —
   // the actuals view (`sum(amount_cents)`) and ledger delta naturally undo it
   // from spending and return the money to the account. Seed from the sign of
@@ -173,7 +188,17 @@ function TransactionModalForm({
   );
   const [selectedAccountId, setSelectedAccountId] = useState<string>(editTx?.accountId ?? initialAccountId ?? "");
   const availableBuckets = bucketsByAccount[selectedAccountId] ?? [];
-  const [selectedBucketId, setSelectedBucketId] = useState<string>("");
+  // An edit opens on the investment bucket it was saved with. Blank used to
+  // mean a plain Save took the amount back off that bucket (the save undoes
+  // the old bucket, then applies whatever is picked now).
+  const [selectedBucketId, setSelectedBucketId] = useState<string>(() => {
+    const saved = editTx?.fromBucketId ?? "";
+    return saved && (bucketsByAccount[editTx?.accountId ?? ""] ?? []).some((b) => b.id === saved) ? saved : "";
+  });
+  // A bank account that holds buckets (Amex Savings): which one the money
+  // came out of, so that bucket moves with the payment (lib/source-buckets).
+  const sourceBuckets = accountOptions.find((a) => a.id === selectedAccountId)?.sourceBuckets ?? [];
+  const [selectedSourceBucketId, setSelectedSourceBucketId] = useState<string>(editTx?.sourceBucketId ?? "");
   const formRef = useRef<HTMLFormElement>(null);
   const amountRef = useRef<HTMLInputElement>(null);
   const [convertedCents, setConvertedCents] = useState<number | null>(null);
@@ -244,7 +269,10 @@ function TransactionModalForm({
   function handlePayeeMatch(item: PayeeLineItem) {
     if (item.subcategoryId) {
       const kind = subOptions.find((s) => s.id === item.subcategoryId)?.kind;
-      if (kind) setTxType(kind);
+      if (kind) {
+        setTxType(kind);
+        followItemKind(kind);
+      }
       setSplits([{ subId: item.subcategoryId, amountCents: totalCents }]);
     }
     // A subscription's price fills an empty amount — never one already typed.
@@ -275,6 +303,7 @@ function TransactionModalForm({
     if (next === selectedAccountId) return;
     setSelectedAccountId(next);
     setSelectedBucketId("");
+    setSelectedSourceBucketId("");
     if (next) clearErrors();
   }
   const autoFilledSubId = useRef<string | null>(null);
@@ -291,14 +320,16 @@ function TransactionModalForm({
     autoFilledSubId.current = subId;
     clearErrors();
     setTxType(kind);
+    followItemKind(kind);
     setSplits([{ subId, amountCents: totalCents }]);
   }
 
   // When txType changes, clear splits (stale subcategories no longer valid).
   // Only when the list actually changes (Income ↔ Expense) — re-tapping the
   // active Expense tab on an edit mustn't wipe the item it already has.
-  function handleTypeChange(kind: CategoryKind) {
-    if ((kind === "income") !== (txType === "income")) setSplits([]);
+  function handleTypeChange(kind: ListTab) {
+    if (kind !== listTab) setSplits([]);
+    setListTab(kind);
     setTxType(kind);
   }
 
@@ -537,10 +568,11 @@ function TransactionModalForm({
     restrictToInitialKind && initialKind
       ? subOptions.filter((s) => s.kind === initialKind)
       : subOptions.filter((s) =>
-          txType === "income" ? s.kind === "income" : SPEND_KINDS.has(s.kind),
+          listTab === "income" ? s.kind === "income" : listTab === "savings" ? s.kind === "savings" : SPEND_KINDS.has(s.kind),
         );
 
-  const allowedGroups = txType === "income" ? new Set(["Banking"]) : new Set(["Banking", "Credit Cards"]);
+  // Money into savings or an investment comes from a bank account, not a card.
+  const allowedGroups = txType === "income" || listTab === "savings" ? new Set(["Banking"]) : new Set(["Banking", "Credit Cards"]);
   const filteredAccounts = accountOptions.filter((a) => allowedGroups.has(a.group ?? "Other"));
   const accountGroups: string[] = [];
   const accountByGroup = new Map<string, typeof accountOptions>();
@@ -736,6 +768,7 @@ function TransactionModalForm({
             autoFilledAccountId.current = null;
             setSelectedAccountId(accountId);
             setSelectedBucketId("");
+            setSelectedSourceBucketId("");
             setAccountPickerOpen(false);
             clearErrors();
           }}
@@ -769,19 +802,19 @@ function TransactionModalForm({
             </div>
           ) : (
             <div className="flex gap-1.5 rounded-xl bg-surface p-1.5 ring-1 ring-line dark:bg-background">
-              {(["income", "expenses"] as const).map((kind) => (
+              {(["income", "expenses", "savings"] as const).map((kind) => (
                 <button
                   key={kind}
                   type="button"
                   onClick={() => handleTypeChange(kind)}
                   className={
-                    "flex-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
-                    (txType === kind || (kind === "expenses" && txType !== "income")
+                    "flex-1 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-semibold transition sm:px-2.5 " +
+                    (listTab === kind
                       ? "shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
-                      : "text-muted hover:bg-foreground/8 hover:text-foreground")
+                      : "text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40")
                   }
                 >
-                  {kind === "income" ? "Income" : "Expense"}
+                  {kind === "income" ? "Income" : kind === "savings" ? "Invest/Savings" : "Expense"}
                 </button>
               ))}
             </div>
@@ -898,6 +931,20 @@ function TransactionModalForm({
                   <path d="m6 9 6 6 6-6" />
                 </svg>
               </button>
+              {sourceBuckets.length > 0 ? (
+                <select
+                  name="sourceBucketId"
+                  aria-label="Bucket the money came out of"
+                  value={selectedSourceBucketId}
+                  onChange={(e) => setSelectedSourceBucketId(e.target.value)}
+                  className="mt-2 w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                >
+                  <option value="">From which bucket? (optional)</option>
+                  {sourceBuckets.map((b) => (
+                    <option key={b.id} value={b.id}>From {b.name}</option>
+                  ))}
+                </select>
+              ) : null}
               {txType === "debt" ? (
                 <p className="mt-1 px-1 text-[11px] text-muted">
                   Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page.

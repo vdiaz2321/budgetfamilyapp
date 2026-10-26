@@ -160,6 +160,9 @@ export type AccountOption = {
   // Shown in the transaction modal's account picker: what a card owes, or
   // what a bank account holds.
   balanceCents?: number;
+  // A bank account that holds buckets: the ones a payment can come out of
+  // (lib/source-buckets). Absent on every other account.
+  sourceBuckets?: { id: string; name: string }[];
 };
 
 // A bucket the transaction modal can attribute an investment contribution to,
@@ -218,6 +221,10 @@ export type TxData = {
   subId: string | null;
   subName: string;
   accountId: string | null;
+  // The bank bucket the money came out of (Amex Savings → Real Estate), on an
+  // account that holds buckets. Required so every loader carries it: an edit
+  // without it would put the money back in the bucket and not take it out.
+  sourceBucketId: string | null;
   // The property this row is attributed to (accounts.kind = 'property').
   propertyId: string | null;
   // The trip this purchase is tagged to (travel_trips.id).

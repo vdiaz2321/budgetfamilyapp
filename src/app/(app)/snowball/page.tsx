@@ -8,6 +8,7 @@ import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { accrueDebtInterest } from "@/lib/debt-interest";
 import { throwIfAny } from "@/lib/supabase-result";
+import { sourceBucketsByAccount } from "@/lib/source-buckets";
 
 export const metadata = { title: "Debt/Loan Snowball · Capitall" };
 
@@ -124,10 +125,10 @@ export default async function SnowballPage() {
   const accountKindById = new Map<string, string>();
   const accountNameById = new Map<string, string>();
   if (debtSubIds.length) {
-    const [{ data: txRows, error: txRowsError }, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: debtCategories, error: debtCategoriesError }, { data: cardBalances, error: cardBalancesError }] = await Promise.all([
+    const [{ data: txRows, error: txRowsError }, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: debtCategories, error: debtCategoriesError }, { data: cardBalances, error: cardBalancesError }, { data: buckets, error: bucketsError }] = await Promise.all([
       supabase
         .from("transactions")
-        .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, paid_to_account_id, movement_type, cleared, is_withdrawal")
+        .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, source_bucket_id, paid_to_account_id, movement_type, cleared, is_withdrawal")
         .eq("household_id", household.id)
         .in("subcategory_id", debtSubIds)
         .order("occurred_on", { ascending: false })
@@ -146,8 +147,16 @@ export default async function SnowballPage() {
         .eq("kind", "debt")
         .order("sort_order"),
       supabase.from("v_card_balances").select("account_id, owed_cents").eq("household_id", household.id),
+      // A payment out of a bucketed bank account names its bucket.
+      supabase
+        .from("buckets")
+        .select("id, account_id, name")
+        .eq("household_id", household.id)
+        .order("sort_order")
+        .order("name"),
     ]);
-    throwIfAny({ txRows: txRowsError, payees: payeesError, accounts: accountsError, debtCategories: debtCategoriesError, cardBalances: cardBalancesError });
+    throwIfAny({ txRows: txRowsError, payees: payeesError, accounts: accountsError, debtCategories: debtCategoriesError, cardBalances: cardBalancesError, buckets: bucketsError });
+    const sourceBuckets = sourceBucketsByAccount(accounts ?? [], buckets ?? []);
     const owedByCard = new Map((cardBalances ?? []).map((b) => [b.account_id as string, Number(b.owed_cents ?? 0)]));
     transferCards = (accounts ?? [])
       .filter((a) => a.kind === "credit_card")
@@ -165,6 +174,7 @@ export default async function SnowballPage() {
         id: a.id,
         name: a.name,
         group: a.kind === "credit_card" ? "Credit Cards" : "Banking",
+        sourceBuckets: sourceBuckets.get(a.id),
       }));
     for (const account of accounts ?? []) accountKindById.set(account.id, account.kind);
     debtTxData = (txRows ?? []).map((t) => ({
@@ -179,6 +189,7 @@ export default async function SnowballPage() {
       subId: t.subcategory_id ?? null,
       subName: t.subcategory_id ? nameBySub.get(t.subcategory_id) ?? "Debt" : "Debt",
       accountId: t.account_id ?? null,
+      sourceBucketId: t.source_bucket_id ?? null,
       propertyId: null,
       tripId: null,
       bookingRef: null,

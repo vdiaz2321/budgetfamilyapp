@@ -25,6 +25,7 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { throwIfAny } from "@/lib/supabase-result";
 import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
 import { CAP_KIND_LABEL, capKindFor, resolveRetirementKind } from "@/lib/retirement-kind";
+import { sourceBucketsByAccount } from "@/lib/source-buckets";
 
 export const metadata = { title: "Invest / Savings · Capitall" };
 
@@ -996,6 +997,7 @@ export default async function InvestPage({
     kind: "savings",
     linkedBucketId: sub.linked_bucket_id ?? null,
   }));
+  const withdrawalSourceBuckets = sourceBucketsByAccount(allAccounts, bucketRows ?? []);
   const withdrawalAccountOptions: AccountOption[] = allAccounts
     .filter(
       (account) =>
@@ -1009,6 +1011,7 @@ export default async function InvestPage({
       name: account.name,
       group: account.kind === "credit_card" ? "Credit Cards" : "Banking",
       balanceCents: pickerBalanceCents(account, cardOwedMap(cardOwedRows)),
+      sourceBuckets: withdrawalSourceBuckets.get(account.id),
     }));
 
   const goalBySub = new Map((savingsGoals ?? []).map((g) => [g.subcategory_id, g]));

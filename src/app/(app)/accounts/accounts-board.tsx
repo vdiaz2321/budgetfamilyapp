@@ -763,7 +763,7 @@ export function AccountsBoard({
     { label: "Month-end update", onSelect: () => setMonthEndOpen(true) },
     { label: estateToFill > 0 ? `Estate guide (${estateToFill} to fill in)` : "Estate guide", onSelect: () => setEstateOpen(true) },
     { label: "Add account", onSelect: () => setAddOpen(true) },
-    { label: "Transfer Funds", onSelect: () => setTransferOpen("banking") },
+    { label: "Transfer Between Banks", onSelect: () => setTransferOpen("banking") },
     { label: "Withdraw Investment", onSelect: () => setTransferOpen("investment") },
     { label: "Transfer Activity", onSelect: () => setActivityOpen(true) },
   ]);
@@ -821,7 +821,7 @@ export function AccountsBoard({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
             </svg>
-            Transfer Funds
+            Transfer Between Banks
           </button>
           {/* Money out of an investment has its own button, so it isn't
               hidden inside Transfer Funds (Victor, 2026-10-24). */}
@@ -1731,7 +1731,15 @@ function TransferModal({
         <div className="flex items-center justify-between">
           {/* Named for what it does: taking money out of an investment is a
               withdrawal. */}
-          <h2 className="text-base font-bold">{fromIsInvestment ? "Withdraw from an investment" : "Transfer between accounts"}</h2>
+          <div>
+            <h2 className="text-base font-bold">{fromIsInvestment ? "Withdraw from an investment" : "Transfer Between Banks"}</h2>
+            {/* Money into Fidelity/TSP is a Budget Invest/Savings entry, not
+                this — said here so the two don't get mixed up (Victor,
+                2026-10-26). */}
+            <p className="mt-0.5 text-[13.5px] text-foreground">
+              {fromIsInvestment ? "Move money from an investment to a bank account." : "Move cash between bank accounts."}
+            </p>
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -2033,7 +2041,7 @@ function AccountSection({
   headerBadge,
   onAddAccount,
   onTransfer,
-  transferLabel = "Transfer Funds",
+  transferLabel = "Transfer Between Banks",
 }: {
   section: Section;
   accounts: AccountData[];

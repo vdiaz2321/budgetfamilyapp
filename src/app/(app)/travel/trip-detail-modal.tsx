@@ -228,11 +228,32 @@ export function TripDetailModal({
         }
       : null;
   // A difference in the other currency, on the same rule as the dollars:
-  // only once there is both a plan and a spend.
+  // only once there is both a plan and a spend. It carries its own colour —
+  // euros can be over while the dollars are even ("$0 / −€1"), and then
+  // only the euro part reads red.
+  const fxDiffNode = (d: number, code: string) => (
+    <span className={d < 0 ? "text-negative" : "text-positive"}>{formatForeignWhole(d, code)}</span>
+  );
   const fxDiffText = (planned: number | null | undefined, actual: number | null | undefined, code: string) =>
-    planned != null && actual != null
-      ? `${formatForeignWhole(planned - actual, code)}`
+    planned == null || actual == null ? null : fxDiffNode(wholeUnits(planned) - wholeUnits(actual), code);
+
+  // The bookings Total row's Difference: the rows' differences added up, so
+  // the column sums to what's printed above it (dash when no row has one).
+  const bookingRowDiffs = shownBookings
+    .filter((b) => !b.cancelled)
+    .map((b) => {
+      const pa = bookingPlanActual(b);
+      return planDiff(pa.planned, pa.actual);
+    })
+    .filter((d): d is number => d != null);
+  const bookingTotalDiff = bookingRowDiffs.length ? bookingRowDiffs.reduce((a, b) => a + b, 0) : null;
+  const fxCompared = liveFx.filter((x) => x.planned != null && x.actual != null);
+  const bookingTotalFxDiff =
+    bookingFxTotals && fxCompared.length
+      ? fxDiffNode(fxCompared.reduce((sum, x) => sum + wholeUnits(x.planned!) - wholeUnits(x.actual!), 0), bookingFxTotals.code)
       : null;
+  const bookingTotalDiffClass =
+    bookingTotalDiff == null ? "text-muted" : bookingTotalDiff > -50 ? "text-positive" : "text-negative";
 
   // The Spending Total's difference sums every row that has one (see
   // planDiff), unplanned spends included; with none, it's a dash too.
@@ -289,7 +310,10 @@ export function TripDetailModal({
   // money still to go (Victor, 2026-10-08) — and a spending row counts once
   // it has spending. Spent with no plan is an unplanned cost (plan $0);
   // nothing paid: left out.
-  const { planned: comparedPlanned, spent: comparedSpent, diff: differenceCents } = tripDifference(t);
+  const { planned: comparedPlanned, spent: comparedSpent, diff: rawDifference } = tripDifference(t);
+  // Shown as "Planned Items Paid $922 / Spent $493", so the difference is
+  // those two whole figures apart (see wholeUnits).
+  const differenceCents = rawDifference == null ? null : wholeUnits(comparedPlanned) - wholeUnits(comparedSpent);
   // "Flights: $0 / Spending: $320" under a card's figure — "Spending" on the
   // Planned card (money set aside), "Spent" on the Spent card. Flights and
   // the last part always show, $0 included; Stays and Rentals each only on a
@@ -723,8 +747,15 @@ export function TripDetailModal({
                         </>
                       ) : DASH
                     }
-                    diff={DASH}
-                    diffClass="text-muted"
+                    diff={
+                      bookingTotalDiff == null ? DASH : (
+                        <>
+                          {formatMoneyWhole(bookingTotalDiff, currency)}
+                          {bookingTotalFxDiff ? <span className="block text-xs font-normal">{bookingTotalFxDiff}</span> : null}
+                        </>
+                      )
+                    }
+                    diffClass={bookingTotalDiffClass}
                   />
                 </li>
               ) : null}
@@ -893,7 +924,10 @@ export function TripDetailModal({
                           <span className="font-normal text-foreground"> / {formatForeignWhole(bookingFxTotals.actual, bookingFxTotals.code)}</span>
                         ) : null}
                       </td>
-                      <td />
+                      <td className={`whitespace-nowrap px-3 py-1.5 text-center tabular-nums ${bookingTotalDiffClass}`}>
+                        {bookingTotalDiff == null ? DASH : formatMoneyWhole(bookingTotalDiff, currency)}
+                        {bookingTotalDiff != null && bookingTotalFxDiff ? <span className="font-normal"> / {bookingTotalFxDiff}</span> : null}
+                      </td>
                     </tr>
                   </tfoot>
                 ) : null}
@@ -1111,10 +1145,16 @@ function Stat({ label, value, className, note, wide }: { label: string; value: s
 // yet used to read as green savings (+$840 before the trip), and an imported
 // actual with no plan as red overspend (Berlin −$1,460) — neither is a
 // difference, so both show a dash.
+// Every figure on the trip shows in whole dollars, so the difference is taken
+// between those whole figures: $115.39 planned vs $115.63 spent reads "$115"
+// and "$116", and the Difference must say −$1 to match, not the −24¢ the raw
+// cents would round to ($0).
+const wholeUnits = (cents: number) => Math.round(cents / 100) * 100;
+
 function planDiff(planned: number | null, actual: number | null): number | null {
-  if (planned != null && actual != null) return planned - actual;
+  if (planned != null && actual != null) return wholeUnits(planned) - wholeUnits(actual);
   // Spent with no plan: an unplanned cost, so the whole spend is over.
-  if (actual != null && actual > 0) return -actual;
+  if (actual != null && actual > 0) return -wholeUnits(actual);
   return null;
 }
 

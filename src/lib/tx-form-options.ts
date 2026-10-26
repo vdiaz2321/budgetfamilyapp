@@ -3,6 +3,7 @@ import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { throwIfAny } from "@/lib/supabase-result";
 import { buildPlanResolver, fetchPlanInputs } from "@/lib/planned-by-sub";
 import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
+import { sourceBucketsByAccount } from "@/lib/source-buckets";
 import type { AccountOption, PayeeLineItem, SubOption } from "@/app/(app)/budget/types";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -110,6 +111,7 @@ export async function loadTxFormData(supabase: SupabaseClient, householdId: stri
   const propertyOptions: AccountOption[] = (accounts ?? [])
     .filter((a) => a.kind === "property")
     .map((a) => ({ id: a.id, name: a.name }));
+  const sourceBuckets = sourceBucketsByAccount(accounts ?? [], buckets ?? []);
   const accountOptions: AccountOption[] = (accounts ?? [])
     .filter((a) => a.kind !== "property")
     .map((a) => ({
@@ -117,6 +119,7 @@ export async function loadTxFormData(supabase: SupabaseClient, householdId: stri
       name: a.name,
       group: accountGroupFor(a),
       balanceCents: pickerBalanceCents(a, cardOwed),
+      sourceBuckets: sourceBuckets.get(a.id),
     }));
 
   const investmentAccountIds = new Set((accounts ?? []).filter((a) => a.kind === "investment").map((a) => a.id));

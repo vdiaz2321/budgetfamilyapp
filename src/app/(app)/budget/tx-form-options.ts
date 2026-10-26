@@ -24,7 +24,7 @@ export async function loadTxFormOptions(): Promise<TxFormOptions & { month: { ke
 export async function loadTransactionForEdit(id: string): Promise<TxData> {
   const { supabase, household } = await getSessionContext();
   const select =
-    "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id";
+    "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, source_bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id";
   const { data: row, error } = await supabase
     .from("transactions")
     .select(select)
@@ -87,6 +87,7 @@ export async function loadTransactionForEdit(id: string): Promise<TxData> {
       subId: t.subcategory_id ?? null,
       subName: sub?.name ?? "Uncategorized",
       accountId: t.account_id ?? null,
+      sourceBucketId: t.source_bucket_id ?? null,
       propertyId: t.property_id ?? null,
       tripId: t.trip_id ?? null,
       travelCategory: t.travel_category ?? null,
