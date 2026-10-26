@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useId, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
 import {
-  CurrencySelect, Field, MoreDetailsToggle, OpenLinkedButton, PaidNote, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, openableClass, outsideTripNote, spentMissingError,
+  CurrencySelect, Field, MoreDetailsToggle, OpenLinkedButton, PaidNote, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, openableClass, spentPlaceholder, closeButtonClass, outsideTripNote, spentMissingError, useSavedFlash,
   type PlanSpent,
 } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
@@ -153,10 +153,34 @@ export function CarModal({
     });
   });
 
-  // "Save & add transaction": the rental saves, then its payment form opens
-  // on top, filled in from it. Done either way, the rental form closes —
-  // what it showed is out of date.
+  // Nothing linked yet: a click on Spent logs the payment — the rental saves
+  // (only when something changed — a save takes seconds), then its payment
+  // form opens on top, filled in from it. Done either way, the rental form
+  // closes — what it showed is out of date. Inside the Add Trip popup it is
+  // offered once the popup has saved. Not on a rental paid with points —
+  // nothing is owed.
+  const canAddPay = spentLocked && !hasPaid && !embed && !car?.cancelledAt && !onPoints;
+
+  // The rental as last saved, to tell whether a Spent click has to save first.
+  const cleanPayload = useRef<string | null>(null);
+  if (car && cleanPayload.current === null) cleanPayload.current = JSON.stringify(payload());
+
   function saveAndPay() {
+    if (car?.tripId && cleanPayload.current === JSON.stringify(payload())) {
+      const tripId = car.tripId;
+      start(async () => {
+        setError(null);
+        await pay.open(
+          { bookingRef: `car:${car.id}`, tripId, label: car.company ?? "Car rental", accountId: car.accountId, amountCents: car.plannedCostCents, payee: car.company ?? "", date: car.reservedOn, due: true },
+          () => {
+            router.refresh();
+            onClose();
+          },
+          { justSaved: false },
+        );
+      });
+      return;
+    }
     if (spentError) return setError(spentError);
     start(async () => {
       setError(null);
@@ -182,6 +206,7 @@ export function CarModal({
   // Pinned in the popup header (in place of the X) so they are reachable
   // without scrolling to the bottom of a long form.
   const formId = useId();
+  const [saved, flashSaved] = useSavedFlash();
   const headerButtons = (
     <>
       {car ? (
@@ -214,9 +239,9 @@ export function CarModal({
         type="button"
         onClick={onClose}
         disabled={pending}
-        className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
+        className={closeButtonClass}
       >
-        Cancel
+        Close
       </button>
       <button
         type="submit"
@@ -224,7 +249,7 @@ export function CarModal({
         disabled={pending}
         className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
       >
-        {pending ? "Saving…" : car ? "Save rental" : "Add rental"}
+        {pending ? "Saving…" : saved ? "Saved" : car ? "Save rental" : "Add rental"}
       </button>
     
     </>
@@ -238,7 +263,14 @@ export function CarModal({
           if (spentError) return setError(spentError);
           start(async () => {
             setError(null);
-            finish(await saveTravelCar(payload()));
+            const result = await saveTravelCar(payload());
+            // An edited rental stays open; a new one closes — the form
+            // can't save it a second time.
+            if (car && !result?.error) {
+              cleanPayload.current = JSON.stringify(payload());
+              router.refresh();
+              flashSaved();
+            } else finish(result);
           });
         }}
         className={`grid grid-cols-1 gap-3 ${embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}`}
@@ -316,15 +348,12 @@ export function CarModal({
             spentOnPoints={onPoints}
             spentLocked={spentLocked}
             onOpenSpent={linked.canOpen ? linked.open : undefined}
+            onAddSpent={canAddPay ? saveAndPay : undefined}
+            spentBusy={canAddPay && (pending || pay.opening)}
             spentNote={hasPaid ? undefined : null}
             showForeign={Boolean(foreignCurrency)}
           />
-          {/* Nothing linked yet: log the payment from here. Inside the Add
-              Trip popup it is offered once the popup has saved. */}
-          {/* Not on a rental paid with points — nothing is owed. */}
-          {spentLocked && !hasPaid && !embed && !car?.cancelledAt && !onPoints ? (
-            <PaymentPrompt due={!isEstimate && !onPoints} busy={pending || pay.opening} error={pay.error} onAdd={saveAndPay} className="mt-2" />
-          ) : null}
+          {canAddPay ? <PaymentPrompt due={!isEstimate} error={pay.error} className="mt-2" /> : null}
           {pay.overlay}
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Card used">
@@ -375,11 +404,11 @@ export function CarModal({
               <input
                 // Only ever the linked payments — blank until one is linked.
                 value={car?.paidCents != null ? centsToDisplay(car.paidCents) : ""}
-                placeholder="—"
+                placeholder={spentPlaceholder(canAddPay && (pending || pay.opening), !linked.canOpen && canAddPay)}
                 readOnly
                 tabIndex={-1}
-                onClick={linked.canOpen ? linked.open : undefined}
-                className={`${inputClass} opacity-70 ${linked.canOpen ? openableClass : ""}`}
+                onClick={linked.canOpen ? linked.open : canAddPay ? saveAndPay : undefined}
+                className={`${inputClass} opacity-70 ${linked.canOpen || canAddPay ? openableClass : ""}`}
               />
               {/* Nothing linked on a locked rental: the button above says it. */}
               {hasPaid || typedSpent ? <PaidNote linked={hasPaid} onOpen={linked.canOpen ? linked.open : undefined} /> : null}

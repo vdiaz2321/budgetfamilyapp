@@ -218,14 +218,16 @@ export function useAddPayment() {
     return () => clearTimeout(t);
   }, []);
 
-  /** Opens the form for a saved booking; `onDone` hears whether it was saved. */
-  const open = async (prefill: PaymentPrefill, onDone: (saved: boolean) => void) => {
+  /** Opens the form for a saved booking; `onDone` hears whether it was saved.
+   *  `justSaved: false` — the booking was already saved and unchanged, so the
+   *  form's "Pays for" list already has it and needn't be reloaded. */
+  const open = async (prefill: PaymentPrefill, onDone: (saved: boolean) => void, { justSaved = true } = {}) => {
     setError(null);
     setOpening(true);
     try {
       // The booking was only just saved: the form's "Pays for" list must
       // have it before the form can pick it.
-      const [[opts, payees]] = await Promise.all([loadPickers(), refreshTripTaggingAfterSave()]);
+      const [[opts, payees]] = await Promise.all([loadPickers(), justSaved ? refreshTripTaggingAfterSave() : null]);
       setForm({ prefill, opts, payees, onDone });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't open the transaction form.");
@@ -309,34 +311,24 @@ function NewPayment({
 }
 
 /**
- * Under a booking's locked Spent: the button that logs its payment, and a red
- * line while it is booked with cash to pay and no transaction yet. The button
- * saves the booking first, so the form links to it as it now stands.
+ * Under a booking's locked Spent: a red line while it is booked with cash to
+ * pay and no transaction yet. Clicking a Spent box logs the payment (it saves
+ * the booking first, so the form links to it as it now stands) — the
+ * "Save & add transaction" button it replaced read oddly (Victor, 2026-10-26).
  */
 export function PaymentPrompt({
   due,
-  busy,
   error,
-  onAdd,
   className = "",
 }: {
   due: boolean;
-  busy: boolean;
   error: string | null;
-  onAdd: () => void;
   className?: string;
 }) {
+  if (!due && !error) return null;
   return (
     <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${className}`}>
-      <button
-        type="button"
-        onClick={onAdd}
-        disabled={busy}
-        className="rounded-md bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-sky-300 transition hover:bg-sky-200 disabled:opacity-60 dark:bg-sky-900/50 dark:ring-sky-700 dark:hover:bg-sky-800/60"
-      >
-        {busy ? "Saving…" : "Save & add transaction"}
-      </button>
-      {due ? <span className="text-xs font-semibold text-negative">No transaction logged yet</span> : null}
+      {due ? <span className="text-xs font-semibold text-negative">No transaction yet: click Spent to add it</span> : null}
       {error ? <span className="basis-full text-xs text-negative">{error}</span> : null}
     </div>
   );

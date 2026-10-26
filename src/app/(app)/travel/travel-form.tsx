@@ -111,6 +111,8 @@ export function PlanSpentFields({
   onFocusSlot,
   spentLocked = false,
   onOpenSpent,
+  onAddSpent,
+  spentBusy = false,
   spentOnPoints = false,
   showForeign = true,
   spentRateDate,
@@ -129,6 +131,11 @@ export function PlanSpentFields({
   spentLocked?: boolean;
   /** Opens those linked transactions — clicking the locked box does it. */
   onOpenSpent?: () => void;
+  /** Nothing linked yet: clicking the locked box logs its payment instead
+   *  (Victor, 2026-10-26 — in place of a "Save & add transaction" button). */
+  onAddSpent?: () => void;
+  /** The payment form is opening: the box says so. */
+  spentBusy?: boolean;
   /** Paid with points: Spent is only the cash paid on top of the points, and
    *  Planned is what it would have cost. The labels say so. */
   spentOnPoints?: boolean;
@@ -207,18 +214,19 @@ export function PlanSpentFields({
   const boxes = allBoxes.filter((b) => showForeign || !b.slot.endsWith("Foreign"));
   const box = (b: (typeof boxes)[number]) => {
     const locked = spentLocked && b.slot === "spent";
+    const openSpent = onOpenSpent ?? onAddSpent;
     return (
       <Field key={b.slot} center label={b.label} action={locked && onOpenSpent ? <OpenLinkedButton onOpen={onOpenSpent} /> : undefined}>
         <input
           value={value[b.slot]}
           onChange={(e) => type(b.slot, e.target.value)}
           onFocus={() => onFocusSlot?.(b.slot)}
-          onClick={locked ? onOpenSpent : undefined}
+          onClick={locked ? openSpent : undefined}
           readOnly={locked}
           tabIndex={locked ? -1 : undefined}
-          placeholder={locked ? "—" : undefined}
+          placeholder={locked ? spentPlaceholder(spentBusy, !onOpenSpent && !!onAddSpent) : undefined}
           inputMode="decimal"
-          className={`${inputClass} text-center ${locked ? "opacity-70" : ""} ${locked && onOpenSpent ? openableClass : ""}`}
+          className={`${inputClass} text-center ${locked ? "opacity-70" : ""} ${locked && openSpent ? openableClass : ""}`}
         />
         {locked ? (spentNote !== undefined ? spentNote : <PaidNote linked onOpen={onOpenSpent} />) : null}
       </Field>
@@ -288,6 +296,30 @@ export function OpenLinkedButton({ onOpen }: { onOpen: () => void }) {
 }
 
 /** A locked Spent box that opens its linked payment when clicked. */
+/** "Saved" on a booking's save button for a moment: an edited booking stays
+ *  open after a save (Victor, 2026-10-26), so the button says it worked. */
+export function useSavedFlash() {
+  const [on, setOn] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const flash = () => {
+    setOn(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setOn(false), 2000);
+  };
+  return [on, flash] as const;
+}
+
+/** The booking popups' Close: leaves without saving (Victor, 2026-10-26 —
+ *  "Cancel" beside "Cancel booking" read as cancelling the reservation). */
+export const closeButtonClass =
+  "rounded-md px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-sky-900/50";
+
+/** A locked Spent box's placeholder: "+ Add" when a click logs its payment. */
+export const spentPlaceholder = (busy: boolean, canAdd: boolean) => (busy ? "Opening…" : canAdd ? "+ Add" : "—");
+
 export const openableClass = "cursor-pointer hover:ring-2 hover:ring-sky-400";
 
 export const inputClass =

@@ -392,7 +392,7 @@ function TransactionModalForm({
   // its popup. An edit starts from this payment's own saved split; a new one
   // starts blank — a payment often covers only some seats, so pre-splitting
   // the amount across everyone was wrong (Victor, 2026-10-10). The amount
-  // follows the dollars typed; "Split by planned fares" fills it on request.
+  // follows the dollars typed; "Fill in from planned fares" fills it on request.
   const flightPax = paidBooking?.ref.startsWith("flight:") ? paidBooking.passengers : [];
   const ownShares = editTx ? paidBooking?.payments.find((p) => p.txId === editTx.id)?.shares ?? null : null;
   const [paxCents, setPaxCents] = useState<Record<string, string> | null>(null);
@@ -407,11 +407,16 @@ function TransactionModalForm({
     const parts = shareOut(totalCents, flightPax.map((p) => p.plannedCents));
     setPaxCents(Object.fromEntries(flightPax.map((p, i) => [p.name, parts[i] ? centsToDisplay(parts[i]) : ""])));
   }
+  // One passenger: the whole amount is theirs — nothing to split (Victor,
+  // 2026-10-26: "$… left to split" on a one-seat flight read as nonsense).
+  const onlyPax = flightPax.length === 1 && !ownShares && totalCents > 0 ? centsToDisplay(totalCents) : "";
   const paxRows: PaxRow[] = flightPax.map((p, i) => ({
     name: p.name,
-    cents: paxCents?.[p.name] ?? (defaultShares[i] ? centsToDisplay(defaultShares[i]) : ""),
+    cents: paxCents?.[p.name] ?? (defaultShares[i] ? centsToDisplay(defaultShares[i]) : onlyPax),
     foreign: paxForeign?.[p.name] ?? (ownShare(p.name)?.foreignCents ? centsToDisplay(ownShare(p.name)!.foreignCents!) : ""),
-    points: paxPoints?.[p.name] ?? (p.points ? String(p.points) : ""),
+    // The booking's points for that seat — 0 shown as 0, not left blank
+    // (Victor, 2026-10-26).
+    points: paxPoints?.[p.name] ?? String(p.points || 0),
   }));
   const paxSplitCents = paxRows.reduce((sum, r) => sum + Math.max(0, moneyExpressionToCents(r.cents)), 0);
   function pickBooking(ref: string) {
@@ -432,7 +437,12 @@ function TransactionModalForm({
     clearErrors();
     const pick = (key: "cents" | "foreign" | "points") =>
       Object.fromEntries(paxRows.map((r) => [r.name, r.name === name && patch[key] !== undefined ? patch[key]! : r[key]]));
-    if (patch.foreign !== undefined) setPaxForeign(pick("foreign"));
+    // Functional, so several rows filled in one go (the panel's EUR fill)
+    // don't overwrite each other.
+    if (patch.foreign !== undefined) {
+      const base = Object.fromEntries(paxRows.map((r) => [r.name, r.foreign]));
+      setPaxForeign((prev) => ({ ...base, ...prev, [name]: patch.foreign! }));
+    }
     if (patch.points !== undefined) setPaxPoints(pick("points"));
     if (patch.cents !== undefined) {
       const next = pick("cents");

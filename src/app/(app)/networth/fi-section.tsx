@@ -2289,7 +2289,7 @@ function PlanModal({
           endYear: l.endYear,
           endMonth: l.endMonth,
           raisePct: l.raisePct,
-          piaCents: fromRecord(l) ? (fromRecord(l)!.pia / 100).toFixed(2) : l.kind === "social_security" ? l.pia : "",
+          piaCents: fromRecord(l) ? (fromRecord(l)!.pia / 100).toFixed(2) : l.kind === "social_security" || (l.kind === "fers" && l.owner === "spouse") ? l.pia : "",
           per: fromRecord(l) ? "mo" : l.kind === "fers" ? "yr" : l.per,
           taxable: l.taxable,
           owner: l.owner,
@@ -3056,9 +3056,10 @@ function PlanModal({
           onClose={closeSection}
           actions={saveButton}
           error={error}
-          // A menu like Income's + Add income, at the header's right — two
-          // buttons wrapped under this long title. One pension per person.
-          aside={
+          // + Add pension at the left, Close at the right (Victor,
+          // 2026-10-26). One pension per person.
+          closeAtRight
+          extra={
             lines.some((l) => l.kind === "fers" && l.owner === "self") &&
             lines.some((l) => l.kind === "fers" && l.owner === "spouse") ? null : (
               <select
@@ -3669,6 +3670,7 @@ function SectionPopup({
   toolbarRef,
   extra,
   aside,
+  closeAtRight,
   children,
 }: {
   open: boolean;
@@ -3683,8 +3685,21 @@ function SectionPopup({
   extra?: React.ReactNode;
   /** At the header's right edge — the section's "How it works" link. */
   aside?: React.ReactNode;
+  /** Close at the header's right edge in place of `aside` (the GS pension
+   *  popup, Victor 2026-10-26). */
+  closeAtRight?: boolean;
   children: React.ReactNode;
 }) {
+  const closeButton = (
+    <button
+      type="button"
+      onClick={onClose}
+      className="shrink-0 rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/30 transition hover:bg-negative/20"
+    >
+      Close
+    </button>
+  );
+  const right = closeAtRight ? closeButton : aside;
   return (
     <div className={open ? "fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4" : "hidden"}>
       {open ? <SectionPopupBackdrop onClose={onClose} /> : null}
@@ -3706,17 +3721,15 @@ function SectionPopup({
           <div className="grid shrink-0 grid-cols-1 items-center gap-x-3 gap-y-2 border-b border-line bg-surface px-5 pb-3 pt-4 sm:grid-cols-[1fr_auto_1fr]">
             <div className="flex flex-wrap items-center gap-3">
               {actions}
-              <button
-                type="button"
-                onClick={onClose}
-                className="shrink-0 rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/30 transition hover:bg-negative/20"
-              >
-                Close
-              </button>
+              {closeAtRight ? null : closeButton}
               {extra}
+              {/* On a phone Close stays on this row, at its right end. */}
+              {closeAtRight ? <div className="ml-auto sm:hidden">{closeButton}</div> : null}
             </div>
             <h2 className="min-w-0 text-center text-base font-bold leading-tight tracking-tight sm:text-xl">{title}</h2>
-            {aside ? <div className="flex justify-center sm:justify-end">{aside}</div> : null}
+            {right ? (
+              <div className={`justify-center sm:justify-end ${closeAtRight ? "hidden sm:flex" : "flex"}`}>{right}</div>
+            ) : null}
             {toolbarRef ? <div ref={toolbarRef} className="space-y-2 sm:col-span-3" /> : null}
             {error ? <p className="text-sm font-medium text-negative sm:col-span-3">{error}</p> : null}
           </div>
@@ -3984,12 +3997,36 @@ function FersLineFields({
               </p>
             ) : null}
             {/* Counted only when that person's Social Security is known
-                (lib/fers: his, from a Social Security line with a PIA). */}
-            {est.supplement ? (
-              <p>
-                Plus the FERS supplement until 62
-                {line.owner === "self" && ssKnown ? "." : " — not in the plan: it needs this person's Social Security."}
-              </p>
+                (lib/fers: his, from a Social Security line with a PIA; the
+                spouse's, typed below from their SSA statement). */}
+            {est.supplement && line.owner === "self" ? (
+              <p>Plus the FERS supplement until 62{ssKnown ? "." : " — not in the plan: it needs your Social Security."}</p>
+            ) : null}
+            {est.supplement && line.owner === "spouse" ? (
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                <span className="font-semibold">Spouse&rsquo;s Social Security at 62 /mo:</span>
+                <input
+                  inputMode="decimal"
+                  value={line.pia}
+                  onChange={(e) => onChange({ pia: e.target.value })}
+                  placeholder="0"
+                  aria-label="Spouse's Social Security at 62 per month"
+                  className={`${lineInput} max-w-40 text-center`}
+                />
+                <span>
+                  {displayToCents(line.pia || "0") > 0 ? (
+                    <>
+                      → supplement{" "}
+                      <span className="font-semibold" style={{ color: "var(--positive)" }}>
+                        {$(Math.round((displayToCents(line.pia) * Math.min(est.serviceYears, 40)) / 40))}/mo
+                      </span>{" "}
+                      until 62
+                    </>
+                  ) : (
+                    "Needed for the FERS supplement until 62."
+                  )}
+                </span>
+              </div>
             ) : null}
             {line.owner === "self" && hasMilitaryRetirement ? (
               <p>Military years not counted: you keep your military retired pay.</p>
@@ -4033,41 +4070,49 @@ function FersGuide({
     ["Survivor benefits", "https://www.opm.gov/retirement-center/survivor-benefits/"],
     ["Retirement quick guide", "https://www.opm.gov/retirement-center/apply/quick-guide/"],
   ];
-  const fullCareer = (whose: string, mra: string) => (
+  // Whoever in the household works GS — either person, with or without a
+  // military past (Victor, 2026-10-26) — so the cases are by situation, not
+  // by "you" and "your spouse". MRA shown for the household's birth years.
+  const mras = [...new Set([birthYear, spouseBirthYear].filter((y): y is number => y != null).map(mraOf))];
+  const mra = mras.length ? mras.join(" or ") : "57";
+  const careerPoints = (
     <>
       <FersPoint label="Full pension">at 62 with 5 GS years, at 60 with 20, or at {mra} with 30.</FersPoint>
-      <FersPoint label="Early">with 10–29 years {whose} can start at {mra}, cut 5% for each year under 62.</FersPoint>
+      <FersPoint label="Early">with 10–29 years, start at {mra}, cut 5% for each year under 62.</FersPoint>
       <FersPoint label="Supplement">leaving before 62 with no cut adds a FERS supplement until 62 — about Social Security at 62 × GS years ÷ 40.</FersPoint>
     </>
   );
+  const career = (
+    <div className="space-y-2">
+      <p className="font-bold uppercase tracking-wide">A GS career — no military retirement:</p>
+      {careerPoints}
+      <FersPoint label="Military time">active-duty years without a military retirement can be bought back (3% of basic pay plus interest) before leaving GS; then they count.</FersPoint>
+    </div>
+  );
+  const military = (
+    <div className="space-y-2">
+      <p className="font-bold uppercase tracking-wide">GS after a military retirement:</p>
+      <FersPoint label="Military years">
+        don&rsquo;t count while getting military retired pay. Counting them means giving up retired pay for life — so most
+        keep retired pay and earn a GS pension on GS years only.
+      </FersPoint>
+      <FersPoint label="GS years needed">5 earns a pension at 62. With 10+, start at {mra}, cut 5% a year under 62.</FersPoint>
+      <FersPoint label="Health insurance">be on FEHB for the 5 years before retiring — TRICARE years count, but be in an FEHB plan on the retirement date.</FersPoint>
+    </div>
+  );
   return (
     <div className="space-y-3 rounded-xl p-4 ring-1 ring-line sm:col-span-2">
-      <p className="text-base font-bold sm:text-lg">How the GS pension works</p>
+      <p className="text-center text-base font-bold uppercase tracking-wide underline underline-offset-4 sm:text-lg">How the GS pension works</p>
+      {/* The household's own situation first. */}
       <div className="grid gap-4 text-sm leading-relaxed md:grid-cols-2">
-        {hasMilitaryRetirement ? (
-          <div className="space-y-2">
-            <p className="font-bold uppercase tracking-wide">You — after military retirement</p>
-            <FersPoint label="Your military years">
-              don&rsquo;t count while you get military retired pay. Counting them means giving up retired pay for life — so you
-              keep retired pay and earn a GS pension on your GS years only.
-            </FersPoint>
-            <FersPoint label="GS years needed">5 earns a pension at 62. With 10+ you can start at {mraOf(birthYear)}, cut 5% a year under 62.</FersPoint>
-            <FersPoint label="Health insurance">be on FEHB for the 5 years before retiring — TRICARE years count, but be in an FEHB plan on your retirement date.</FersPoint>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="font-bold uppercase tracking-wide">You — a GS career</p>
-            {fullCareer("you", mraOf(birthYear))}
-            <FersPoint label="Military time">active-duty years without a military retirement can be bought back (3% of basic pay plus interest) before leaving GS; then they count.</FersPoint>
-          </div>
-        )}
-        <div className="space-y-2">
-          <p className="font-bold uppercase tracking-wide">{spouseBirthYear != null ? "Your spouse — a GS career" : "For everyone"}</p>
-          {spouseBirthYear != null ? fullCareer("your spouse", mraOf(spouseBirthYear)) : null}
-          <FersPoint label="How much">1% of the best 3-year average salary for each GS year — 1.1% when leaving at 62+ with 20+ years.</FersPoint>
-          <FersPoint label="Raises">a COLA each January from 62, a little less than Social Security&rsquo;s when inflation is over 2%.</FersPoint>
-          <FersPoint label="Survivor">leaving your spouse 50% costs 10% of the pension; 25% costs 5%.</FersPoint>
-        </div>
+        {hasMilitaryRetirement ? military : career}
+        {hasMilitaryRetirement ? career : military}
+      </div>
+      <div className="space-y-2 border-t border-line pt-3 text-sm leading-relaxed">
+        <p className="font-bold uppercase tracking-wide">Everyone:</p>
+        <FersPoint label="How much">1% of the best 3-year average salary for each GS year — 1.1% when leaving at 62+ with 20+ years.</FersPoint>
+        <FersPoint label="Raises">a COLA each January from 62, a little less than Social Security&rsquo;s when inflation is over 2%.</FersPoint>
+        <FersPoint label="Survivor">leaving a spouse 50% costs 10% of the pension; 25% costs 5%.</FersPoint>
       </div>
       {/* OPM's own pages, right here rather than behind a link. */}
       <div className="flex flex-wrap gap-2 border-t border-line pt-3">

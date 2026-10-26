@@ -645,7 +645,8 @@ export async function saveRetirementPlan(formData: FormData) {
       end_year: end,
       end_month: end == null ? null : endMonth,
       raise_pct: raise,
-      pia_cents: kind === "social_security" && String(l.piaCents ?? "").trim() ? Math.max(0, displayToCents(String(l.piaCents))) || null : null,
+      // On a spouse's GS line: their own Social Security at 62, for the supplement.
+      pia_cents: (kind === "social_security" || (kind === "fers" && l.owner === "spouse")) && String(l.piaCents ?? "").trim() ? Math.max(0, displayToCents(String(l.piaCents))) || null : null,
       // VA disability is never taxed, whatever the box says; a GS pension always is.
       taxable: kind === "va" ? false : kind === "fers" ? true : !!l.taxable,
       owner: kind === "fers" && l.owner === "spouse" ? "spouse" : "self",

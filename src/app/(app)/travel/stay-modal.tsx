@@ -8,7 +8,7 @@ import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./acti
 import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import {
-  CurrencySelect, PlanSpentFields, PlannedPointsNote, isPlannedOnly, outsideTripNote, spentMissingError,
+  CurrencySelect, PlanSpentFields, PlannedPointsNote, closeButtonClass, isPlannedOnly, outsideTripNote, spentMissingError, useSavedFlash,
   type PlanSpent,
 } from "./travel-form";
 import type { Embed, SectionHandle } from "./embedded-section";
@@ -325,10 +325,38 @@ export function StayModal({
     return result.payment ?? null;
   }
 
-  // "Save & add transaction": the stay saves, then its payment form opens
-  // on top, filled in from it. Done either way, the stay form closes —
-  // what it showed is out of date.
+  // Nothing linked yet: a click on Spent logs the payment — the stay saves
+  // (only when something changed — a save takes seconds), then its payment
+  // form opens on top, filled in from it. Done either way, the stay form
+  // closes — what it showed is out of date. Inside the Add Trip popup it is
+  // offered once the popup has saved. Not on a stay paid with points or a
+  // free night — nothing is owed (cash taxes still go through + Transaction).
+  // The stay as last saved — every field, read off the form — to tell
+  // whether a Spent click has to save first.
+  const formSnapshot = () => (formRef.current ? new URLSearchParams(new FormData(formRef.current) as unknown as Record<string, string>).toString() : "");
+  const cleanForm = useRef<string | null>(null);
+  useEffect(() => {
+    if (stay) cleanForm.current = formSnapshot();
+  }, []);
+
+  const canAddPay = spentLocked && !hasPaid && !embed && !stay?.cancelledAt && !pointsUsed && !freeNightUsed;
+
   function saveAndPay() {
+    if (stay?.tripId && !rooms.length && cleanForm.current === formSnapshot()) {
+      const tripId = stay.tripId;
+      start(async () => {
+        setError(null);
+        await pay.open(
+          { bookingRef: `stay:${stay.id}`, tripId, label: stay.propertyName, accountId: stay.accountId, amountCents: stay.plannedCostCents, payee: stay.propertyName, date: stay.reservedOn, due: true },
+          () => {
+            router.refresh();
+            onClose();
+          },
+          { justSaved: false },
+        );
+      });
+      return;
+    }
     start(async () => {
       const payment = await saveAll();
       if (payment === false) return;
@@ -345,6 +373,7 @@ export function StayModal({
 
   // Pinned in the popup header (in place of the X) so they are reachable
   // without scrolling to the bottom of a long form.
+  const [justSaved, flashSaved] = useSavedFlash();
   const headerButtons = (
     <>
       {/* A booking that falls through is cancelled, not deleted: it keeps
@@ -407,9 +436,9 @@ export function StayModal({
         type="button"
         onClick={onClose}
         disabled={pending}
-        className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
+        className={closeButtonClass}
       >
-        Cancel
+        Close
       </button>
       <button
         type="submit"
@@ -417,7 +446,7 @@ export function StayModal({
         disabled={pending}
         className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
       >
-        {pending ? "Saving…" : stay ? "Save stay" : "Add stay"}
+        {pending ? "Saving…" : justSaved ? "Saved" : stay ? "Save stay" : "Add stay"}
       </button>
     
     </>
@@ -435,7 +464,15 @@ export function StayModal({
           e.preventDefault();
           if (embed) return;
           start(async () => {
-            if ((await saveAll()) !== false) onClose();
+            // An edited stay stays open; a new one closes — the form can't
+            // save it a second time.
+            if ((await saveAll()) !== false) {
+              if (stay) {
+                cleanForm.current = formSnapshot();
+                flashSaved();
+              }
+              else onClose();
+            }
           });
         }}
         className="grid grid-cols-1 gap-3 sm:grid-cols-2"
@@ -593,16 +630,12 @@ export function StayModal({
             spentRateDate={isEstimate ? undefined : reservedOn}
             spentLocked={spentLocked}
             onOpenSpent={linked.canOpen ? linked.open : undefined}
+            onAddSpent={canAddPay ? saveAndPay : undefined}
+            spentBusy={canAddPay && (pending || pay.opening)}
             spentNote={hasPaid ? undefined : null}
             showForeign={Boolean(foreignCurrency)}
           />
-          {/* Nothing linked yet: log the payment from here. Inside the Add
-              Trip popup it is offered once the popup has saved. Not on a
-              stay paid with points or a free night — nothing is owed (cash
-              taxes still go through + Transaction). */}
-          {spentLocked && !hasPaid && !embed && !stay?.cancelledAt && !pointsUsed && !freeNightUsed ? (
-            <PaymentPrompt due={due} busy={pending || pay.opening} error={pay.error} onAdd={saveAndPay} />
-          ) : null}
+          {canAddPay ? <PaymentPrompt due={due} error={pay.error} /> : null}
           {linked.error ? <p className="text-[11px] text-negative">{linked.error}</p> : null}
           {linked.overlay}
           {pay.overlay}

@@ -165,6 +165,13 @@ export function SsRecordSection({
   const past = rows.filter((r) => r.year < thisYear);
   const per = Math.ceil(past.length / 3);
   const thirds = [past.slice(0, per), past.slice(per, per * 2), past.slice(per * 2)];
+  // Years worked so far: a running count of the years with earnings (Victor, 2026-10-26).
+  const yearsWorked = new Map<number, number>();
+  past.reduce((n, r) => {
+    const next = n + (r.cents > 0 ? 1 : 0);
+    yearsWorked.set(r.year, next);
+    return next;
+  }, 0);
   const posted = past.reduce((t, r) => t + r.cents, 0);
   const spouseOk = spouseBirthYear != null && record != null;
   const yearOk = /^\d{4}$/.test(year.trim()) && Number(year) < thisYear;
@@ -445,12 +452,14 @@ export function SsRecordSection({
                 <table className="w-full table-fixed text-sm tabular-nums">
                   {/* Fixed widths so the parts line up when stacked on the phone. */}
                   <colgroup>
-                    <col className="w-[30%]" />
-                    <col className="w-[20%]" />
-                    <col className="w-1/2" />
+                    <col className="w-[22%]" />
+                    <col className="w-[22%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[40%]" />
                   </colgroup>
                   <thead className={i > 0 ? "max-sm:hidden" : ""}>
                     <tr className="border-b border-line">
+                      <th className="px-1 sm:px-2 py-1.5 text-center font-bold leading-tight">Total Yrs</th>
                       <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Year</th>
                       <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Age</th>
                       <th className="px-1.5 sm:px-3 py-1.5 text-center font-bold">Earnings</th>
@@ -461,6 +470,7 @@ export function SsRecordSection({
                       editing === r.year ? (
                         <Fragment key={r.year}>
                           <tr className="bg-sky-50 dark:bg-sky-950/40">
+                            <td className="px-1.5 sm:px-3 py-1 text-center">{yearsWorked.get(r.year)}</td>
                             <td className="px-1.5 sm:px-3 py-1 text-center font-semibold">{r.year}</td>
                             <td className="px-1.5 sm:px-3 py-1 text-center">{birthYear != null ? r.year - birthYear : "—"}</td>
                             <td className="px-1 py-1">
@@ -484,7 +494,7 @@ export function SsRecordSection({
                             </td>
                           </tr>
                           <tr className="bg-sky-50 dark:bg-sky-950/40">
-                            <td colSpan={3} className="px-1.5 pb-1.5 sm:px-3">
+                            <td colSpan={4} className="px-1.5 pb-1.5 sm:px-3">
                               <div className="flex flex-wrap items-center justify-center gap-2">
                                 <button
                                   type="button"
@@ -522,6 +532,7 @@ export function SsRecordSection({
                           }}
                           className="cursor-pointer transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                         >
+                          <td className="px-1.5 sm:px-3 py-1 text-center">{yearsWorked.get(r.year)}</td>
                           <td className="px-1.5 sm:px-3 py-1 text-center">{r.year}</td>
                           <td className="px-1.5 sm:px-3 py-1 text-center">{birthYear != null ? r.year - birthYear : "—"}</td>
                           <td className="px-1.5 sm:px-3 py-1 text-center" style={{ color: "var(--viz-income)" }}>

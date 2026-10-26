@@ -199,7 +199,8 @@ const SS_AT_62_SHARE = 0.7;
  * its own start month, no end, the amount after the age and survivor cuts.
  * A start before 62 with no cut also gets the FERS supplement until 62 —
  * about Social Security at 62 × GS years ÷ 40 — when that person's Social
- * Security is known (his: the line with a PIA). Lines that pay nothing (under
+ * Security is known (his: the line with a PIA; the spouse's: their own Social
+ * Security at 62, stored in the GS line's `piaCents`). Lines that pay nothing (under
  * 5 years, or dates missing) are dropped.
  */
 export function applyFers(
@@ -228,10 +229,14 @@ export function applyFers(
       taxable: true,
       fers: est,
     });
-    if (est.supplement && inp.owner === "self") {
+    if (est.supplement) {
+      // His: from his Social Security line's PIA. The spouse's: their own
+      // Social Security at 62, typed on the GS line from their SSA statement
+      // (Victor, 2026-10-26) — the plan holds no record of theirs.
       const ss = lines.find((l) => l.kind === "social_security" && !l.spousal && l.piaCents);
-      if (ss?.piaCents) {
-        const monthly = Math.round((ss.piaCents * SS_AT_62_SHARE * Math.min(est.serviceYears, 40)) / 40);
+      const ssAt62 = inp.owner === "spouse" ? (line.piaCents ?? 0) : ss?.piaCents ? ss.piaCents * SS_AT_62_SHARE : 0;
+      if (ssAt62 > 0) {
+        const monthly = Math.round((ssAt62 * Math.min(est.serviceYears, 40)) / 40);
         // Paid through the month before 62.
         out.push({
           ...line,

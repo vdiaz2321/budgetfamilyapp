@@ -434,7 +434,9 @@ export type IncomeLine = {
   /** Typed per year: the amount as typed. `monthlyCents` is then a twelfth of it. */
   annualCents?: number | null;
   /** Social Security only: the full-retirement-age benefit (PIA) per month,
-   *  in the same money as `monthlyCents`. Null: worked out from the start age. */
+   *  in the same money as `monthlyCents`. Null: worked out from the start age.
+   *  On a spouse's FERS line: their own Social Security at 62 per month, for the
+   *  FERS supplement (lib/fers). */
   piaCents?: number | null;
   taxable: boolean;
   /** Social Security from the SSA statement (lib/ssa), not typed: its

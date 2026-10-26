@@ -89,17 +89,48 @@ export function BookingPaymentPanel({
 
   // Typing in the other currency fills that passenger's dollars at the
   // payment date's rate. The rates load with the panel and follow the date.
-  const rates = useRef<Record<string, number> | null>(null);
+  const [rates, setRates] = useState<Record<string, number> | null>(null);
   useEffect(() => {
     if (!isFlight) return;
     let stale = false;
     loadFxRates(date).then((r) => {
-      if (!stale) rates.current = r;
+      if (!stale) setRates(r);
     });
     return () => { stale = true; };
   }, [isFlight, date]);
+
+  // And the other way: a passenger's dollars fill their other-currency box
+  // at the same rate (Victor, 2026-10-26) — typed, filled from the amount,
+  // or from planned fares. A figure typed in that box is kept; one filled
+  // here follows the dollars when they change.
+  const filled = useRef<Record<string, string>>({});
+  const fillKey = rows.map((r) => `${r.name}|${r.cents}|${r.foreign}`).join(";");
+  useEffect(() => {
+    const rate = rates?.[foreignCurrency];
+    if (!isFlight || !foreign || !rate) return;
+    for (const r of rows) {
+      const auto = !r.foreign.trim() || r.foreign === filled.current[r.name];
+      const usd = hasOperator(r.cents) ? NaN : Number(r.cents.replace(/,/g, ""));
+      if (!auto) continue;
+      if (!r.cents.trim()) {
+        // Dollars cleared: a filled-in figure goes with them.
+        if (r.foreign) {
+          delete filled.current[r.name];
+          onRow(r.name, { foreign: "" });
+        }
+        continue;
+      }
+      if (!Number.isFinite(usd)) continue;
+      const next = centsToDisplay(Math.round(usd * rate * 100));
+      if (next === r.foreign) continue;
+      filled.current[r.name] = next;
+      onRow(r.name, { foreign: next });
+    }
+  }, [fillKey, rates, foreignCurrency, isFlight, foreign]);
+
   function typeForeign(name: string, value: string) {
-    const rate = rates.current?.[foreignCurrency];
+    delete filled.current[name];
+    const rate = rates?.[foreignCurrency];
     const n = hasOperator(value) ? NaN : Number(value.replace(/,/g, ""));
     onRow(name, rate && value.trim() && Number.isFinite(n) ? { foreign: value, cents: centsToDisplay(Math.round((n / rate) * 100)) } : { foreign: value });
   }
@@ -204,9 +235,11 @@ export function BookingPaymentPanel({
           </div>
           {left !== 0 && totalCents > 0 ? (
             <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] font-semibold text-negative">
-              {left > 0 ? `${formatMoney(left)} left to split` : `${formatMoney(-left)} over the amount`}
+              {left > 0
+                ? `${formatMoney(left)} of the ${formatMoney(totalCents)} not given to a passenger yet`
+                : `Passengers add up to ${formatMoney(-left)} more than the ${formatMoney(totalCents)} paid`}
               <button type="button" onClick={onResetSplit} className="rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/40">
-                Split by planned fares
+                Fill in from planned fares
               </button>
             </p>
           ) : null}
