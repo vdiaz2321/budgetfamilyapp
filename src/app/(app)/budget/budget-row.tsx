@@ -510,7 +510,7 @@ function MobilePlannedInput({
           if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();
         }}
         style={{ fontSize: '16px' }}
-        className="w-24 rounded bg-transparent px-0.5 text-right text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand"
+        className="w-24 rounded bg-transparent px-0.5 text-center text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand"
       />
     </form>
   );

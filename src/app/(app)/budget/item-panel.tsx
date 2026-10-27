@@ -121,7 +121,7 @@ function CoverOverspend({
               value={fromId}
               onChange={(e) => setFromId(e.target.value)}
               aria-label="Move from"
-              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm text-center [text-align-last:center] ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Take from…</option>
               {donors.map((d) => (
@@ -135,7 +135,7 @@ function CoverOverspend({
               onChange={(e) => setAmount(e.target.value)}
               inputMode="decimal"
               aria-label="Amount to move"
-              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             />
             <div className="flex gap-2">
               <button
@@ -368,7 +368,7 @@ export function ItemPanel({
               runSave={runSave}
             />
           ) : kind === "savings" && row.savings ? (
-            <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} formId={saveFormId} runSave={runSave} />
+            <SavingsForm key={row.subId} row={row} currency={currency} bucketOptions={bucketOptions} monthKey={monthKey} formId={saveFormId} runSave={runSave} />
           ) : (
             <PlannedForm
               subId={row.subId}
@@ -432,14 +432,14 @@ function ItemGroupSelect({
     >
       <input type="hidden" name="subcategoryId" value={row.subId} />
       <label className="flex items-center gap-3 text-xs">
-        <span className="font-semibold text-muted">Category group</span>
+        <span className="font-semibold text-muted sm:text-[15px]">Category group</span>
         <select
           key={row.categoryId}
           name="categoryId"
           defaultValue={row.categoryId}
           disabled={pending}
           onChange={(event) => event.currentTarget.form?.requestSubmit()}
-          className="ml-auto max-w-[12rem] rounded-lg bg-surface px-2.5 py-1.5 font-semibold text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
+          className="ml-auto max-w-[12rem] rounded-lg bg-surface px-2.5 py-1.5 text-center [text-align-last:center] font-semibold text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
         >
           {compatible.map((group) => (
             <option key={group.id} value={group.id}>{group.name}</option>
@@ -797,10 +797,13 @@ function PlannedForm({
   const [, startDue] = useTransition();
   const router = useRouter();
 
+  // Short values get a box sized to the value, not the panel width — a
+  // full-width box around "79.02" reads as dead space.
   const plannedInput = (
-    <label className="block flex-1 min-w-0">
-      <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">Planned ($)</span>
-      <input
+    <label className="flex items-center gap-3">
+      <span className="text-xs font-semibold text-muted sm:text-[15px]">Planned</span>
+      <ValueBox
+        prefix="$"
         key={plannedCents}
         name="planned"
         type="number"
@@ -810,7 +813,7 @@ function PlannedForm({
         onFocus={(e) => e.currentTarget.select()}
         disabled={autoPlanned}
         placeholder="0.00"
-        className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:cursor-not-allowed disabled:opacity-50"
+        
       />
     </label>
   );
@@ -818,7 +821,7 @@ function PlannedForm({
   // figure yet. Once Planned is typed here it stands on its own — nothing
   // adds the trip on top and nothing writes back to the trip.
   const tripNote = tripPlannedCents > 0 ? (
-    <p className="mb-3 mt-1.5 text-[11px] leading-snug text-muted">
+    <p className="text-[11px] leading-snug text-muted">
       {tripNames.join(", ")} (Travel Log) plans{" "}
       <span className="font-semibold text-foreground tabular-nums">{formatMoney(tripPlannedCents, currency)}</span> here.
       Planned above is your own figure — change the trip&apos;s amounts in the Travel Log.
@@ -844,13 +847,12 @@ function PlannedForm({
         <input type="hidden" name="subcategoryId" value={subId} />
         <input type="hidden" name="month" value={monthKey} />
 
-        {hasDue ? (
-          <Section title="Planned & due day">
-            <div className="flex items-end gap-2">
-              {plannedInput}
-              <label className="block flex-1 min-w-0">
-                <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">Due day</span>
-                <input
+        <div className="space-y-2 pt-1">
+          {plannedInput}
+          {hasDue ? (
+            <label className="flex items-center gap-3">
+              <span className="text-xs font-semibold text-muted sm:text-[15px]">Due day</span>
+              <input
                   key={dueDay ?? ""}
                   name="dueDay"
                   type="number"
@@ -859,35 +861,31 @@ function PlannedForm({
                   placeholder="—"
                   defaultValue={dueDay ?? ""}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="ml-auto w-28 rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 />
-              </label>
-            </div>
-            {tripNote}
-            {paymentAccountOptions.length > 0 ? (
-              <label className="block">
-                <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted">Charged to (optional)</span>
+            </label>
+          ) : null}
+          {tripNote}
+          {hasDue && paymentAccountOptions.length > 0 ? (
+            <div>
+              <label className="flex items-center gap-3">
+                <span className="shrink-0 text-xs font-semibold text-muted sm:text-[15px]">Charged to</span>
                 <select
                   key={paymentAccountId ?? "none"}
                   name="paymentAccountId"
                   defaultValue={paymentAccountId ?? ""}
-                  className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center [text-align-last:center] text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   <option value="">No linked account</option>
                   {paymentAccountOptions.map((account) => (
                     <option key={account.id} value={account.id}>{account.name}</option>
                   ))}
                 </select>
-                <span className="mt-1 block text-[10px] text-muted">Used to prefill the account when you mark this item Paid. Nothing charges automatically.</span>
               </label>
-            ) : null}
-          </Section>
-        ) : (
-          <Section title="Planned amount">
-            {plannedInput}
-            {tripNote}
-          </Section>
-        )}
+              <p className="mt-1 text-[11px] text-muted">Prefills the account when you mark it Paid.</p>
+            </div>
+          ) : null}
+        </div>
         {/* The Travel Log row an item counts in (subcategories.travel_category)
             is no longer set here — Victor found it out of place on a budget
             item (2026-09-30). The rows already set keep routing trip
@@ -1021,7 +1019,7 @@ function ItemDetailsPopover({
                 value={toSubId}
                 onChange={(e) => setToSubId(e.target.value)}
                 required
-                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm text-center [text-align-last:center] ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Pick a budget item…</option>
                 {subOptions.filter((s) => s.id !== subId).map((s) => (
@@ -1040,7 +1038,7 @@ function ItemDetailsPopover({
                 autoComplete="off"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </label>
             {error ? <p className="text-xs font-medium text-negative">{error}</p> : null}
@@ -1094,11 +1092,10 @@ function DebtForm({
       >
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
-            Planned this month
-          </span>
-          <input
+        <label className="flex items-center gap-3">
+          <span className="text-xs font-semibold text-muted sm:text-[15px]">Planned this month</span>
+          <ValueBox
+            prefix="$"
             ref={plannedRef}
             key={row.plannedCents}
             name="planned"
@@ -1106,24 +1103,21 @@ function DebtForm({
             step="0.01"
             defaultValue={centsToDisplay(row.plannedCents)}
             onFocus={(e) => e.currentTarget.select()}
-            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
         <Grid>
-          <Labeled label="Balance" name="balance" type="number" step="0.01" defaultValue={centsToDisplay(d.balanceCents)} />
-          <Labeled label="Min. payment" name="minPayment" type="number" step="0.01" defaultValue={centsToDisplay(d.minCents)} />
-          <Labeled label="Interest %" name="apr" type="number" step="0.001" defaultValue={String(d.apr)} />
+          <Labeled label="Balance" prefix="$" name="balance" type="number" step="0.01" defaultValue={centsToDisplay(d.balanceCents)} />
+          <Labeled label="Min. payment" prefix="$" name="minPayment" type="number" step="0.01" defaultValue={centsToDisplay(d.minCents)} />
+          <Labeled label="Interest" suffix="%" name="apr" type="number" step="0.001" defaultValue={String(d.apr)} />
           <Labeled label="Due day" name="dueDay" type="number" min={1} max={31} defaultValue={d.dueDay ?? ""} />
         </Grid>
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
-            Debt type
-          </span>
+        <label className="flex items-center gap-3">
+          <span className="shrink-0 text-xs font-semibold text-muted sm:text-[15px]">Debt type</span>
           <select
             key={d.debtKind ?? "none"}
             name="debtKind"
             defaultValue={d.debtKind ?? ""}
-            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center [text-align-last:center] text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           >
             <option value="">Not set</option>
             {DEBT_KINDS.map((k) => (
@@ -1138,31 +1132,26 @@ function DebtForm({
           defaultValue={d.promoAprEndsOn ?? ""}
         />
         {accountOptions.length > 0 ? (
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
-              Linked account
-            </span>
+          <div>
+          <label className="flex items-center gap-3">
+            <span className="shrink-0 text-xs font-semibold text-muted sm:text-[15px]">Linked account</span>
             <select
               key={d.accountId ?? "none"}
               name="accountId"
               defaultValue={d.accountId ?? ""}
-              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center [text-align-last:center] text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Not linked</option>
               {accountOptions.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
-            <span className="mt-0.5 block text-[10px] text-muted">
-              Link the credit card / loan account this debt represents — Networth then
-              counts it once (this balance, not the account&apos;s).
-            </span>
           </label>
+          <p className="mt-1 text-[11px] text-muted">Net worth counts this debt once, using this balance.</p>
+          </div>
         ) : null}
         <label className="block">
-          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
-            Notes
-          </span>
+          <span className="mb-1 block text-xs font-semibold text-muted sm:text-[15px]">Notes</span>
           <textarea
             key={d.notes ?? ""}
             name="notes"
@@ -1177,45 +1166,14 @@ function DebtForm({
   );
 }
 
-function calcMonthly(goalStr: string, startStr: string, targetDate: string): string {
-  const goal = parseFloat(goalStr) || 0;
-  const start = parseFloat(startStr) || 0;
-  const left = goal - start;
-  if (!targetDate || left <= 0) return "";
-  const [ty, tm] = targetDate.split("-").map(Number);
-  const now = new Date();
-  const months = (ty - now.getFullYear()) * 12 + (tm - 1 - now.getMonth());
-  if (months <= 0) return "";
-  return String(Math.ceil((left / months) * 100) / 100);
-}
-
-function savingsPace(goalCents: number, startCents: number, monthlyCents: number, targetDate: string | null, spentCents: number) {
-  if (goalCents <= 0 || !targetDate) return null;
-  const savedCents = startCents + spentCents;
-  if (savedCents >= goalCents) return "reached" as const;
-  const [ty, tm] = targetDate.split("-").map(Number);
-  const now = new Date();
-  const months = (ty - now.getFullYear()) * 12 + (tm - 1 - now.getMonth());
-  if (months <= 0) return "overdue" as const;
-  const required = Math.ceil((goalCents - savedCents) / months);
-  return monthlyCents >= required ? "on_track" as const : "behind" as const;
-}
-
-function SavingsForm({ row, bucketOptions, monthKey, formId, runSave }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string; formId: string; runSave: (write: () => Promise<void>) => Promise<void> }) {
-  const [pending, start] = useTransition();
+function SavingsForm({ row, currency, bucketOptions, monthKey, formId, runSave }: { row: RowData; currency: string; bucketOptions: BucketOption[]; monthKey: string; formId: string; runSave: (write: () => Promise<void>) => Promise<void> }) {
+  const [, start] = useTransition();
   const router = useRouter();
   const s = row.savings!;
-  const [goal, setGoal] = useState(centsToDisplay(s.goalCents));
-  const [savingsStart, setSavingsStart] = useState(centsToDisplay(s.startCents));
-  const [targetDate, setTargetDate] = useState(s.targetDate ?? "");
-  const [monthly, setMonthly] = useState(centsToDisplay(s.monthlyCents));
-
-  function recompute(newGoal = goal, newStart = savingsStart, newDate = targetDate) {
-    const auto = calcMonthly(newGoal, newStart, newDate);
-    if (auto) setMonthly(auto);
-  }
-
-  const pace = savingsPace(s.goalCents, s.startCents, s.monthlyCents, s.targetDate, row.spentCents);
+  // Monthly Needed and the pace badge come from the server's shared
+  // savingsGoalProgress — the same figures as the Invest page. They refresh
+  // after Save, since they depend on this year's saved transactions too.
+  const pace = s.pace;
 
   return (
     <Section title="Savings goal">
@@ -1225,7 +1183,7 @@ function SavingsForm({ row, bucketOptions, monthKey, formId, runSave }: { row: R
         </p>
       )}
       {pace === "behind" && (
-        <p className="mb-2 flex items-center gap-1 text-xs font-medium text-amber-500">
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium text-negative">
           <span>⚠</span> Behind pace
         </p>
       )}
@@ -1247,27 +1205,22 @@ function SavingsForm({ row, bucketOptions, monthKey, formId, runSave }: { row: R
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <Grid>
-          <Labeled label="Planned monthly" name="planned" type="number" step="0.01" defaultValue={centsToDisplay(row.plannedCents)} />
-          <Labeled label="Goal" name="goal" type="number" step="0.01" value={goal}
-            onChange={(e) => { setGoal(e.target.value); recompute(e.target.value, savingsStart, targetDate); }} />
-          <Labeled
-            label="Target date"
-            name="targetDate"
-            type="date"
-            value={targetDate}
-            onChange={(e) => { setTargetDate(e.target.value); recompute(goal, savingsStart, e.target.value); }}
-          />
-          <Labeled label="Start" name="start" type="number" step="0.01" value={savingsStart}
-            onChange={(e) => { setSavingsStart(e.target.value); recompute(goal, e.target.value, targetDate); }} />
+          <Labeled label="Planned monthly" prefix="$" name="planned" type="number" step="0.01" defaultValue={centsToDisplay(row.plannedCents)} />
+          <Labeled key={`g${s.goalCents}`} label="Expected Goal" prefix="$" name="goal" type="number" step="0.01" defaultValue={centsToDisplay(s.goalCents)} />
+          <Labeled key={`d${s.targetDate}`} label="Goal Target Dt" name="targetDate" type="date" defaultValue={s.targetDate ?? ""} />
+          <Labeled key={`s${s.startCents}`} label="Starting Amount" prefix="$" name="start" type="number" step="0.01" defaultValue={centsToDisplay(s.startCents)} />
         </Grid>
-        <div className="grid grid-cols-2 gap-2">
-          <Labeled label="Monthly to reach goal" labelClassName="text-[8.5px]" name="monthly" type="number" step="0.01" value={monthly}
-            onChange={(e) => setMonthly(e.target.value)} />
+        <div className="space-y-2">
+          {/* Calculated, not typed — no input, so Save never writes it. */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-semibold text-muted sm:text-[15px]">Monthly Needed</span>
+            <span className="ml-auto w-28 py-1.5 text-center text-sm font-semibold tabular-nums">
+              {s.requiredMonthlyCents != null ? formatMoney(s.requiredMonthlyCents, currency) : "—"}
+            </span>
+          </div>
           {bucketOptions.length > 0 ? (
-            <label className="block">
-              <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
-                Linked bucket
-              </span>
+            <label className="flex items-center gap-3">
+              <span className="shrink-0 text-xs font-semibold text-muted sm:text-[15px]">Linked bucket</span>
               <select
                 key={s.linkedBucketId ?? s.linkedAccountId ?? "none"}
                 name="linkTarget"
@@ -1276,7 +1229,7 @@ function SavingsForm({ row, bucketOptions, monthKey, formId, runSave }: { row: R
                     ? `account:${s.linkedAccountId}`
                     : s.linkedBucketId ?? ""
                 }
-                className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center [text-align-last:center] text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Not linked</option>
                 {(() => {
@@ -1309,48 +1262,60 @@ function SavingsForm({ row, bucketOptions, monthKey, formId, runSave }: { row: R
             </label>
           ) : null}
         </div>
-        <SaveBtn pending={pending} full />
       </form>
     </Section>
   );
 }
 
+// Stack of one-line label/value rows — same shape as the Category group row.
 function Grid({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-2 gap-2">{children}</div>;
+  return <div className="space-y-2">{children}</div>;
 }
 
 function Labeled({
   label,
   hint,
-  labelClassName,
   onFocus,
   ...inputProps
-}: { label: string; hint?: string; labelClassName?: string } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "labelClassName">) {
+}: { label: string; hint?: string } & ValueBoxProps) {
   return (
-    <label className="block">
-      <span className={`mb-0.5 flex items-center gap-1 font-medium uppercase tracking-wide text-muted ${labelClassName ?? "text-[10px]"}`}>
+    <label className="flex items-center gap-3">
+      <span className="flex items-center gap-1 text-xs font-semibold text-muted sm:text-[15px]">
         {label}
-        {hint && <span className="font-normal normal-case tracking-normal text-muted/60">{hint}</span>}
+        {hint && <span className="font-normal text-muted/60">{hint}</span>}
       </span>
-      <input
+      <ValueBox
         {...inputProps}
         // Select the existing value on focus so typing replaces a "0" or
         // "0.00" placeholder instead of requiring it to be deleted first.
         onFocus={onFocus ?? ((e) => e.currentTarget.select())}
-        className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
     </label>
   );
 }
 
-function SaveBtn({ pending, full, label }: { pending: boolean; full?: boolean; label?: string }) {
+type ValueBoxProps = React.InputHTMLAttributes<HTMLInputElement> & {
+  prefix?: string;
+  suffix?: string;
+  ref?: React.Ref<HTMLInputElement>;
+};
+
+// Right-hand value box for a card row. A number input can't show "$" in its
+// value, so the unit sits inside the box beside it.
+function ValueBox({ prefix, suffix, className, ...inputProps }: ValueBoxProps) {
   return (
-    <button
-      type="submit"
-      disabled={pending}
-      className={`rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60 ${full ? "w-full" : ""}`}
+    <span
+      className={`ml-auto flex ${inputProps.type === "date" ? "w-40" : "w-28"} shrink-0 items-center justify-center rounded-lg bg-sky-50 px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus-within:ring-2 focus-within:ring-brand dark:bg-background has-[:disabled]:opacity-50 ${className ?? ""}`}
     >
-      {pending ? "Saving…" : label ?? "Save"}
-    </button>
+      {prefix ? <span className="text-muted">{prefix}</span> : null}
+      <input
+        {...inputProps}
+        // field-sizing makes the input as wide as its value, so "$" sits
+        // right beside the number and the pair centers together.
+        className={`${prefix || suffix ? "min-w-[2ch] max-w-full [field-sizing:content]" : "w-full min-w-0 flex-1"} bg-transparent text-center focus:outline-none disabled:cursor-not-allowed`}
+      />
+      {suffix ? <span className="text-muted">{suffix}</span> : null}
+    </span>
   );
 }
+

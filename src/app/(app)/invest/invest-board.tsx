@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { MINUS, centsToGroupedDisplay, currencySymbol, formatMoney, formatMoneyWhole } from "@/lib/money";
 import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
@@ -10,14 +9,14 @@ import {
   resolveTaxTreatment,
   type TaxTreatment,
 } from "@/lib/tax-treatment";
-import { setInvestmentYear, transferFromInvestment } from "./actions";
+import { setInvestmentYear } from "./actions";
+import { LazyMoveMoney } from "../accounts/move-money";
 import { ImportInvestmentModal } from "./import-modal";
 import { AddMonthForm, AddHoldingsForm } from "./manual-entry";
 import { AllHoldingsTable } from "./holdings-rollup";
 import { describeUpdate } from "@/lib/updated-ago";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { SavingsPanel, type SavingsPanelProps } from "./savings-panel";
-import { useScrollLock } from "@/lib/use-scroll-lock";
 
 export type YearCell = {
   year: number;
@@ -168,7 +167,6 @@ function liveBalanceCents(a: InvestAccount): number {
   return a.balanceCents;
 }
 
-export type DestAccount = { id: string; name: string; buckets: { id: string; name: string }[] };
 
 export type BoardTab = "portfolio" | "savings";
 
@@ -176,7 +174,6 @@ type Props = {
   accounts: InvestAccount[];
   years: number[]; // newest first
   currency: string;
-  destAccounts: DestAccount[];
   imports: InvestmentImportView[];
   /** Net contributions logged into investment accounts this calendar month. */
   contributedThisMonthCents: number;
@@ -242,7 +239,6 @@ export function InvestBoard({
   accounts,
   years,
   currency,
-  destAccounts,
   imports,
   contributedThisMonthCents,
   currentMonthLabel,
@@ -256,7 +252,6 @@ export function InvestBoard({
   // paging the table one year at a time said nothing the chart didn't.
   const year = years[0] ?? new Date().getFullYear();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showGuide, setShowGuide] = useState(false);
   // One switch for all three hero breakdowns: opening any opens them all, so
   // the cards stay side by side.
   const [showBreakdowns, setShowBreakdowns] = useState(false);
@@ -468,13 +463,12 @@ export function InvestBoard({
   );
 
   useRegisterMobilePageActions([
-    { label: "Withdraw", onSelect: () => setShowTransfer(true) },
-    { label: "How investment tracking works", onSelect: () => setShowGuide((open) => !open) },
+    { label: "Move Money", onSelect: () => setShowTransfer(true) },
   ]);
 
   return (
     <div className="mx-auto flex w-full max-w-[110rem] flex-col gap-6 px-4 py-7">
-      {/* Header: title + one Withdraw entry + hero stats + tabs */}
+      {/* Header: title + Move Money + hero stats + tabs */}
       <header className="space-y-4">
         {/* Title and its one action share a row. Below md the action lives in
             the ⋯ menu instead (registered above) — title and button don't fit
@@ -487,48 +481,14 @@ export function InvestBoard({
             onClick={() => setShowTransfer(true)}
             className="hidden items-center md:flex gap-1.5 rounded-lg bg-brand-soft px-3 py-2 text-sm font-bold text-brand ring-1 ring-brand/20 transition hover:bg-brand-soft/80"
           >
-            {/* It only ever moves money out of an investment into a bank —
-                a withdrawal, so that's its name (Victor, 2026-10-24). */}
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" />
+            {/* Same popup and icon as Accounts' Move Money: transfer, invest
+                or withdraw, worked out from the accounts picked. */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
             </svg>
-            Withdraw
-          </button>
-          {/* The guide sits beside the page's action rather than taking a
-              full-width bar of its own above the tax card. */}
-          <button
-            type="button"
-            onClick={() => setShowGuide((open) => !open)}
-            aria-expanded={showGuide}
-            className={`hidden items-center md:flex gap-1.5 rounded-lg px-3 py-2 text-sm font-bold text-brand ring-1 transition ${
-              showGuide ? "bg-brand-soft ring-brand/50" : "bg-brand-soft ring-brand/20 hover:bg-brand-soft/80"
-            }`}
-          >
-            How investment tracking works
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showGuide ? "rotate-90" : ""}`} aria-hidden>
-              <path d="M9 6l6 6-6 6" />
-            </svg>
+            Move Money
           </button>
         </div>
-        {showGuide ? (
-          <div className="max-w-3xl rounded-xl bg-brand-soft/50 px-4 pb-4 pt-3 text-sm text-foreground ring-1 ring-brand/20">
-            <p className="mb-3 text-xs sm:text-sm text-muted">Review each investment account against its year-end statement.</p>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg bg-surface/60 px-3 py-2.5">
-                <p className="mb-1 max-sm:text-[11px] sm:text-sm font-semibold uppercase tracking-wide text-brand">Contributions</p>
-                <p className="text-xs sm:text-sm leading-relaxed">Log a deposit transaction to any investment account — it auto-adds to <span className="font-semibold text-foreground">Contrib</span> here.</p>
-              </div>
-              <div className="rounded-lg bg-surface/60 px-3 py-2.5">
-                <p className="mb-1 max-sm:text-[11px] sm:text-sm font-semibold uppercase tracking-wide text-brand">Gains / Losses</p>
-                <p className="text-xs sm:text-sm leading-relaxed">At year-end, type the market gain or loss from your brokerage statement into <span className="font-semibold text-foreground">Gains</span>.</p>
-              </div>
-              <div className="rounded-lg bg-surface/60 px-3 py-2.5">
-                <p className="mb-1 max-sm:text-[11px] sm:text-sm font-semibold uppercase tracking-wide text-brand">Current balance</p>
-                <p className="text-xs sm:text-sm leading-relaxed">Update the account balance on <span className="font-semibold text-foreground">Accounts</span> to match your brokerage&apos;s ending balance.</p>
-              </div>
-            </div>
-          </div>
-        ) : null}
         {/* Hero, same layout as Net Worth on Accounts: the portfolio total
             leads at hero size, and the two contribution figures sit beside it
             (beneath on a phone). This month's contribution is a line under the
@@ -548,7 +508,7 @@ export function InvestBoard({
               {formatMoneyWhole(summary.current, currency)}
             </p>
             {summary.gains !== 0 ? (
-              <p className="mt-0.5 text-xs sm:text-[15px]">
+              <p className="mt-0.5 text-xs font-semibold sm:text-[15px]">
                 <span className="text-muted">Total Gains in {year}:</span>{" "}
                 <span
                   className="font-semibold tabular-nums"
@@ -560,7 +520,7 @@ export function InvestBoard({
               </p>
             ) : null}
             {contributedThisMonthCents > 0 ? (
-              <p className="mt-0.5 text-xs sm:text-[15px]">
+              <p className="mt-0.5 text-xs font-semibold sm:text-[15px]">
                 <span className="text-muted">Contributed in {currentMonthLabel.split(" ")[0]}:</span>{" "}
                 <span className="font-semibold tabular-nums text-positive">
                   +{formatMoneyWhole(contributedThisMonthCents, currency)}
@@ -582,11 +542,24 @@ export function InvestBoard({
                 </button>
                 {showBreakdowns ? (
                   // Where the year's gains came from, account by account.
-                  <ul className="mx-auto mt-1.5 max-w-xs space-y-0.5 border-t border-line/60 pt-2 text-left text-xs sm:max-w-none sm:text-sm">
+                  <ul className="mx-auto mt-1.5 max-w-xs space-y-0.5 border-t border-line/60 pt-2 text-left text-xs font-semibold sm:max-w-none sm:text-sm">
+                    {/* Named heading, same as the middle card's "Retirement:"
+                        group — without it the list read as balances under
+                        the $ total above (Victor, 2026-10-27). */}
+                    <li className="-mx-2 rounded-md bg-sky-50 px-2 py-0.5 dark:bg-sky-950/40 flex items-baseline justify-between gap-3 font-bold">
+                      <span>Total Gains in {year}:</span>
+                      <span
+                        className="tabular-nums"
+                        style={{ color: summary.gains > 0 ? "var(--viz-bills)" : summary.gains < 0 ? "var(--color-negative)" : undefined }}
+                      >
+                        {summary.gains > 0 ? "+" : summary.gains < 0 ? "-" : ""}
+                        {formatMoneyWhole(Math.abs(summary.gains), currency)}
+                      </span>
+                    </li>
                     {gainsByAccount.map((r) => (
                       // Name left, amount right, so the figures line up in
-                      // one column.
-                      <li key={r.name} className="flex items-baseline justify-between gap-3">
+                      // one column; indented under the heading.
+                      <li key={r.name} className="flex items-baseline justify-between gap-3 pl-2.5">
                         <span className="text-muted">{r.name}:</span>
                         <span
                           className="font-semibold tabular-nums"
@@ -607,16 +580,6 @@ export function InvestBoard({
             value={formatMoneyWhole(summary.contributed, currency)}
             extra={
               <>
-                {investGoals.length > 0 && leftToGoalCents > 0 ? (
-                  <p
-                    className="mt-0.5 truncate text-xs sm:text-[15px] font-semibold"
-                    style={{ color: behindGoals.length > 0 ? "var(--color-negative)" : "var(--color-positive)" }}
-                  >
-                    {behindGoals.length > 0
-                      ? `Behind: ${formatMoneyWhole(behindMonthlyCents, currency)}/mo needed`
-                      : "On track"}
-                  </p>
-                ) : null}
                 <button
                   type="button"
                   onClick={() => setShowBreakdowns((open) => !open)}
@@ -630,11 +593,11 @@ export function InvestBoard({
                   </svg>
                 </button>
                 {showBreakdowns ? (
-                  <div className="mt-1.5 space-y-1.5 border-t border-line/60 pt-2 text-left text-xs sm:text-sm">
+                  <div className="mt-1.5 space-y-1.5 border-t border-line/60 pt-2 text-left text-xs font-semibold sm:text-sm">
                     {investedSplit.groups.map((g) => (
                       <div key={g.name}>
-                        <p className="sm:flex sm:items-baseline sm:justify-between sm:gap-3">
-                          <span className="font-semibold">{g.name}:</span>{" "}
+                        <p className="-mx-2 rounded-md bg-sky-50 px-2 py-0.5 dark:bg-sky-950/40 sm:flex sm:items-baseline sm:justify-between sm:gap-3">
+                          <span className="font-bold">Total {g.name}:</span>{" "}
                           <span className="font-bold tabular-nums">{formatMoneyWhole(g.cents, currency)}</span>
                         </p>
                         {/* Which holdings it went into. Two lines each on a
@@ -658,7 +621,23 @@ export function InvestBoard({
               investGoals.length === 0
                 ? "so far"
                 : leftToGoalCents > 0
-                  ? `Left to Goal: ${formatMoneyWhole(leftToGoalCents, currency)}`
+                  ? (
+                    // Pace shares the note's line on desktop so this card is
+                    // the same height as its neighbours; a half-width phone
+                    // card has no room, so it drops to its own line there.
+                    <>
+                      Left to Goal: {formatMoneyWhole(leftToGoalCents, currency)}
+                      <span
+                        className="font-semibold max-sm:block"
+                        style={{ color: behindGoals.length > 0 ? "var(--color-negative)" : "var(--color-positive)" }}
+                      >
+                        <span className="text-muted max-sm:hidden"> · </span>
+                        {behindGoals.length > 0
+                          ? `Behind: ${formatMoneyWhole(behindMonthlyCents, currency)}/mo needed`
+                          : "On track"}
+                      </span>
+                    </>
+                  )
                   : "goals reached"
             }
             className="border-r border-line sm:border-l"
@@ -712,7 +691,7 @@ export function InvestBoard({
                   </svg>
                 </button>
                 {showBreakdowns ? (
-                <ul className="mt-1.5 space-y-0.5 border-t border-line/60 pt-2 text-left text-xs sm:text-sm">
+                <ul className="mt-1.5 space-y-0.5 border-t border-line/60 pt-2 text-left text-xs font-semibold sm:text-sm">
                   {limitRows.map((r) => {
                     const type =
                       r.capKind === "ira"
@@ -732,12 +711,14 @@ export function InvestBoard({
                       </li>
                     );
                   })}
-                  {/* The three added up. Two lines everywhere: the label is
-                      too long to share a line in a third-width card. */}
-                  <li className="mt-1.5 border-t border-line/60 pt-1.5">
-                    <span className="block font-semibold">Total Invested in Retirement:</span>
-                    {/* Right-aligned from sm up, under the column above. */}
-                    <span className="block tabular-nums sm:text-right">
+                  {/* The three added up. One line when the card is wide
+                      enough (Victor's monitor); wraps to two only when the
+                      label and figure can't share a line. */}
+                  <li className="mt-1.5 -mx-2 flex flex-wrap items-baseline justify-between gap-x-3 rounded-md bg-sky-50 px-2 py-0.5 dark:bg-sky-950/40">
+                    <span className="font-bold sm:whitespace-nowrap">Total Invested in Retirement:</span>
+                    {/* ml-auto keeps it right-aligned under the column above
+                        when it wraps to its own line. */}
+                    <span className="ml-auto tabular-nums sm:whitespace-nowrap">
                       <span className="font-bold">
                         {formatMoneyWhole(limitRows.reduce((sum, r) => sum + r.contributedCents, 0), currency)}
                       </span>
@@ -762,8 +743,14 @@ export function InvestBoard({
         </div>
       </header>
 
+      {/* The same Move Money popup as Accounts and Transactions — one way to
+          move money between your own accounts, not a second copy. Outside the
+          tabs so both the header button and the Savings tab's Withdraw funds
+          can open it. */}
+      <LazyMoveMoney open={showTransfer} onClose={() => setShowTransfer(false)} />
+
       {tab === "savings" ? (
-        <SavingsPanel {...savings} />
+        <SavingsPanel {...savings} onMoveMoney={() => setShowTransfer(true)} />
       ) : accounts.length === 0 ? (
         <div className="rounded-2xl bg-surface px-6 py-12 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
           <p className="text-sm text-muted">
@@ -889,14 +876,6 @@ export function InvestBoard({
             }
           />
 
-          {showTransfer && (
-            <TransferModal
-              accounts={accounts}
-              destAccounts={destAccounts}
-              currency={currency}
-              onClose={() => setShowTransfer(false)}
-            />
-          )}
           {showImport && (
             <ImportInvestmentModal
               accounts={accounts}
@@ -1187,7 +1166,7 @@ function SummaryStat({
     <div className={`min-w-0 px-3 py-4 sm:px-4 ${className ?? ""}`}>
       <p className="truncate max-sm:text-[11px] font-medium uppercase text-muted sm:text-sm sm:tracking-wide">{label}</p>
       <p className={`mt-0.5 truncate text-2xl font-bold tabular-nums sm:text-4xl ${tone ?? ""}`}>{value}</p>
-      {note ? <p className="mt-0.5 truncate text-xs sm:text-[15px] text-muted">{note}</p> : null}
+      {note ? <p className="mt-0.5 truncate text-xs font-semibold sm:text-[15px] text-muted">{note}</p> : null}
       {extra}
     </div>
   );
@@ -2455,201 +2434,4 @@ function YByAccountRows({
   );
 }
 
-// ─── Transfer modal ────────────────────────────────────────────────────────
-
-function TransferModal({
-  accounts,
-  destAccounts,
-  currency,
-  onClose,
-}: {
-  accounts: InvestAccount[];
-  destAccounts: DestAccount[];
-  currency: string;
-  onClose: () => void;
-}) {
-  useScrollLock();
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [sourceAccountId, setSourceAccountId] = useState("");
-  const [sourceBucketId, setSourceBucketId] = useState("");
-  const [destAccountId, setDestAccountId] = useState("");
-  const [destBucketId, setDestBucketId] = useState("");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [memo, setMemo] = useState("");
-
-  const srcAccount = accounts.find((a) => a.id === sourceAccountId);
-  const hasBuckets = (srcAccount?.buckets.length ?? 0) > 0;
-  const destBuckets = destAccounts.find((a) => a.id === destAccountId)?.buckets ?? [];
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const fd = new FormData();
-    fd.set("sourceAccountId", sourceAccountId);
-    if (sourceBucketId) fd.set("sourceBucketId", sourceBucketId);
-    fd.set("destAccountId", destAccountId);
-    if (destBucketId) fd.set("destBucketId", destBucketId);
-    fd.set("amount", amount);
-    fd.set("date", date);
-    if (memo) fd.set("memo", memo);
-    start(async () => {
-      setErrorMsg(null);
-      const r = await transferFromInvestment(fd);
-      if (r.error) setErrorMsg(r.error);
-      else {
-        // Fresh balances and gains straight away, not on the next reload.
-        router.refresh();
-        onClose();
-      }
-    });
-  };
-
-  return (
-    // Scrollable and viewport-capped: with six fields plus the iOS keyboard the
-    // submit button used to end up below the fold with no way to reach it.
-    <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/40 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div
-        className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-surface shadow-xl ring-1 ring-black/10 sm:rounded-2xl dark:ring-white/10"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <h2 className="text-lg font-bold">Withdraw from an investment</h2>
-          <button type="button" onClick={onClose} className="rounded-lg p-1 text-muted transition hover:bg-brand-soft hover:text-foreground">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M18 6L6 18M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
-          {/* Source account */}
-          <label className="block">
-            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">From (investment account)</span>
-            <select
-              required
-              value={sourceAccountId}
-              onChange={(e) => { setSourceAccountId(e.target.value); setSourceBucketId(""); }}
-              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              <option value="">Select investment account</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}{a.holder ? ` (${a.holder})` : ""}</option>
-              ))}
-            </select>
-          </label>
-
-          {/* Source bucket (when account has buckets) */}
-          {hasBuckets && (
-            <label className="block">
-              <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Bucket</span>
-              <select
-                required
-                value={sourceBucketId}
-                onChange={(e) => setSourceBucketId(e.target.value)}
-                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="">Choose a bucket…</option>
-                {srcAccount!.buckets.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name} — {formatMoney(b.balanceCents, currency)}</option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          {/* Destination account */}
-          <label className="block">
-            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">To (banking account)</span>
-            <select
-              required
-              value={destAccountId}
-              onChange={(e) => { setDestAccountId(e.target.value); setDestBucketId(""); }}
-              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              <option value="">Select destination account</option>
-              {destAccounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </label>
-
-          {/* Destination bucket (when the banking account has buckets) */}
-          {destBuckets.length > 0 && (
-            <label className="block">
-              <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Into bucket</span>
-              <select
-                required
-                value={destBucketId}
-                onChange={(e) => setDestBucketId(e.target.value)}
-                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="">Choose a bucket…</option>
-                {destBuckets.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          {/* Amount */}
-          <label className="block">
-            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Amount</span>
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">{currencySymbol(currency)}</span>
-              <input
-                required
-                type="number"
-                step="0.01"
-                min="0.01"
-                placeholder="0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-lg border border-line bg-surface py-2 pl-7 pr-3 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-            </div>
-          </label>
-
-          {/* Date */}
-          <label className="block">
-            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Date</span>
-            <input
-              required
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
-
-          {/* Memo */}
-          <label className="block">
-            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Note</span>
-            <input
-              type="text"
-              placeholder="Transfer note (optional)"
-              value={memo}
-              onChange={(e) => setMemo(e.target.value)}
-              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
-
-          {errorMsg ? <p className="text-sm font-medium text-negative">{errorMsg}</p> : null}
-
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-muted transition hover:bg-brand-soft hover:text-foreground">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={pending || !sourceAccountId || !destAccountId || !amount || !date}
-              className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand/90 disabled:opacity-40"
-            >
-              {pending ? "Withdrawing…" : "Withdraw"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
 

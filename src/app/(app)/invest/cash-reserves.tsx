@@ -20,6 +20,11 @@ import { useSessionCollapse } from "@/lib/use-session-collapse";
 export type CashReserveRow = {
   id: string;
   name: string;
+  /** The account this fund sits in — itself, for a bucketless account. */
+  accountId: string;
+  accountName: string;
+  /** A bucket inside a bank account, vs. a whole account with no buckets. */
+  isBucket: boolean;
   balanceCents: number;
   isEmergencyFund: boolean;
   /** Non-null once a savings goal exists for this bucket. */
@@ -96,7 +101,8 @@ function RunwayTrack({
   );
 }
 
-function ReserveRow({
+// The target / months-of-cover lines under a fund, when it has one.
+function ReserveTracks({
   row,
   currency,
   monthlyEssentialCents,
@@ -106,14 +112,7 @@ function ReserveRow({
   monthlyEssentialCents: number | null;
 }) {
   return (
-    <li className="px-4 py-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-        <span className="min-w-0 text-sm font-semibold">{row.name}</span>
-        <span className="shrink-0 text-sm font-bold tabular-nums">
-          {formatCash(row.balanceCents, currency)}
-        </span>
-      </div>
-
+    <>
       {row.goalCents != null && row.goalCents > 0 ? (
         (() => {
           // Same track the emergency fund gets, measured against the goal
@@ -155,8 +154,45 @@ function ReserveRow({
           currency={currency}
         />
       ) : null}
-    </li>
+    </>
   );
+}
+
+function FundLine({ name, cents, currency }: { name: string; cents: number; currency: string }) {
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+      <span className="min-w-0 text-sm font-semibold">{name}</span>
+      <span className="shrink-0 text-sm font-bold tabular-nums">{formatCash(cents, currency)}</span>
+    </div>
+  );
+}
+
+// Same soft light-blue band as the totals in the cards at the top of the page.
+const TOTAL_BAND = "-mx-2 rounded-md bg-sky-50 px-2 py-1 dark:bg-sky-950/40";
+
+type AccountGroup = {
+  accountId: string;
+  accountName: string;
+  totalCents: number;
+  buckets: CashReserveRow[];
+  /** The account's own row when it has no buckets. */
+  self: CashReserveRow | null;
+};
+
+function groupByAccount(rows: CashReserveRow[]): AccountGroup[] {
+  const byId = new Map<string, AccountGroup>();
+  for (const row of rows) {
+    let g = byId.get(row.accountId);
+    if (!g) {
+      g = { accountId: row.accountId, accountName: row.accountName, totalCents: 0, buckets: [], self: null };
+      byId.set(row.accountId, g);
+    }
+    g.totalCents += row.balanceCents;
+    if (row.isBucket) g.buckets.push(row);
+    else g.self = row;
+  }
+  // Biggest first, at both levels — rows already arrive balance-sorted.
+  return [...byId.values()].sort((a, b) => b.totalCents - a.totalCents);
 }
 
 export function CashReserves({ data, currency }: { data: CashReservesData; currency: string }) {
@@ -198,15 +234,48 @@ export function CashReserves({ data, currency }: { data: CashReservesData; curre
           <p className="border-b border-line/70 px-4 py-2 text-xs sm:text-sm text-muted">
             The balances come from Accounts.
           </p>
+          {/* Grouped by the account the money sits in: an account with
+              buckets gets a tinted heading with its total and its buckets
+              indented under it; an account with no buckets is one plain row.
+              Without this, Amex Savings' four buckets read as four separate
+              accounts beside Wallet$ and Ally Bank (Victor, 2026-10-27). */}
           <ul className="divide-y divide-line/60">
-            {data.rows.map((row) => (
-              <ReserveRow
-                key={row.id}
-                row={row}
-                currency={currency}
-                monthlyEssentialCents={data.monthlyEssentialCents}
-              />
-            ))}
+            {groupByAccount(data.rows).map((g) =>
+              g.buckets.length > 0 ? (
+                <li key={g.accountId} className="px-4 py-3">
+                  <div className={`${TOTAL_BAND} flex flex-wrap items-baseline justify-between gap-x-3`}>
+                    <span className="min-w-0 text-sm font-bold">
+                      {g.accountName}{" "}
+                      <span className="font-semibold text-muted">· {g.buckets.length} buckets</span>
+                    </span>
+                    <span className="ml-auto shrink-0 text-sm font-bold tabular-nums">{formatCash(g.totalCents, currency)}</span>
+                  </div>
+                  <ul className="mt-1 divide-y divide-line/40 pl-3">
+                    {g.buckets.map((row) => (
+                      <li key={row.id} className="py-2.5">
+                        <FundLine name={row.name} cents={row.balanceCents} currency={currency} />
+                        <ReserveTracks row={row} currency={currency} monthlyEssentialCents={data.monthlyEssentialCents} />
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ) : (
+                <li key={g.accountId} className="px-4 py-3">
+                  {g.self ? (
+                    <>
+                      <FundLine name={g.self.name} cents={g.self.balanceCents} currency={currency} />
+                      <ReserveTracks row={g.self} currency={currency} monthlyEssentialCents={data.monthlyEssentialCents} />
+                    </>
+                  ) : null}
+                </li>
+              ),
+            )}
+            <li className="px-4 py-3">
+              <div className={`${TOTAL_BAND} flex flex-wrap items-baseline justify-between gap-x-3`}>
+                <span className="text-sm font-bold">Total Cash On Hand</span>
+                <span className="text-sm font-bold tabular-nums">{formatCash(data.totalCents, currency)}</span>
+              </div>
+            </li>
           </ul>
         </>
       ) : null}

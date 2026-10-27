@@ -1120,16 +1120,19 @@ export async function upsertSavingsGoal(formData: FormData) {
 
   const goalCents = displayToCents(String(formData.get("goal") ?? "0"));
   const startCents = displayToCents(String(formData.get("start") ?? "0"));
-  const monthlyCents = displayToCents(String(formData.get("monthly") ?? "0"));
   const targetDate = String(formData.get("targetDate") ?? "").trim() || null;
 
+  // `monthly_contribution_cents` is the Invest page's "Monthly contribution".
+  // The Budget card shows a calculated Monthly Needed instead and sends no
+  // `monthly`, so it must leave that column alone rather than zero it.
+  const monthlyRaw = formData.get("monthly");
   await supabase.from("savings_goals").upsert(
     {
       household_id: householdId,
       subcategory_id: subcategoryId,
       goal_cents: goalCents,
       start_cents: startCents,
-      monthly_contribution_cents: monthlyCents,
+      ...(monthlyRaw == null ? {} : { monthly_contribution_cents: displayToCents(String(monthlyRaw)) }),
       target_date: targetDate,
     },
     { onConflict: "household_id,subcategory_id" },

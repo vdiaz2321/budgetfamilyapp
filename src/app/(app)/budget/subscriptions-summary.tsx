@@ -952,7 +952,7 @@ function IrregularPlannedInput({
           setFocused(false);
           if (e.currentTarget.value !== initialValue) formRef.current?.requestSubmit();
         }}
-        className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-sm font-medium text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
+        className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-center text-sm font-medium text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />

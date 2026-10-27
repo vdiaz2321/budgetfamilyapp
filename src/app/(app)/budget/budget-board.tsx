@@ -1121,7 +1121,7 @@ function AssignLeftover({
                 onChange={(e) => setAmount(e.target.value)}
                 inputMode="decimal"
                 autoFocus
-                className="w-full rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-center text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </label>
 

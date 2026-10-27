@@ -142,3 +142,53 @@ export function resolveContributedCents(input: {
   if (storedCents != null) return storedCents;
   return liveCents;
 }
+
+export type SavingsGoalPace = "none" | "reached" | "overdue" | "on_track" | "behind";
+
+/**
+ * A savings goal's "monthly needed" and pace — one copy for /budget and
+ * /invest, which used to compute it two different ways and disagree (Budget
+ * divided Goal − Start by the months left and ignored what had been saved).
+ *
+ * Saved = this period's net transactions, or the Start amount when the
+ * period has none yet. This month's Planned is treated as already made —
+ * Victor logs savings at month end, so the month gets a chance to land
+ * before the goal reads Behind.
+ */
+export function savingsGoalProgress(input: {
+  goalCents: number;
+  startCents: number;
+  targetDate: string | null;
+  plannedCents: number;
+  periodNetCents: number;
+  hasPeriodTx: boolean;
+  now: Date;
+}): {
+  savedCents: number;
+  leftToSaveCents: number;
+  pace: SavingsGoalPace;
+  requiredMonthlyCents: number | null;
+} {
+  const { goalCents, startCents, targetDate, plannedCents, periodNetCents, hasPeriodTx, now } = input;
+  const savedCents = hasPeriodTx ? periodNetCents : startCents;
+  const leftToSaveCents = goalCents - savedCents;
+  if (goalCents > 0 && leftToSaveCents <= 0) {
+    return { savedCents, leftToSaveCents, pace: "reached", requiredMonthlyCents: null };
+  }
+  if (!targetDate || goalCents <= 0) {
+    return { savedCents, leftToSaveCents, pace: "none", requiredMonthlyCents: null };
+  }
+  const [ty, tm] = targetDate.split("-").map(Number);
+  const months = (ty - now.getFullYear()) * 12 + (tm - 1 - now.getMonth());
+  if (months <= 0) {
+    return { savedCents, leftToSaveCents, pace: "overdue", requiredMonthlyCents: leftToSaveCents };
+  }
+  const projectedLeft = Math.max(0, leftToSaveCents - plannedCents);
+  const requiredMonthlyCents = Math.ceil(projectedLeft / months);
+  return {
+    savedCents,
+    leftToSaveCents,
+    pace: plannedCents >= requiredMonthlyCents ? "on_track" : "behind",
+    requiredMonthlyCents,
+  };
+}

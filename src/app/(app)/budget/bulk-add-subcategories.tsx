@@ -51,7 +51,7 @@ function BulkAddModal({ groups, onClose }: { groups: GroupData[]; onClose: () =>
             name="categoryId"
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
-            className="rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-sm text-center [text-align-last:center] ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           >
             {groups.map((g) => (
               <option key={g.categoryId} value={g.categoryId}>{g.name}</option>

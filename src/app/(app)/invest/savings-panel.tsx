@@ -1,16 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
-import { TransactionModal } from "../budget/transaction-modal";
-import type { AccountOption, SubOption } from "../budget/types";
+import { useMemo, useState, useTransition } from "react";
 import { centsToDisplay } from "@/lib/money";
 import { updateSavingsGoalFields, saveContributionCaps } from "./savings-actions";
-import { listPayees } from "../budget/actions";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { IRS_LIMITS_URL, contributionDeadline, monthsUntilDeadline } from "@/lib/contribution-limits";
 import { CashReserves, type CashReservesData } from "./cash-reserves";
-import { useScrollLock } from "@/lib/use-scroll-lock";
 
 export type SavingsTxData = {
   id: string;
@@ -55,9 +51,13 @@ export type SavingsPanelProps = {
   incomeReceivedCents: number;
   currentMonthKey: string;
   currentMonthLabel: string;
-  firstOfMonth: string;
-  withdrawalSubOptions: SubOption[];
-  withdrawalAccountOptions: AccountOption[];
+  /**
+   * This month's Move Money withdrawals out of investments, by whose account
+   * they left — counted on the Withdraw tile alongside goal withdrawals.
+   */
+  monthMovedOutCents: { family: number; kids: number };
+  /** Opens the page's Move Money popup (the same one as Accounts). */
+  onMoveMoney?: () => void;
 };
 
 type Scope = "family" | "kids" | "all";
@@ -486,29 +486,22 @@ export function SavingsPanel({
   incomeReceivedCents,
   currentMonthKey,
   currentMonthLabel,
-  firstOfMonth,
-  withdrawalSubOptions,
-  withdrawalAccountOptions,
+  monthMovedOutCents,
+  onMoveMoney,
 }: SavingsPanelProps) {
   const familyCards = cards.filter((card) => !card.isKids);
   const kidsCards = cards.filter((card) => card.isKids);
   const [scope, setScope] = useState<Scope>(familyCards.length > 0 ? "family" : "all");
-  const [withdrawalOpen, setWithdrawalOpen] = useState(false);
-  useScrollLock(withdrawalOpen);
-  // Payee autocomplete for the withdrawal modal — the full household list is
-  // ~28KB, so it's fetched when the modal opens rather than shipped with the
-  // page. Same pattern as the budget board and the transactions table.
-  const [withdrawalPayeeOptions, setWithdrawalPayeeOptions] = useState<{ id: string; name: string }[]>([]);
-  const payeesRequested = useRef(false);
-  const openWithdrawal = () => {
-    if (!payeesRequested.current) {
-      payeesRequested.current = true;
-      void listPayees().then(setWithdrawalPayeeOptions);
-    }
-    setWithdrawalOpen(true);
-  };
   const scopedCards = scope === "family" ? familyCards : scope === "kids" ? kidsCards : cards;
   const stats = statsFor(scopedCards);
+  // Withdraw tile: goal withdrawals plus Move Money withdrawals out of an
+  // investment this month, for the same Family / Kids scope. The goal-only
+  // count read "$0 · no withdrawals" while $877 had left Fundrise this month.
+  const movedOutCents =
+    scope === "family" ? monthMovedOutCents.family
+    : scope === "kids" ? monthMovedOutCents.kids
+    : monthMovedOutCents.family + monthMovedOutCents.kids;
+  const withdrawnCents = stats.withdrawals + movedOutCents;
   const savingsRate = incomeReceivedCents > 0 ? (stats.net / incomeReceivedCents) * 100 : null;
 
   const recentActivity = useMemo(
@@ -578,20 +571,31 @@ export function SavingsPanel({
               <div className="grid grid-cols-1 divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
                 <Metric label="Of income" value={savingsRate == null ? "—" : `${savingsRate.toFixed(1)}%`} detail={`${formatSavingsMoney(incomeReceivedCents, currency)} received`} tone={savingsRate != null && savingsRate > 0 ? "text-positive" : undefined} />
                 <Metric label="This month’s savings" value={stats.planned > 0 ? `${Math.max(0, stats.planPct).toFixed(0)}% of plan` : "No plan"} detail={<><span className={stats.net >= 0 ? "text-positive" : "text-negative"}>{formatSavingsMoney(stats.net, currency)} saved</span> of {formatSavingsMoney(stats.planned, currency)} planned</>} />
-                <Metric label="Withdraw"value={formatSavingsMoney(stats.withdrawals, currency)} detail={stats.withdrawals > 0 ? "moved out of goals" : "no withdrawals"} tone={stats.withdrawals > 0 ? "text-negative" : undefined} action={<button type="button" onClick={openWithdrawal} className="mt-2 rounded-md border border-brand/35 px-2 py-1 text-xs sm:text-sm font-semibold text-brand transition hover:bg-brand-soft focus:outline-none focus:ring-2 focus:ring-brand">Withdraw funds</button>} />
+                <Metric label="Withdraw" value={formatSavingsMoney(withdrawnCents, currency)} detail={withdrawnCents > 0 ? "taken out this month" : "no withdrawals"} tone={withdrawnCents > 0 ? "text-negative" : undefined} action={onMoveMoney ? <button type="button" onClick={onMoveMoney} className="mt-2 rounded-md border border-brand/35 px-2 py-1 text-xs sm:text-sm font-semibold text-brand transition hover:bg-brand-soft focus:outline-none focus:ring-2 focus:ring-brand">Withdraw funds</button> : undefined} />
               </div>
 
-              <div className="space-y-2 border-t border-line/70 px-4 py-3">
-                <div className="flex items-center justify-between gap-3 text-xs sm:text-sm">
-                  <span className="font-medium">Overall goal progress</span>
-                  <span className="tabular-nums text-muted"><span className="text-positive">{formatSavingsMoney(stats.towardGoals, currency)}</span> of {formatSavingsMoney(stats.goal, currency)}</span>
+              {/* The total, then what it's made of: cash goals (savings
+                  buckets), investment goals, and kids funding when in scope.
+                  One bar hid that Real Estate is ~89% of the total — the
+                  investment goals alone sit near 75% (Victor, 2026-10-27).
+                  Each group opens to its goals in dollars only; the goals
+                  list below keeps the per-goal bars and pace. */}
+              <div className="space-y-2 border-t border-line/70 px-4 py-3 font-semibold">
+                <div className="-mx-2 flex flex-col gap-0.5 rounded-md bg-sky-50 px-2 py-1 text-xs sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 sm:text-sm dark:bg-sky-950/40">
+                  <span className="font-bold">Overall goal progress</span>
+                  <span className="tabular-nums">
+                    <span className="font-bold text-positive">{formatSavingsMoney(stats.towardGoals, currency)}</span> of {formatSavingsMoney(stats.goal, currency)}
+                    {" · "}{Math.min(100, Math.max(0, stats.goalPct)).toFixed(1)}%
+                    {stats.left > 0 ? <span className="whitespace-nowrap text-negative"> · {formatSavingsMoney(stats.left, currency)} left</span> : null}
+                  </span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-line/60">
                   <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.min(100, Math.max(0, stats.goalPct))}%`, backgroundColor: "var(--viz-savings)" }} />
                 </div>
-                <div className="flex items-center justify-between gap-3 max-sm:text-[12px] sm:text-[15px] text-muted">
-                  <span>{Math.min(100, Math.max(0, stats.goalPct)).toFixed(1)}% complete</span>
-                  <span className="text-negative">{formatSavingsMoney(stats.left, currency)} left</span>
+                <div className="grid grid-cols-1 gap-x-6 gap-y-2 pt-1 sm:grid-cols-[repeat(auto-fit,minmax(17rem,1fr))]">
+                  <GoalProgressGroup name="Cash goals" cards={scopedCards.filter((c) => !c.isInvestment && !c.isKids)} currency={currency} />
+                  <GoalProgressGroup name="Investment goals" cards={scopedCards.filter((c) => c.isInvestment && !c.isKids)} currency={currency} />
+                  <GoalProgressGroup name="Kids funding" cards={scopedCards.filter((c) => c.isKids)} currency={currency} />
                 </div>
               </div>
 
@@ -614,24 +618,6 @@ export function SavingsPanel({
             </div>
           </section>
 
-          {withdrawalOpen ? (
-            <div className="fixed inset-0 z-[70] flex min-h-0 items-stretch justify-center overflow-hidden overscroll-none bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
-              <div className="w-full sm:max-w-[520px]">
-                <TransactionModal
-                  editTx={null}
-                  monthKey={currentMonthKey}
-                  firstOfMonth={firstOfMonth}
-                  subOptions={withdrawalSubOptions}
-                  accountOptions={withdrawalAccountOptions}
-                  payeeOptions={withdrawalPayeeOptions}
-                  initialKind="savings"
-                  initialIsWithdrawal
-                  restrictToInitialKind
-                  onClose={() => setWithdrawalOpen(false)}
-                />
-              </div>
-            </div>
-          ) : null}
         </>
       )}
     </div>
@@ -652,6 +638,73 @@ function ScopeButton({ active, onClick, children }: { active: boolean; onClick: 
     >
       {children}
     </button>
+  );
+}
+
+// One slice of Overall goal progress, sized to sit side by side with the
+// others (Victor, 2026-10-27). Counts each goal up to its target, the same
+// rule as statsFor, so the slices add up to the total above them. Click the
+// header to list its goals in the same two-line shape.
+function GoalProgressGroup({ name, cards, currency }: { name: string; cards: SavingsCardData[]; currency: string }) {
+  const [open, setOpen] = useState(false);
+  const goals = cards
+    .filter((c) => c.goalCents > 0)
+    .sort((a, b) => b.goalCents - a.goalCents);
+  if (goals.length === 0) return null;
+  const goalCents = goals.reduce((t, c) => t + c.goalCents, 0);
+  const savedCents = goals.reduce((t, c) => t + Math.min(c.savedCents, c.goalCents), 0);
+  const pct = goalCents > 0 ? Math.min(100, (savedCents / goalCents) * 100) : 0;
+  return (
+    <div className="min-w-0 self-start">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="-mx-2 block w-[calc(100%+1rem)] rounded-md px-2 py-1 text-left text-xs transition hover:bg-sky-50 sm:text-sm dark:hover:bg-sky-950/40"
+      >
+        <span className="flex items-baseline justify-between gap-2">
+          <span className="flex items-center gap-1.5">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden>
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+            {name} <span className="text-muted">· {goals.length}</span>
+          </span>
+          <span className="tabular-nums">{pct.toFixed(0)}%</span>
+        </span>
+        <AmountLine savedCents={savedCents} goalCents={goalCents} currency={currency} className="pl-[18px]" />
+        <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-line/60">
+          <span className="block h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: "var(--viz-savings)" }} />
+        </span>
+      </button>
+      {open ? (
+        <ul className="mt-1 space-y-1.5 pl-[18px] text-xs sm:text-sm">
+          {goals.map((c) => {
+            const goalPct = Math.min(100, (Math.min(c.savedCents, c.goalCents) / c.goalCents) * 100);
+            return (
+              <li key={c.id}>
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className="min-w-0 truncate text-muted">{c.name}</span>
+                  <span className="tabular-nums">{goalPct.toFixed(0)}%</span>
+                </span>
+                <AmountLine savedCents={c.savedCents} goalCents={c.goalCents} currency={currency} />
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+// "$saved of $goal" left, "$left left" right — the second line of a goal row.
+function AmountLine({ savedCents, goalCents, currency, className }: { savedCents: number; goalCents: number; currency: string; className?: string }) {
+  const saved = Math.min(savedCents, goalCents);
+  const left = Math.max(0, goalCents - saved);
+  return (
+    <span className={`flex items-baseline justify-between gap-2 tabular-nums ${className ?? ""}`}>
+      <span className="whitespace-nowrap">{formatSavingsMoney(saved, currency)} of {formatSavingsMoney(goalCents, currency)}</span>
+      <span className="whitespace-nowrap text-negative">{left > 0 ? `${formatSavingsMoney(left, currency)} left` : ""}</span>
+    </span>
   );
 }
 
@@ -692,7 +745,7 @@ function ActivityPanel({ activity, currency, monthLabel: label }: { activity: Ac
 function GoalGroup({ title, cards, currency, incomeReceivedCents }: { title: string; cards: SavingsCardData[]; currency: string; incomeReceivedCents: number }) {
   return (
     <div className="overflow-hidden rounded-xl border border-line/80">
-      <div className="border-b border-line/70 bg-brand-soft/25 px-4 py-2 text-xs sm:text-sm font-semibold text-muted dark:bg-brand-soft/10">{title}</div>
+      <div className="border-b border-line/70 bg-brand-soft/25 px-4 py-2 text-xs sm:text-base font-semibold text-muted dark:bg-brand-soft/10">{title}</div>
       <div className="divide-y divide-line/60">{cards.map((card) => <SavingsGoalRow key={card.id} card={card} currency={currency} incomeReceivedCents={incomeReceivedCents} />)}</div>
     </div>
   );
@@ -706,23 +759,23 @@ function SavingsGoalRow({ card, currency, incomeReceivedCents }: { card: Savings
 
   return (
     <div>
-      <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className="grid w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-brand-soft/20 md:grid-cols-[minmax(200px,1.2fr)_150px_minmax(230px,1fr)_118px_18px]">
+      <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className="grid w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-brand-soft/20 sm:py-3 md:grid-cols-[minmax(220px,1fr)_175px_minmax(300px,1.6fr)_140px_18px]">
         <span className="flex min-w-0 items-center gap-2">
           <span className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="block min-w-0 flex-1 truncate text-sm font-semibold">{card.name}</span>
+            <span className="block min-w-0 flex-1 truncate text-sm font-semibold sm:text-[17px]">{card.name}</span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-muted transition-transform md:hidden ${expanded ? "rotate-90" : ""}`} aria-hidden><path d="M9 18l6-6-6-6" /></svg>
           </span>
           <StatusBadge pace={card.pace} hasGoal={hasGoal} />
         </span>
         <span className="flex items-baseline gap-1.5 whitespace-nowrap">
-          <span className="text-xs sm:text-sm text-muted">This month</span>
-          <span className={`text-sm font-semibold tabular-nums ${card.monthNetCents >= 0 ? "text-positive" : "text-negative"}`}>{card.monthNetCents < 0 ? "−" : ""}{formatSavingsMoney(Math.abs(card.monthNetCents), currency)}</span>
+          <span className="text-xs sm:text-base text-muted">This month</span>
+          <span className={`text-sm font-semibold tabular-nums sm:text-[17px] ${card.monthNetCents >= 0 ? "text-positive" : "text-negative"}`}>{card.monthNetCents < 0 ? "−" : ""}{formatSavingsMoney(Math.abs(card.monthNetCents), currency)}</span>
         </span>
         <span className="min-w-0">
-          <span className="flex items-center justify-between gap-2 text-xs sm:text-sm text-muted"><span>{hasGoal ? `${progress.toFixed(0)}% complete` : "No goal set"}</span><span className="truncate tabular-nums">{hasGoal ? <><span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span> / {formatSavingsMoney(card.goalCents, currency)}</> : <span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span>}</span></span>
-          <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-line/60"><span className={`block h-full rounded-full ${card.pace === "reached" ? "bg-positive" : ""}`} style={{ width: `${progress}%`, ...(card.pace === "reached" ? {} : { backgroundColor: "var(--viz-savings)" }) }} /></span>
+          <span className="flex items-center justify-between gap-2 text-xs font-semibold sm:text-base text-muted"><span>{hasGoal ? `${progress.toFixed(0)}% complete` : "No goal set"}</span><span className="truncate tabular-nums">{hasGoal ? <><span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span> / {formatSavingsMoney(card.goalCents, currency)}</> : <span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span>}</span></span>
+          <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-line/60 sm:h-2"><span className={`block h-full rounded-full ${card.pace === "reached" ? "bg-positive" : ""}`} style={{ width: `${progress}%`, ...(card.pace === "reached" ? {} : { backgroundColor: "var(--viz-savings)" }) }} /></span>
         </span>
-        <span className="flex items-baseline gap-1.5 whitespace-nowrap"><span className="text-xs sm:text-sm text-muted">Of income</span><span className="text-sm font-semibold tabular-nums">{incomeRate == null ? "—" : `${incomeRate.toFixed(1)}%`}</span></span>
+        <span className="flex items-baseline gap-1.5 whitespace-nowrap"><span className="text-xs sm:text-base text-muted">Of income</span><span className="text-sm font-semibold tabular-nums sm:text-[17px]">{incomeRate == null ? "—" : `${incomeRate.toFixed(1)}%`}</span></span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`hidden text-muted transition-transform md:block ${expanded ? "rotate-90" : ""}`} aria-hidden><path d="M9 18l6-6-6-6" /></svg>
       </button>
 
@@ -876,7 +929,7 @@ function Detail({ label, value, sub }: { label: string; value: string; sub?: str
 }
 
 function StatusBadge({ pace, hasGoal }: { pace: SavingsCardData["pace"]; hasGoal: boolean }) {
-  if (!hasGoal) return <span className="text-xs sm:text-sm font-medium text-muted">No goal</span>;
+  if (!hasGoal) return <span className="text-xs sm:text-base font-semibold text-muted">No goal</span>;
   const badges: Record<SavingsCardData["pace"], { label: string; className: string } | null> = {
     none: null,
     reached: { label: "✓ Reached", className: "text-positive" },
@@ -885,5 +938,5 @@ function StatusBadge({ pace, hasGoal }: { pace: SavingsCardData["pace"]; hasGoal
     overdue: { label: "Overdue", className: "text-negative" },
   };
   const badge = badges[pace];
-  return badge ? <span className={`whitespace-nowrap text-xs sm:text-sm font-medium ${badge.className}`}>{badge.label}</span> : <span />;
+  return badge ? <span className={`whitespace-nowrap text-xs sm:text-base font-semibold ${badge.className}`}>{badge.label}</span> : <span />;
 }

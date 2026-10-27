@@ -1,5 +1,6 @@
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { getSessionContext } from "@/lib/auth-context";
+import { periodStartFor, savingsGoalProgress, signedContributionCents } from "@/lib/fund-contributions";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { resolveMonth } from "@/lib/month";
 import { BudgetBoard } from "./budget-board";
@@ -189,10 +190,10 @@ export default async function BudgetPage({
     // bill's year-to-date spend with the same payee matcher the month figures
     // use. Paged because a year of rows crosses PostgREST's 1000-row
     // cap; the full-fat transaction read above stays at two months.
-    fetchAllRows<{ subcategory_id: string | null; payee_id: string | null; amount_cents: number; occurred_on: string }>((from, to) =>
+    fetchAllRows<{ subcategory_id: string | null; payee_id: string | null; amount_cents: number; occurred_on: string; is_withdrawal: boolean }>((from, to) =>
       supabase
         .from("transactions")
-        .select("subcategory_id, payee_id, amount_cents, occurred_on")
+        .select("subcategory_id, payee_id, amount_cents, occurred_on, is_withdrawal")
         .eq("household_id", household.id)
         .gte("occurred_on", yearStart)
         .lt("occurred_on", yearEnd)
@@ -259,6 +260,23 @@ export default async function BudgetPage({
     ytdBySub.set(row.subcategory_id, (ytdBySub.get(row.subcategory_id) ?? 0) + row.actual_cents);
   }
   const goalBySub = new Map((goals ?? []).map((g) => [g.subcategory_id, g]));
+  // Savings goal progress for the item card — the same period rule and math
+  // the Invest page uses (@/lib/fund-contributions), so "Monthly needed" and
+  // the pace badge read the same on both pages. The year's transactions above
+  // cover a goal's period only when its target falls in the viewed year;
+  // otherwise it falls back to the Start amount, as a fresh goal does.
+  const now = new Date();
+  const goalPeriodNetBySub = new Map<string, number>();
+  const goalPeriodTxCountBySub = new Map<string, number>();
+  for (const t of yearTxRows) {
+    if (!t.subcategory_id) continue;
+    const goal = goalBySub.get(t.subcategory_id);
+    if (!goal) continue;
+    const from = periodStartFor(goal.target_date ?? null, now);
+    if (from !== yearStart || t.occurred_on < from) continue;
+    goalPeriodNetBySub.set(t.subcategory_id, (goalPeriodNetBySub.get(t.subcategory_id) ?? 0) + signedContributionCents(t));
+    goalPeriodTxCountBySub.set(t.subcategory_id, (goalPeriodTxCountBySub.get(t.subcategory_id) ?? 0) + 1);
+  }
   const debtBySub = new Map((debts ?? []).map((d) => [d.subcategory_id, d]));
   const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
   const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
@@ -456,9 +474,20 @@ export default async function BudgetPage({
               ? {
                   goalCents: g?.goal_cents ?? 0,
                   startCents: g?.start_cents ?? 0,
-
                   monthlyCents: g?.monthly_contribution_cents ?? 0,
                   targetDate: g?.target_date ?? null,
+                  ...(() => {
+                    const p = savingsGoalProgress({
+                      goalCents: g?.goal_cents ?? 0,
+                      startCents: g?.start_cents ?? 0,
+                      targetDate: g?.target_date ?? null,
+                      plannedCents,
+                      periodNetCents: goalPeriodNetBySub.get(s.id) ?? 0,
+                      hasPeriodTx: (goalPeriodTxCountBySub.get(s.id) ?? 0) > 0,
+                      now,
+                    });
+                    return { requiredMonthlyCents: p.requiredMonthlyCents, pace: p.pace };
+                  })(),
                   linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
                   linkedAccountId: linkedAccountBySub.get(s.id) ?? null,
                 }

@@ -682,7 +682,7 @@ function AddItemForm({
           min={1}
           max={31}
           placeholder="Due"
-          className="w-16 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-right text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-16 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       ) : null}
       {allowRecurring && isRecurring ? <input type="hidden" name="isRecurring" value="on" /> : null}

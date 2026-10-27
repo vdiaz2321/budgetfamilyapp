@@ -66,7 +66,7 @@ function AddCategoryGroupModal({ onClose }: { onClose: () => void }) {
           <select
             name="kind"
             defaultValue="bills"
-            className="rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-center [text-align-last:center] ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           >
             {GROUP_TYPES.map((type) => (
               <option key={type.value} value={type.value}>{type.label}</option>

@@ -1,3 +1,4 @@
+import type { SavingsGoalPace } from "@/lib/fund-contributions";
 import type { CategoryKind } from "@/lib/categories";
 
 export type SavingsDetail = {
@@ -13,6 +14,10 @@ export type SavingsDetail = {
   // Same idea, but for a bare investment account (TSP, M1, etc.) that has no
   // buckets. Only one of linkedBucketId/linkedAccountId can be set.
   linkedAccountId: string | null;
+  // From the shared savingsGoalProgress (@/lib/fund-contributions) — the
+  // same figures the Invest page shows. Null when there's no goal/date.
+  requiredMonthlyCents: number | null;
+  pace: SavingsGoalPace;
 };
 
 // A target a Savings item can link to. Usually a bucket (with parent account

@@ -9,7 +9,6 @@ import {
 } from "./invest-board";
 import type { SavingsCardData } from "./savings-panel";
 import type { CashReserveRow, CashReservesData } from "./cash-reserves";
-import type { AccountOption, SubOption } from "../budget/types";
 import { getSessionContext } from "@/lib/auth-context";
 import { ensureCategories } from "@/lib/categories";
 import { capsForYear, latestCapYear, pendingCapYear } from "@/lib/contribution-limits";
@@ -18,14 +17,13 @@ import {
   investSlotKey,
   periodStartFor,
   resolveContributedCents,
+  savingsGoalProgress,
   signedContributionCents,
   transferOutCents,
 } from "@/lib/fund-contributions";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { throwIfAny } from "@/lib/supabase-result";
-import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
 import { CAP_KIND_LABEL, capKindFor, resolveRetirementKind } from "@/lib/retirement-kind";
-import { sourceBucketsByAccount } from "@/lib/source-buckets";
 
 export const metadata = { title: "Invest / Savings · Capitall" };
 
@@ -35,12 +33,6 @@ const FLOOR_YEAR = 2023;
 // Whole calendar months from today to a YYYY-MM-DD target date (day-of-month
 // ignored — Monthly contributions are a monthly cadence, so day precision
 // inside a month isn't meaningful here). Negative means the date has passed.
-function monthsUntil(target: string): number {
-  const [ty, tm] = target.split("-").map(Number);
-  const now = new Date();
-  return (ty - now.getFullYear()) * 12 + (tm - 1 - now.getMonth());
-}
-
 export default async function InvestPage({
   searchParams,
 }: {
@@ -159,7 +151,6 @@ export default async function InvestPage({
     { data: incomeActuals, error: incomeActualsError },
     { data: essentialActuals, error: essentialActualsError },
     { data: storedCapRows, error: storedCapRowsError },
-    { data: cardOwedRows, error: cardOwedError },
     { data: transferRows, error: transferRowsError },
   ] = await Promise.all([
     supabase
@@ -281,11 +272,6 @@ export default async function InvestPage({
       .from("contribution_caps")
       .select("tax_year, elective_deferral_cents, ira_cents")
       .eq("household_id", household.id),
-    // Owed per card for the withdrawal modal's account picker.
-    supabase
-      .from("v_card_balances")
-      .select("account_id, owed_cents")
-      .eq("household_id", household.id),
     // Money moved in or out of an investment by Withdraw — added
     // back when working out gains (see transferOutCents).
     supabase
@@ -307,7 +293,6 @@ export default async function InvestPage({
     incomeActuals: incomeActualsError,
     essentialActuals: essentialActualsError,
     storedCapRows: storedCapRowsError,
-    cardOwed: cardOwedError,
     transferRows: transferRowsError,
   });
 
@@ -675,19 +660,6 @@ export default async function InvestPage({
     })
     .reduce((sum, row) => sum + (row.net_contribution_cents ?? 0), 0);
 
-  // Where a withdrawal can land: banking accounts (Kids Funding ones named as
-  // such), with their buckets — a bucketed account must name the bucket.
-  // Cards aren't offered: paying a card is its own flow on Accounts.
-  const destAccounts = allAccounts
-    .filter((a) => a.active && (a.kind === "checking" || a.kind === "savings_bucket" || a.kind === "cash"))
-    .map((a) => ({
-      id: a.id,
-      name: a.is_kids_account ? `${a.name} (Kids Funding)` : a.name,
-      buckets: (bucketRows ?? [])
-        .filter((b) => b.account_id === a.id)
-        .map((b) => ({ id: b.id, name: b.name })),
-    }));
-
   // ---- Imported holdings & performance -------------------------------------
 
   const [
@@ -818,6 +790,9 @@ export default async function InvestPage({
       return {
         id: b.id,
         name: b.name,
+        accountId: b.account_id,
+        accountName: allAccounts.find((a) => a.id === b.account_id)?.name ?? "",
+        isBucket: true,
         balanceCents: b.balance_cents ?? 0,
         // Only decides whether the months-of-cover track is drawn under this
         // row — the balance itself is never gated on the name matching.
@@ -842,6 +817,9 @@ export default async function InvestPage({
       return {
         id: a.id,
         name: a.name,
+        accountId: a.id,
+        accountName: a.name,
+        isBucket: false,
         balanceCents: a.current_balance_cents ?? 0,
         isEmergencyFund: /emergency/i.test(a.name ?? ""),
         goalCents: goal ? goal.goalCents : null,
@@ -991,28 +969,14 @@ export default async function InvestPage({
 
   // ---- Savings goal cards ---------------------------------------------------
 
-  const withdrawalSubOptions: SubOption[] = savingsSubs.map((sub) => ({
-    id: sub.id,
-    name: sub.name,
-    kind: "savings",
-    linkedBucketId: sub.linked_bucket_id ?? null,
-  }));
-  const withdrawalSourceBuckets = sourceBucketsByAccount(allAccounts, bucketRows ?? []);
-  const withdrawalAccountOptions: AccountOption[] = allAccounts
-    .filter(
-      (account) =>
-        account.kind === "checking" ||
-        account.kind === "savings_bucket" ||
-        account.kind === "cash" ||
-        account.kind === "credit_card",
-    )
-    .map((account) => ({
-      id: account.id,
-      name: account.name,
-      group: account.kind === "credit_card" ? "Credit Cards" : "Banking",
-      balanceCents: pickerBalanceCents(account, cardOwedMap(cardOwedRows)),
-      sourceBuckets: withdrawalSourceBuckets.get(account.id),
-    }));
+  // This month's Move Money withdrawals out of an investment, split by whose
+  // account the money left — the Savings tab's Withdraw tile counts them.
+  const monthMovedOutCents = { family: 0, kids: 0 };
+  for (const t of transferRows ?? []) {
+    if (!t.is_withdrawal || !t.occurred_on.startsWith(currentMonthKey)) continue;
+    if (t.account_id && isKidsAccountById.get(t.account_id)) monthMovedOutCents.kids += t.amount_cents;
+    else monthMovedOutCents.family += t.amount_cents;
+  }
 
   const goalBySub = new Map((savingsGoals ?? []).map((g) => [g.subcategory_id, g]));
   const plannedBySub = new Map(
@@ -1097,29 +1061,11 @@ export default async function InvestPage({
     const monthNetCents = monthDepositsCents - monthWithdrawalsCents;
     const periodNetCents = periodNetBySub.get(s.id) ?? 0;
     const hasPeriodTx = (periodTxCountBySub.get(s.id) ?? 0) > 0;
-    const savedCents = hasPeriodTx ? periodNetCents : startCents;
-    const leftToSaveCents = goalCents - savedCents;
-    const reached = goalCents > 0 && leftToSaveCents <= 0;
-
-    let pace: SavingsCardData["pace"] = "none";
-    let requiredMonthlyCents: number | null = null;
-    if (reached) {
-      pace = "reached";
-    } else if (targetDate && goalCents > 0) {
-      const months = monthsUntil(targetDate);
-      if (months <= 0) {
-        pace = "overdue";
-        requiredMonthlyCents = leftToSaveCents;
-      } else {
-        // Treat this month's planned contribution as already made — Victor
-        // logs savings at end of month, so give the month a chance to land
-        // before flagging behind. Required = what's needed each future month
-        // after this month's planned amount comes through.
-        const projectedLeft = Math.max(0, leftToSaveCents - plannedCents);
-        requiredMonthlyCents = Math.ceil(projectedLeft / months);
-        pace = plannedCents >= requiredMonthlyCents ? "on_track" : "behind";
-      }
-    }
+    // Shared with the Budget item card so both pages show the same
+    // "monthly needed" and pace.
+    const { savedCents, leftToSaveCents, pace, requiredMonthlyCents } = savingsGoalProgress({
+      goalCents, startCents, targetDate, plannedCents, periodNetCents, hasPeriodTx, now,
+    });
 
     return {
       id: s.id,
@@ -1151,7 +1097,6 @@ export default async function InvestPage({
       accounts={data}
       years={years}
       currency={household.currency}
-      destAccounts={destAccounts}
       imports={imports}
       contributedThisMonthCents={contributedThisMonthCents}
       currentMonthLabel={currentMonthLabel}
@@ -1169,9 +1114,7 @@ export default async function InvestPage({
         incomeReceivedCents,
         currentMonthKey,
         currentMonthLabel,
-        withdrawalSubOptions,
-        withdrawalAccountOptions,
-        firstOfMonth: monthKey,
+        monthMovedOutCents,
       }}
     />
   );
