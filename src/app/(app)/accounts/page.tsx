@@ -5,6 +5,7 @@ import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, typ
 import type { CardPayment } from "@/components/card-payments-ledger";
 import { getSessionContext } from "@/lib/auth-context";
 import type { EstateData } from "./estate-guide";
+import { investItemsFrom } from "@/lib/invest-items";
 import { loadDebtMonthPlans } from "@/lib/debt-month-plan";
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
 
@@ -114,10 +115,13 @@ export default async function AccountsPage() {
       .from("debts")
       .select("subcategory_id, account_id, current_balance_cents, min_payment_cents, target_payment_cents, apr, due_day, debt_kind, tracking_enabled, promo_apr_ends_on, property_account_id, bt_card_account_id, bt_transaction_id")
       .eq("household_id", household.id),
+    // Names for the debt reports, plus the Invest/Savings items the Move
+    // Money popup offers as "To" (money into an investment).
     supabase
       .from("subcategories")
-      .select("id, name")
-      .eq("household_id", household.id),
+      .select("id, name, active, sort_order, linked_bucket_id, linked_account_id, categories(kind)")
+      .eq("household_id", household.id)
+      .order("sort_order"),
     supabase
       .from("credit_card_details")
       .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, free_night_category_max, benefit_used_on, benefit_booked_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id, rewards_category, rewards_program, points_value_micros, five24_countable, card_url, benefit_cadence")
@@ -288,6 +292,7 @@ export default async function AccountsPage() {
   }
 
   const subName = new Map((subRows ?? []).map((s) => [s.id, s.name]));
+  const investItems = investItemsFrom(subRows ?? [], bucketRows ?? []);
   const debtHistory = new Map<string, number>();
   for (const s of debtSnapshotRows ?? []) {
     debtHistory.set(`${s.subcategory_id}:${s.month}`, s.balance_cents ?? 0);
@@ -643,6 +648,7 @@ export default async function AccountsPage() {
       monthEndChecks={monthEndChecks}
       accounts={accounts}
       budgetDebts={budgetDebts}
+      investItems={investItems}
       currency={household.currency}
       nonCardAccounts={nonCardAccounts}
       freeNightStays={freeNightStays}

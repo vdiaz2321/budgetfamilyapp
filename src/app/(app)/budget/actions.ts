@@ -3000,8 +3000,8 @@ export async function setRollover(formData: FormData) {
 
 // Rolls over a chosen amount (or the full live amount when `override` is
 // blank). Saving the row is what turns the rollover on, so the Rollover pill
-// calls this directly. The override also resets the carry from this month
-// on, so the part NOT rolled over doesn't reappear next month.
+// calls this directly. The part NOT rolled over stays in the pool and is
+// offered again next month (see the carry walk in page.tsx).
 export async function setRolloverOverride(formData: FormData): Promise<{ error?: string }> {
   const { supabase, householdId } = await requireHousehold();
   const month = String(formData.get("month") ?? "");

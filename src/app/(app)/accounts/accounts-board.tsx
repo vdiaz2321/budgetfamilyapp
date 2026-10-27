@@ -18,7 +18,6 @@ import {
   addBucket,
   deleteAccount,
   deleteBucket,
-  transferBetweenAccounts,
   reorderAccounts,
   reorderBuckets,
   updateAccount,
@@ -26,7 +25,6 @@ import {
   updateBucket,
   updateBucketBalance,
 } from "./actions";
-import { transferFromInvestment } from "@/app/(app)/invest/actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
 import { DEBT_KINDS } from "../budget/types";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
@@ -37,6 +35,7 @@ import {
   type AccountData,
   type BucketData,
   type BudgetDebt,
+  type InvestItem,
   type CardDetails,
   type NonCardAccount,
   type RewardActivity,
@@ -44,6 +43,7 @@ import {
 } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 import { AddTransactionButton } from "../travel/add-transaction-button";
+import { MoveMoneyModal } from "./move-money";
 import { TransferActivityModal } from "./transfer-activity";
 import type { EditableTransfer } from "../transactions/transfer-editor-modal";
 import { MonthEndUpdateModal, type MonthEndCheck } from "./month-end-update";
@@ -175,6 +175,7 @@ const SECTIONS: Section[] = [
 type Props = {
   accounts: AccountData[];
   budgetDebts: BudgetDebt[];
+  investItems: InvestItem[];
   currency: string;
   nonCardAccounts?: NonCardAccount[];
   // [current, prev, prev2] as YYYY-MM-01 — powers the three balance columns.
@@ -447,6 +448,7 @@ function SubtypeSelect({
 export function AccountsBoard({
   accounts,
   budgetDebts,
+  investItems,
   currency,
   nonCardAccounts = [],
   historyMonths,
@@ -477,7 +479,7 @@ export function AccountsBoard({
   const [estateOpen, setEstateOpen] = useState(false);
   const estateToFill = estateToFillCount(accounts, estate);
   const [monthEndOpen, setMonthEndOpen] = useState(false);
-  const [transferOpen, setTransferOpen] = useState<false | "banking" | "investment">(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
   // Period picker on the Accounts header — same control as Insights. Local
@@ -763,8 +765,7 @@ export function AccountsBoard({
     { label: "Month-end update", onSelect: () => setMonthEndOpen(true) },
     { label: estateToFill > 0 ? `Estate guide (${estateToFill} to fill in)` : "Estate guide", onSelect: () => setEstateOpen(true) },
     { label: "Add account", onSelect: () => setAddOpen(true) },
-    { label: "Transfer Between Banks", onSelect: () => setTransferOpen("banking") },
-    { label: "Withdraw Investment", onSelect: () => setTransferOpen("investment") },
+    { label: "Move Money", onSelect: () => setTransferOpen(true) },
     { label: "Transfer Activity", onSelect: () => setActivityOpen(true) },
   ]);
 
@@ -811,9 +812,12 @@ export function AccountsBoard({
               <span className="rounded-full bg-negative/15 px-1.5 text-[10px] font-bold text-foreground ring-1 ring-negative/15">{estateToFill}</span>
             ) : null}
           </button>
+          {/* Every move between your own accounts — bank transfer, invest,
+              withdraw — in one popup that works out which from From / To.
+              Three buttons read as the same thing (Victor, 2026-10-27). */}
           <button
             type="button"
-            onClick={() => setTransferOpen("banking")}
+            onClick={() => setTransferOpen(true)}
             // Outlined in the brand color: stands apart from the plain
             // buttons, while Add account stays the one filled button.
             className="hidden shrink-0 items-center gap-1.5 md:inline-flex whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
@@ -821,19 +825,7 @@ export function AccountsBoard({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
             </svg>
-            Transfer Between Banks
-          </button>
-          {/* Money out of an investment has its own button, so it isn't
-              hidden inside Transfer Funds (Victor, 2026-10-24). */}
-          <button
-            type="button"
-            onClick={() => setTransferOpen("investment")}
-            className="hidden shrink-0 items-center gap-1.5 md:inline-flex whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" />
-            </svg>
-            Withdraw Investment
+            Move Money
           </button>
           <button
             type="button"
@@ -998,8 +990,7 @@ export function AccountsBoard({
             onToggleBuckets={toggleBuckets}
             headerBadge={section.kidsGroup ? "Not in Net Worth" : undefined}
             onAddAccount={() => setAddOpen(true)}
-            onTransfer={() => setTransferOpen(section.key === "investments" ? "investment" : "banking")}
-            transferLabel={section.key === "investments" ? "Withdraw Investment" : undefined}
+            onTransfer={() => setTransferOpen(true)}
           />
           </div>
         );
@@ -1104,10 +1095,10 @@ export function AccountsBoard({
         />
       ) : null}
       {transferOpen ? (
-        <TransferModal
+        <MoveMoneyModal
           accounts={accounts}
-          allBuckets={accounts.flatMap((a) => a.buckets)}
-          mode={transferOpen}
+          investItems={investItems}
+          currency={currency}
           onClose={() => setTransferOpen(false)}
         />
       ) : null}
@@ -1659,239 +1650,6 @@ function PickCardModal({
   );
 }
 
-// Move money between two of your own accounts. Budget-neutral by design —
-// see `transferBetweenAccounts` for why funding a savings goal stays on the
-// Budget page instead of being folded in here.
-function TransferModal({
-  accounts,
-  allBuckets,
-  mode = "banking",
-  onClose,
-}: {
-  accounts: AccountData[];
-  allBuckets: BucketData[];
-  // Each button has one job, so From only lists what fits it: Transfer Funds
-  // moves money between bank accounts, Withdraw takes it out of an
-  // investment. One popup listing both let a Fundrise move slip in under the
-  // wrong button (Victor, 2026-10-25).
-  mode?: "banking" | "investment";
-  onClose: () => void;
-}) {
-  useScrollLock();
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Grouped so it's plain which money is which: moving to or from a Kids
-  // Funding account moves money in or out of Net Worth. Cards have their own
-  // payment flow. Money INTO an investment is a contribution, logged on Budget
-  // so Contributed / Left to max count it, so investments are only a source.
-  const live = accounts.filter((a) => a.active && a.kind !== "credit_card");
-  const banking = live.filter((a) => !a.isKidsAccount && a.kind !== "investment" && a.kind !== "property" && a.kind !== "debt_loan");
-  const investments = live.filter((a) => !a.isKidsAccount && a.kind === "investment");
-  const kids = live.filter((a) => a.isKidsAccount && a.kind !== "property" && a.kind !== "debt_loan");
-  const destinations = [...banking, ...kids.filter((a) => a.kind !== "investment")];
-
-  const kidsCash = kids.filter((a) => a.kind !== "investment");
-  const sources = mode === "investment" ? investments : [...banking, ...kidsCash];
-  const firstFrom = sources[0];
-  const [fromId, setFromId] = useState<string>(firstFrom?.id ?? "");
-  const [toId, setToId] = useState<string>(destinations.find((a) => a.id !== firstFrom?.id)?.id ?? "");
-  const [fromBucketId, setFromBucketId] = useState("");
-  const [toBucketId, setToBucketId] = useState("");
-
-  const fromIsInvestment = mode === "investment";
-  const fromBuckets = allBuckets.filter((b) => b.accountId === fromId);
-  const toBuckets = allBuckets.filter((b) => b.accountId === toId);
-  const toOptions = destinations.filter((a) => a.id !== fromId);
-
-  const selectClass =
-    "w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
-  const labelClass = "mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground";
-  const optionGroups = (groups: [string, AccountData[]][]) =>
-    groups
-      .filter(([, list]) => list.length > 0)
-      .map(([label, list]) => (
-        <optgroup key={label} label={label}>
-          {list.map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </optgroup>
-      ));
-
-  return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-sm space-y-3 rounded-xl bg-surface p-4 shadow-lg ring-1 ring-black/10"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between">
-          {/* Named for what it does: taking money out of an investment is a
-              withdrawal. */}
-          <div>
-            <h2 className="text-base font-bold">{fromIsInvestment ? "Withdraw from an investment" : "Transfer Between Banks"}</h2>
-            {/* Money into Fidelity/TSP is a Budget Invest/Savings entry, not
-                this — said here so the two don't get mixed up (Victor,
-                2026-10-26). */}
-            <p className="mt-0.5 text-[13.5px] text-foreground">
-              {fromIsInvestment ? "Move money from an investment to a bank account." : "Move cash between bank accounts."}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* onSubmit, not <form action>: a rejected save must keep what was typed. */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            start(async () => {
-              setErrorMsg(null);
-              let r: { error: string | null } | undefined;
-              if (fromIsInvestment) {
-                // Same withdrawal Invest / Savings records — one transaction
-                // type, one set of balance moves, one Net Worth effect.
-                const w = new FormData();
-                w.set("sourceAccountId", fromId);
-                w.set("sourceBucketId", fromBucketId);
-                w.set("destAccountId", toId);
-                w.set("destBucketId", toBucketId);
-                w.set("amount", String(fd.get("amount") ?? ""));
-                w.set("date", String(fd.get("date") ?? ""));
-                w.set("memo", String(fd.get("memo") ?? ""));
-                r = await transferFromInvestment(w);
-              } else {
-                r = await transferBetweenAccounts(fd);
-              }
-              if (r?.error) setErrorMsg(r.error);
-              else {
-                // The totals above didn't move until a reload after a
-                // withdrawal, which read as "it didn't work".
-                router.refresh();
-                onClose();
-              }
-            });
-          }}
-          className="space-y-2"
-        >
-          {/* Amount and Date share a row; From and To each get a full line
-              so long account names aren't cut off at this width (Victor,
-              2026-10-25). Stacks on a phone. */}
-          <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2">
-            <LabeledInput label="Amount" name="amount" type="number" step="0.01" min="0" required autoFocus />
-            <LabeledInput
-              label="Date"
-              name="date"
-              type="date"
-              defaultValue={new Date().toISOString().slice(0, 10)}
-              required
-            />
-          </div>
-          <label className="block">
-            <span className={labelClass}>From</span>
-            <select
-              name="fromAccountId"
-              value={fromId}
-              onChange={(e) => {
-                setFromId(e.target.value);
-                setFromBucketId("");
-                if (e.target.value === toId) {
-                  setToId(destinations.find((a) => a.id !== e.target.value)?.id ?? "");
-                  setToBucketId("");
-                }
-              }}
-              required
-              className={selectClass}
-            >
-              {mode === "investment"
-                ? optionGroups([["Investments", investments]])
-                : optionGroups([["Banking", banking], ["Kids Funding", kidsCash]])}
-            </select>
-          </label>
-          {fromBuckets.length > 0 ? (
-            <label className="block">
-              <span className={labelClass}>From bucket</span>
-              <select
-                name="fromBucketId"
-                value={fromBucketId}
-                onChange={(e) => setFromBucketId(e.target.value)}
-                required
-                className={selectClass}
-              >
-                <option value="">Choose a bucket…</option>
-                {fromBuckets.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <label className="block">
-            <span className={labelClass}>To</span>
-            <select
-              name="toAccountId"
-              value={toId}
-              onChange={(e) => { setToId(e.target.value); setToBucketId(""); }}
-              required
-              className={selectClass}
-            >
-              {optionGroups([
-                ["Banking", toOptions.filter((a) => !a.isKidsAccount)],
-                ["Kids Funding", toOptions.filter((a) => a.isKidsAccount)],
-              ])}
-            </select>
-          </label>
-          {toBuckets.length > 0 ? (
-            <label className="block">
-              <span className={labelClass}>To bucket</span>
-              <select
-                name="toBucketId"
-                value={toBucketId}
-                onChange={(e) => setToBucketId(e.target.value)}
-                required
-                className={selectClass}
-              >
-                <option value="">Choose a bucket…</option>
-                {toBuckets.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          <LabeledInput label="Note" name="memo" />
-          {errorMsg ? <p className="text-xs text-negative">{errorMsg}</p> : null}
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
-            >
-              {fromIsInvestment ? (pending ? "Withdrawing…" : "Withdraw") : pending ? "Transferring…" : "Transfer"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 // Signed % change; null when we can't compute a meaningful comparison —
 // missing prior data, near-zero base, or an absurd swing (>500%) that
 // would just be visual noise. Same guardrails as the Insights hero.
@@ -2041,7 +1799,6 @@ function AccountSection({
   headerBadge,
   onAddAccount,
   onTransfer,
-  transferLabel = "Transfer Between Banks",
 }: {
   section: Section;
   accounts: AccountData[];
@@ -2061,8 +1818,6 @@ function AccountSection({
   // new account doesn't mean closing the section first. They open above it.
   onAddAccount?: () => void;
   onTransfer?: () => void;
-  /** The transfer button's words — "Withdraw Investment" on Investments. */
-  transferLabel?: string;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -2262,9 +2017,9 @@ function AccountSection({
               className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                {transferLabel === "Withdraw Investment" ? <path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" /> : <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />}
+                <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
               </svg>
-              {transferLabel}
+              Move Money
             </button>
           ) : null}
           {onAddAccount ? (

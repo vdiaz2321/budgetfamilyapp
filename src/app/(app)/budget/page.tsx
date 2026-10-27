@@ -529,8 +529,10 @@ export default async function BudgetPage({
   // running cash carry — money is fungible, so unspent income from any past
   // month remains available regardless of whether an intermediate month's
   // rollover toggle was on. The toggle only controls whether the current
-  // month DISPLAYS the carry as an included rollover. Manual overrides on a
-  // past month reset the carry to that override amount at that point.
+  // month DISPLAYS the carry as an included rollover. An override (rolling
+  // over only part) does NOT reset the carry: the part left out stays in the
+  // pool, and rolled-over money that goes unspent shows up in that month's
+  // actual leftover, so both flow on to the next month.
   const stepMonth = (key: string) => {
     const [y, m] = key.split("-").map(Number);
     const d = new Date(y, m, 1); // m is 1-based, and this constructs the *next* month
@@ -540,13 +542,7 @@ export default async function BudgetPage({
   let carry = 0;
   let cursor = ROLLOVER_ANCHOR;
   while (cursor < month.firstOfMonth) {
-    const own = leftoverByMonth.get(cursor) ?? 0;
-    const meta = rolloverByMonth.get(cursor);
-    // An override on a past month replaces the accumulated carry at that
-    // point (user is saying "the real starting amount for this month was X").
-    // Otherwise the carry just keeps rolling forward through this month.
-    const baseline = meta?.override_cents ?? carry;
-    carry = baseline + own;
+    carry += leftoverByMonth.get(cursor) ?? 0;
     cursor = stepMonth(cursor);
   }
 

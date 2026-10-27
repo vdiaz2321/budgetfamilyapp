@@ -1448,12 +1448,12 @@ function CategoryProgressCard({
       {/* Wide (4 across): name centered on line 1, amounts centered on line 2. */}
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 @3xl:justify-center">
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
-        <span className="whitespace-nowrap text-[11px] text-muted">{label}</span>
+        <span className="whitespace-nowrap max-sm:text-[12px] sm:text-sm text-muted">{label}</span>
         {/* The planned figure and the "/ Spent $x" pair each hold together,
             but the line may break between them. Holding the whole thing on one
             line clipped it against the card's edge whenever the summary panel
             squeezed this column — the amounts were wider than the card. */}
-        <span className="ml-auto text-[11px] tabular-nums sm:text-xs @3xl:ml-0 @3xl:basis-full @3xl:text-center">
+        <span className="ml-auto max-sm:text-[12px] tabular-nums sm:text-sm @3xl:ml-0 @3xl:basis-full @3xl:text-center">
           <span className="whitespace-nowrap font-semibold text-foreground">{formatMoney(planned, currency)}</span>{" "}
           <span className="whitespace-nowrap">
             <span className="text-muted">/ {actualLabel} </span>
@@ -1476,40 +1476,63 @@ function CategoryProgressCard({
 // and Roll Planned actions are styled as a matched pair to sit above the
 // Summary / Transactions tab strip in the right rail.
 
-// Small submit-only Undo button used inline next to the "+$X rollover" line
-// in the hero card. Same server action as the pill's Undo in RolloverControl —
-// posts a blank `enable` value to toggle rollover off for this month.
+// Undo for the rollover in the hero card. Posts a blank `enable` value to
+// toggle rollover off for this month. A plain button, not a <form>: it also
+// sits inside the amount box's form, and forms can't nest.
 function UndoRolloverButton({ monthFirstOfMonth }: { monthFirstOfMonth: string }) {
   const [pending, start] = useTransition();
   return (
-    <form action={(fd) => start(() => setRollover(fd))}>
-      <input type="hidden" name="month" value={monthFirstOfMonth} />
-      <input type="hidden" name="enable" value="" />
-      <button
-        type="submit"
-        disabled={pending}
-        className="cursor-pointer rounded-full border border-line bg-surface px-2 py-0.5 text-[10px] font-semibold text-muted transition hover:border-negative/40 hover:text-negative disabled:cursor-wait disabled:opacity-60"
-      >
-        {pending ? "…" : "Undo"}
-      </button>
-    </form>
+    <button
+      type="button"
+      disabled={pending}
+      onClick={() => {
+        const fd = new FormData();
+        fd.set("month", monthFirstOfMonth);
+        fd.set("enable", "");
+        start(() => setRollover(fd));
+      }}
+      className="shrink-0 cursor-pointer whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 disabled:cursor-wait disabled:opacity-60"
+    >
+      {pending ? "Undoing…" : "↩ Undo Roll Over"}
+    </button>
   );
 }
 
-// "$X Added · Undo" once a rollover is in. The amount is a button that
-// reopens the amount box, so a partial rollover can be changed later.
-function RolloverAddedLine({
+// When the rollover was last rolled in from the pill. Module-level so it
+// survives the remount after the server refresh; a fresh page load reads 0,
+// so Undo only shows right after the click, not on every visit.
+let rolloverAddedAt = 0;
+const UNDO_WINDOW_MS = 30_000;
+
+const ROLLOVER_PILL =
+  "inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-full border border-positive/25 bg-positive/10 px-2 py-1 sm:gap-1.5 sm:px-2.5 text-[11px] text-positive transition hover:border-positive/40 hover:bg-positive/15";
+
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="size-3 opacity-80" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+      <path d="M11.5 2.5l2 2L6 12H4v-2l7.5-7.5z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// Under Income Planned once a rollover is in: what's still left of last
+// month's leftover, or the amount box while editing. Hidden when all of it
+// was rolled over and the box is closed.
+function RolloverLeftLine({
   rolloverCents,
   liveAvailableCents,
   monthFirstOfMonth,
   currency,
+  editing,
+  setEditing,
 }: {
   rolloverCents: number;
   liveAvailableCents: number;
   monthFirstOfMonth: string;
   currency: string;
+  editing: boolean;
+  setEditing: (v: boolean) => void;
 }) {
-  const [editing, setEditing] = useState(false);
   if (editing) {
     return (
       <RolloverAmountForm
@@ -1522,23 +1545,170 @@ function RolloverAddedLine({
       />
     );
   }
+  const leftCents = Math.max(0, liveAvailableCents - rolloverCents);
+  if (leftCents === 0) return null;
   return (
-    // <div> (not <p>) because UndoRolloverButton renders a <form>, and forms
-    // inside paragraphs are invalid HTML.
-    <div className="flex items-center gap-1.5 text-xs text-foreground">
+    <button type="button" onClick={() => setEditing(true)} className={ROLLOVER_PILL}>
+      {/* Phone columns are too narrow for the full label. */}
+      <span className="font-semibold opacity-80">
+        Left<span className="max-sm:hidden"> to roll over</span>:
+      </span>
+      <span className="font-bold tabular-nums">{formatMoney(leftCents, currency)}</span>
+      <PencilIcon />
+    </button>
+  );
+}
+
+// Under Income Planned Remaining: what was rolled over. Clicking it opens a
+// box to hand some (or all) of it back to the rollover pool. Undo Roll Over
+// shows under it for 30s after rolling in, then only while that box is open.
+function RolloverAddedLine({
+  rolloverCents,
+  liveAvailableCents,
+  prevMonthLabel,
+  monthFirstOfMonth,
+  currency,
+}: {
+  rolloverCents: number;
+  liveAvailableCents: number;
+  prevMonthLabel: string;
+  monthFirstOfMonth: string;
+  currency: string;
+}) {
+  const [returning, setReturning] = useState(false);
+  const [showUndo, setShowUndo] = useState(() => Date.now() - rolloverAddedAt < UNDO_WINDOW_MS);
+  useEffect(() => {
+    if (!showUndo) return;
+    const t = window.setTimeout(() => setShowUndo(false), Math.max(0, rolloverAddedAt + UNDO_WINDOW_MS - Date.now()));
+    return () => window.clearTimeout(t);
+  }, [showUndo]);
+
+  return (
+    <div className="flex flex-col items-start gap-1.5 @3xl:items-center">
       <button
         type="button"
-        onClick={() => setEditing(true)}
-        className="cursor-pointer whitespace-nowrap rounded-full px-1 py-0.5 transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-        aria-label={`Change rollover amount, now ${formatMoney(rolloverCents, currency)}`}
+        onClick={() => setReturning(true)}
+        className={ROLLOVER_PILL}
+        aria-label={`Return some of the ${formatMoney(rolloverCents, currency)} rollover`}
       >
-        <span className="font-semibold text-positive underline decoration-positive/40 decoration-dotted underline-offset-2">
-          {formatMoney(rolloverCents, currency)}
-        </span>{" "}
-        Added
+        <span className="font-bold tabular-nums">+{formatMoney(rolloverCents, currency)}</span>
+        <span className="font-semibold opacity-80">
+          <span className="max-sm:hidden">rolled over </span>from {shortMonth(prevMonthLabel)}
+        </span>
+        <PencilIcon />
       </button>
-      <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />
+      {returning && (
+        <ReturnRolloverForm
+          rolloverCents={rolloverCents}
+          liveAvailableCents={liveAvailableCents}
+          monthFirstOfMonth={monthFirstOfMonth}
+          currency={currency}
+          onDone={() => setReturning(false)}
+        />
+      )}
+      {(showUndo || returning) && <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />}
     </div>
+  );
+}
+
+// "Return $X to the rollover": lowers what this month rolled over. The
+// returned money goes back to Left to roll over (and on to next month).
+function ReturnRolloverForm({
+  rolloverCents,
+  liveAvailableCents,
+  monthFirstOfMonth,
+  currency,
+  onDone,
+}: {
+  rolloverCents: number;
+  liveAvailableCents: number;
+  monthFirstOfMonth: string;
+  currency: string;
+  onDone: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const save = () => {
+    const cents = Math.round(parseFloat(value.replace(/[$,\s]/g, "")) * 100);
+    if (isNaN(cents) || cents <= 0) {
+      setError("Enter an amount above $0.");
+      return;
+    }
+    if (cents > rolloverCents) {
+      setError(`Max is ${formatMoney(rolloverCents, currency)}.`);
+      return;
+    }
+    const keep = rolloverCents - cents;
+    const fd = new FormData();
+    fd.set("month", monthFirstOfMonth);
+    start(async () => {
+      if (keep === 0) {
+        // Returning all of it is the same as undoing the rollover.
+        fd.set("enable", "");
+        await setRollover(fd);
+        return;
+      }
+      fd.set("override", keep === liveAvailableCents ? "" : (keep / 100).toFixed(2));
+      const res = await setRolloverOverride(fd);
+      if (res.error) setError(res.error);
+      else onDone();
+    });
+  };
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        save();
+      }}
+      className="flex flex-col items-start gap-1.5 @3xl:items-center"
+    >
+      <span className="text-[11px] font-semibold text-foreground">
+        Amount to return{" "}
+        <span className="font-normal">
+          (max <span className="font-semibold tabular-nums">{formatMoney(rolloverCents, currency)}</span>)
+        </span>
+      </span>
+      <div className="flex flex-wrap items-center gap-1.5 @3xl:justify-center">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={value}
+          placeholder="0.00"
+          autoFocus
+          aria-label="Amount to return"
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onDone();
+          }}
+          disabled={pending}
+          className="w-24 rounded-md border border-line bg-surface px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+        />
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={onDone}
+            className="shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-negative/10 px-2.5 py-1 text-[11px] font-semibold text-negative ring-1 ring-negative/30 transition hover:bg-negative/20 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={pending}
+            className="shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-brand px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-brand-strong disabled:cursor-wait disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Return"}
+          </button>
+        </div>
+      </div>
+      {error && <span className="text-[11px] font-semibold text-negative">{error}</span>}
+    </form>
   );
 }
 
@@ -1575,6 +1745,8 @@ function SummaryHeroCard({
 }) {
   const { tone, badgeText } = getBudgetStatus(actualSpent, incomePlanned);
   const toneClasses = TONE_CLASSES[tone];
+  // The "Left to roll over" pill's amount box under Income Planned.
+  const [editingRollover, setEditingRollover] = useState(false);
 
   return (
     <div className="@container -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
@@ -1596,11 +1768,13 @@ function SummaryHeroCard({
             <div className="mt-1.5 flex flex-col items-start gap-1.5 @3xl:items-center">
               <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
               {rolloverCents > 0 && (
-                <RolloverAddedLine
+                <RolloverLeftLine
                   rolloverCents={rolloverCents}
                   liveAvailableCents={rollover.liveAvailableCents}
                   monthFirstOfMonth={monthFirstOfMonth}
                   currency={currency}
+                  editing={editingRollover}
+                  setEditing={setEditingRollover}
                 />
               )}
             </div>
@@ -1654,6 +1828,17 @@ function SummaryHeroCard({
                 />
               </div>
             ) : null}
+            {rolloverCents > 0 && (
+              <div className="mt-1.5">
+                <RolloverAddedLine
+                  rolloverCents={rolloverCents}
+                  liveAvailableCents={rollover.liveAvailableCents}
+                  prevMonthLabel={rollover.prevMonthLabel}
+                  monthFirstOfMonth={monthFirstOfMonth}
+                  currency={currency}
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -1864,6 +2049,9 @@ function RolloverControl({
         currency={currency}
         submitLabel="Roll over"
         onDone={() => setChoosing(false)}
+        onSaved={() => {
+          rolloverAddedAt = Date.now();
+        }}
       />
     );
   }
@@ -1892,6 +2080,7 @@ function RolloverAmountForm({
   currency,
   submitLabel,
   onDone,
+  onSaved,
 }: {
   monthFirstOfMonth: string;
   currentCents: number;
@@ -1899,6 +2088,7 @@ function RolloverAmountForm({
   currency: string;
   submitLabel: string;
   onDone: () => void;
+  onSaved?: () => void;
 }) {
   const [pending, start] = useTransition();
   const [value, setValue] = useState((currentCents / 100).toFixed(2));
@@ -1925,7 +2115,10 @@ function RolloverAmountForm({
     start(async () => {
       const res = await setRolloverOverride(fd);
       if (res.error) setError(res.error);
-      else onDone();
+      else {
+        onSaved?.();
+        onDone();
+      }
     });
   };
 
@@ -1943,7 +2136,7 @@ function RolloverAmountForm({
           (<span className="font-semibold tabular-nums">{formatMoney(leftCents, currency)}</span> left)
         </span>
       </span>
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 @3xl:justify-center">
         <input
           type="text"
           inputMode="decimal"
@@ -1959,7 +2152,7 @@ function RolloverAmountForm({
             if (e.key === "Escape") onDone();
           }}
           disabled={pending}
-          className="w-24 rounded-md border border-line bg-surface px-1.5 py-0.5 text-sm font-semibold tabular-nums text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+          className="w-24 rounded-md border border-line bg-surface px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
         />
         {/* Cancel then the save, kept together so a narrow column wraps them
             as one pair under the input instead of splitting them. */}

@@ -8,6 +8,8 @@ import { deleteTransaction, listPayees, toggleCleared, updateTransactionAmount }
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
 import { ImportCsvModal } from "./import-csv-modal";
+import { LazyMoveMoney } from "../accounts/move-money";
+import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
 import { TransferEditorModal } from "./transfer-editor-modal";
 import { DOT as KIND_DOT } from "../budget/category-icons";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
@@ -130,6 +132,9 @@ export function TransactionsTable({
   const [transferEdit, setTransferEdit] = useState<TxData | null>(null);
   useScrollLock(!!modal || !!transferEdit);
   const [importOpen, setImportOpen] = useState(false);
+  // Move Money — the same popup as Accounts. On a phone it's in the ⋯ menu.
+  const [moveOpen, setMoveOpen] = useState(false);
+  useRegisterMobilePageActions([{ label: "Move Money", onSelect: () => setMoveOpen(true) }]);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const searchToolbarRef = useRef<HTMLDivElement>(null);
@@ -536,6 +541,16 @@ export function TransactionsTable({
           </svg>
           Transaction
         </button>
+        <button
+          type="button"
+          onClick={() => setMoveOpen(true)}
+          className="order-3 hidden items-center gap-1.5 rounded-xl bg-surface px-3 py-1.5 font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white md:order-2 md:flex"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
+          </svg>
+          Move Money
+        </button>
         {/* Filter chip: show only rows still un-reconciled (cleared=false).
             Uses viz-savings blue when active so it never reads as
             purple/brand. On mobile it sits between Select and +Transaction
@@ -834,6 +849,7 @@ export function TransactionsTable({
       ) : null}
 
       {importOpen ? <ImportCsvModal onClose={() => setImportOpen(false)} /> : null}
+      <LazyMoveMoney open={moveOpen} onClose={() => setMoveOpen(false)} />
     </div>
   );
 }

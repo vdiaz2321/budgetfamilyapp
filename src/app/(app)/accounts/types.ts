@@ -163,6 +163,14 @@ export type NonCardAccount = {
 };
 
 
+// A Budget Invest/Savings item tied to a fund (Fidelity (Taxable) → the
+// Fidelity account). Money from a bank into it is saved through the Budget.
+export type InvestItem = {
+  subId: string;
+  name: string;
+  accountId: string;
+};
+
 // A debt from the Budget Debt group — shown here read-only (Budget is the
 // single source of truth for debts).
 export type BudgetDebt = {
