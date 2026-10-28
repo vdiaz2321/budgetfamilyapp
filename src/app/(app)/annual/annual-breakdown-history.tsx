@@ -585,7 +585,9 @@ function Group({
             years={years}
             gridStyle={gridStyle}
             currency={currency}
-            indent={singleGroup ? "pl-4" : "pl-7"}
+            // Flush with the group name above (Victor, 2026-10-28): the
+            // bold group row already marks the hierarchy.
+            indent="pl-4"
             selected={selected}
             onToggleCell={onToggleCell}
           />
@@ -643,7 +645,7 @@ function LineRow({
         .sort((a, b) => sumOverYears(b.byYear, years) - sumOverYears(a.byYear, years))
         .map((d) => (
         <li key={`${line.label}::${d.label}`} className="grid items-center gap-2 pr-4 py-1 bg-brand-soft/10" style={gridStyle}>
-          <span className="truncate pl-12 text-[13px] leading-tight text-muted">
+          <span className="truncate pl-9 text-[13px] leading-tight text-muted">
             └ {d.label}
           </span>
           <TotalBand pad="-my-1"><span className="text-center text-[16px] font-medium tabular-nums text-muted">{formatMoney(sumOverYears(d.byYear, years), currency)}</span></TotalBand>

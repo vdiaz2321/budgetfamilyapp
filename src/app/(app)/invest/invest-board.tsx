@@ -325,11 +325,11 @@ export function InvestBoard({
   savings,
 }: Props) {
   const [tab, setTab] = useState<BoardTab>(initialTab);
-  // The page is pinned to the current year. A picker used to scope the
-  // Investments table, but the only column with history behind it is Contrib,
-  // and the Performance-by-year chart already plots every year side by side —
-  // paging the table one year at a time said nothing the chart didn't.
+  // The hero cards stay on the current year. The Investments and Kids
+  // Funding tables follow tableYear, picked in either table's header or by
+  // clicking a year's bar in the Performance chart (Victor, 2026-10-28).
   const year = years[0] ?? new Date().getFullYear();
+  const [tableYear, setTableYear] = useState(year);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // One switch for all three hero breakdowns: opening any opens them all, so
   // the cards stay side by side.
@@ -576,8 +576,17 @@ export function InvestBoard({
             keeps them. */}
         {/* Three peers on one grid: same padding, label → figure → note in
             each, all centered, so labels and figures line up across. On a
-            phone the portfolio total takes the full top row. */}
-        <div className="grid grid-cols-2 rounded-2xl bg-surface text-center shadow-sm ring-1 ring-black/5 sm:grid-cols-3 dark:ring-white/10">
+            phone the portfolio total takes the full top row. A click anywhere
+            on the cards opens/closes the breakdowns — the buttons toggle
+            themselves, and selecting text doesn't count as a click. */}
+        <div
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest("button")) return;
+            if (window.getSelection()?.toString()) return;
+            setShowBreakdowns((open) => !open);
+          }}
+          className="grid cursor-pointer grid-cols-2 rounded-2xl bg-surface text-center shadow-sm ring-1 ring-black/5 sm:grid-cols-3 dark:ring-white/10"
+        >
           <div className="col-span-2 min-w-0 border-b border-line px-4 py-4 sm:col-span-1 sm:border-b-0">
             {/* What the investment accounts are worth today (savings-bucket cash
                 is on the Savings tab, not here). Each label says what its
@@ -858,6 +867,9 @@ export function InvestBoard({
             accounts={chartAccounts}
             years={years}
             currency={currency}
+            selectedYear={tableYear}
+            // Clicking the picked year again goes back to the current one.
+            onSelectYear={(y) => setTableYear((cur) => (cur === y && y !== year ? year : y))}
             selectedName={
               selectedAccount?.name ??
               (taxPick.length > 0 ? taxSplit.rows.filter((r) => taxPick.includes(r.treatment)).map((r) => TAX_LABEL[r.treatment]).join(" + ") : null)
@@ -922,7 +934,9 @@ export function InvestBoard({
                           </button>
                           {open ? (
                             <div className="pb-2 pl-6">
-                              <ul className="space-y-0.5">
+                              {/* Two per row so the list stays about as tall
+                                  as the chart beside it as holdings are added. */}
+                              <ul className="grid grid-cols-2 gap-x-2 gap-y-0.5">
                                 {holdings.map((r) => {
                                   const pct = band.cents > 0 ? (r.cents / band.cents) * 100 : 0;
                                   const active = selectedId === r.accountId;
@@ -938,9 +952,13 @@ export function InvestBoard({
                                             : `hover:bg-sky-50 dark:hover:bg-sky-950/40 ${selectedId ? "opacity-50" : ""}`
                                         }`}
                                       >
-                                        <div className="flex items-baseline justify-between gap-2">
-                                          <span className="truncate text-xs sm:text-base">{r.label}</span>
-                                          <span className="shrink-0 text-xs sm:text-base font-semibold tabular-nums">
+                                        {/* Name and amount share a line when
+                                            the cell is wide enough; the amount
+                                            drops under the name when it isn't
+                                            (phone, narrow windows). */}
+                                        <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                                          <span className="min-w-0 break-words text-xs sm:text-base">{r.label}:</span>
+                                          <span className="shrink-0 whitespace-nowrap text-xs sm:text-base font-semibold tabular-nums">
                                             {formatMoneyWhole(r.cents, currency)}{" "}
                                             <span className="font-normal">({pct.toFixed(0)}%)</span>
                                           </span>
@@ -975,13 +993,13 @@ export function InvestBoard({
             />
           )}
           <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-            <PerfTable title="Investments" accounts={mine} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
+            <PerfTable title="Investments" accounts={mine} year={tableYear} years={years} onYearChange={setTableYear} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
             {/* The kids' accounts, kept apart from the household's: they're
                 not in net worth, so they never mix into the totals above. */}
             {kidsAccounts.length > 0 ? (
               <>
                 <div className="border-t border-foreground/10" />
-                <PerfTable title="Kids Funding" accounts={kidsAccounts} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
+                <PerfTable title="Kids Funding" accounts={kidsAccounts} year={tableYear} years={years} onYearChange={setTableYear} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
               </>
             ) : null}
             <div className="border-t border-foreground/10" />
@@ -1275,12 +1293,18 @@ function PerformanceChart({
   selectedName,
   onClear,
   aside,
+  selectedYear,
+  onSelectYear,
 }: {
   accounts: InvestAccount[];
   years: number[];
   currency: string;
   selectedName: string | null;
   onClear: () => void;
+  /** The year the Investments tables show — its bar gets a wash. */
+  selectedYear?: number;
+  /** Clicking a year's bar shows that year in the tables. */
+  onSelectYear?: (year: number) => void;
   /** Shown beside the chart from lg up (under it on a phone) — the
    *  holdings list, which fills the width the fixed-ratio chart leaves. */
   aside?: React.ReactNode;
@@ -1434,7 +1458,7 @@ function PerformanceChart({
 
       {/* The panel gets a fixed width so each amount stays near its name;
           the chart takes whatever is left. */}
-      {chartOpen ? <div className={aside ? "lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(24rem,34rem)]" : ""}>
+      {chartOpen ? <div className={aside ? "lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(24rem,1fr)]" : ""}>
       <div className="flex min-w-0 flex-col">
       {/* Legend */}
       <div className="flex items-center gap-4 px-4 pb-2 text-xs sm:text-base">
@@ -1524,15 +1548,30 @@ function PerformanceChart({
 
             return (
               <g key={b.year}>
-                {/* Hover hit area */}
+                {/* The year the tables below are showing. */}
+                {onSelectYear && selectedYear === b.year ? (
+                  <rect
+                    x={PAD.left + slotW * i}
+                    y={PAD.top}
+                    width={slotW}
+                    height={chartH}
+                    fill="var(--viz-sel)"
+                    rx="4"
+                    pointerEvents="none"
+                  />
+                ) : null}
+                {/* Hover + click hit area: a click shows that year in the
+                    Investments tables. */}
                 <rect
                   x={PAD.left + slotW * i}
                   y={PAD.top}
                   width={slotW}
                   height={chartH}
                   fill="transparent"
+                  className={onSelectYear ? "cursor-pointer" : undefined}
                   onMouseEnter={() => setHovered(i)}
                   onMouseLeave={() => setHovered(null)}
+                  onClick={onSelectYear ? () => onSelectYear(b.year) : undefined}
                 />
                 {isHovered && (
                   <rect
@@ -1632,10 +1671,19 @@ function ChartTooltip({
   );
 }
 
+// Investments table figures: centered under their header as one block, but
+// right-aligned inside it so cents line up row to row. Centering each figure
+// on its own left short and long amounts staggered (Victor, 2026-10-28).
+// min-w fits the widest figure today ("-$2,050.00", "$186,088.78").
+const FIG = "mx-auto block w-fit min-w-[10.5ch] text-right";
+const PCT = "mx-auto block w-fit min-w-[6ch] text-right";
+
 function PerfTable({
   title,
   accounts,
   year,
+  years,
+  onYearChange,
   currency,
   selectedId,
   onSelect,
@@ -1644,6 +1692,9 @@ function PerfTable({
   title: string;
   accounts: InvestAccount[];
   year: number;
+  /** Years the picker offers, newest first. */
+  years?: number[];
+  onYearChange?: (year: number) => void;
   currency: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -1729,9 +1780,12 @@ function PerfTable({
   // Show the column only once some account actually has one — it was a column
   // of dashes that pushed Gains and Return off the side of the card.
   const showClose = closeAny;
+  const showEnd = endAny;
+  const showRet = effStartAny;
+  const isLatest = !years || years.length === 0 || year >= Math.max(...years);
   const zeroCls = "text-muted/50";
   const bothCell = (cents: number) => (
-    <span className="block text-center text-[13px] sm:text-sm tabular-nums font-semibold">
+    <span className={`${FIG} text-[13px] sm:text-sm tabular-nums font-semibold`}>
       {cents ? formatMoney(cents, currency) : null}
     </span>
   );
@@ -1740,10 +1794,18 @@ function PerfTable({
 
   return (
     <section className={noCard ? "" : "overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10"}>
-      <button
-        type="button"
+      {/* A div acting as the button: the year picker lives inside the row,
+          and a <select> can't sit inside a real <button>. */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
         onClick={toggle}
-        className="flex w-full items-center gap-2 border-b border-line bg-brand-soft/30 px-4 py-2.5 text-left transition hover:bg-brand-soft/50"
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+        }}
+        className="flex w-full cursor-pointer items-center gap-2 border-b border-line bg-brand-soft/30 px-4 py-2.5 text-left transition hover:bg-brand-soft/50"
       >
         <svg
           width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -1758,7 +1820,26 @@ function PerfTable({
             up in columns, near the title rather than at the far edge. */}
         <h2 className="flex flex-1 items-center gap-2 text-sm lg:text-base font-bold sm:w-[27rem] sm:flex-none">
           {title}
-          <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs sm:text-sm lg:text-sm font-semibold text-muted dark:bg-sky-900/50">{year}</span>
+          {years && years.length > 1 && onYearChange ? (
+            // Native select: the phone opens its own wheel picker.
+            <span className="relative inline-flex items-center" onClick={(e) => e.stopPropagation()}>
+              <select
+                value={year}
+                onChange={(e) => onYearChange(Number(e.target.value))}
+                aria-label={`${title} year`}
+                className="cursor-pointer appearance-none rounded bg-sky-100 py-0.5 pl-1.5 pr-5 text-xs font-semibold text-foreground transition hover:bg-sky-200 focus:outline-none focus:ring-2 focus:ring-brand sm:text-sm lg:text-sm dark:bg-sky-900/50 dark:hover:bg-sky-800/60"
+              >
+                {years.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute right-1.5" aria-hidden>
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </span>
+          ) : (
+            <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs sm:text-sm lg:text-sm font-semibold text-muted dark:bg-sky-900/50">{year}</span>
+          )}
           {/* Rows are accounts; split accounts hold several holdings, so both
               counts are given — "13 accounts" over 7 rows read as a mistake. */}
           <span className="max-sm:text-xs font-bold text-muted">
@@ -1777,7 +1858,7 @@ function PerfTable({
             {endAny && <span className="flex gap-2 sm:w-56 sm:justify-between">Current <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}
           </div>
         )}
-      </button>
+      </div>
       {collapsed ? null : <>
       <div className="overflow-x-auto">
         {/* Fixed widths from sm up (name column, then equal shares) so the
@@ -1793,12 +1874,15 @@ function PerfTable({
                 [
                   ["name", "Account", true],
                   ["start", "Start", showStart],
-                  ["current", "Current", true],
+                  // A past year has no balances on file (snapshots start
+                  // Jan 2026), so Current and Return drop out rather than
+                  // showing as empty columns.
+                  ["current", isLatest ? "Current" : "Year-end", showEnd],
                   ["contrib", "Contrib", true],
                   ["gains", "Gains", true],
                   ["eoy", "EOY", showClose],
                   ["both", "Total Contrib/Gains", true],
-                  ["ret", "Return", true],
+                  ["ret", "Return", showRet],
                 ] as [SortKey, string, boolean][]
               ).filter(([, , shown]) => shown).map(([key, label]) => {
                 const active = sort.key === key;
@@ -1905,7 +1989,10 @@ function PerfTable({
                               <span className="max-sm:text-[12px] sm:text-sm lg:text-sm text-muted">{a.subtype}</span>
                             ) : null}
                             {a.holder ? (
-                              <span className="rounded bg-background px-1 max-sm:text-[11px] sm:text-sm lg:text-sm font-semibold text-muted ring-1 ring-line">
+                              // Plain text like the type beside it — a boxed
+                              // chip made the name stand out more than the
+                              // account it belongs to.
+                              <span className="max-sm:text-[12px] sm:text-sm lg:text-sm text-muted">
                                 {a.holder}
                               </span>
                             ) : null}
@@ -1923,30 +2010,32 @@ function PerfTable({
                     {showStart ? (
                       <td className="px-1 py-1">
                         {hasBuckets ? (
-                          <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
+                          <span className={`${FIG} text-[13px] sm:text-sm tabular-nums text-muted`}>
                             {eff.startBalanceCents ? formatMoney(eff.startBalanceCents, currency) : null}
                           </span>
                         ) : (
-                          <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
+                          <span className={`${FIG} text-[13px] sm:text-sm tabular-nums text-muted`}>
                             {parentCell?.startBalanceCents ? formatMoney(parentCell.startBalanceCents, currency) : null}
                           </span>
                         )}
                       </td>
                     ) : null}
+                    {showEnd ? (
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-center text-[13px] sm:text-sm tabular-nums font-semibold ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                        <span className={`${FIG} text-[13px] sm:text-sm tabular-nums font-semibold ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {eff.endBalanceCents ? formatMoney(eff.endBalanceCents, currency) : null}
                         </span>
                       ) : (
-                        <span className={`block text-center text-[13px] sm:text-sm tabular-nums font-semibold ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                        <span className={`${FIG} text-[13px] sm:text-sm tabular-nums font-semibold ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {parentCell?.endBalanceCents ? formatMoney(parentCell.endBalanceCents, currency) : null}
                         </span>
                       )}
                     </td>
+                    ) : null}
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className="block text-center text-[13px] sm:text-sm tabular-nums font-semibold">
+                        <span className={`${FIG} text-[13px] sm:text-sm tabular-nums font-semibold`}>
                           {eff.contributedCents ? formatMoney(eff.contributedCents, currency) : null}
                         </span>
                       ) : (
@@ -1956,7 +2045,7 @@ function PerfTable({
                     <td className="relative px-1 py-1">
                       {eff.accruedManual ? <PinnedMark /> : null}
                       {hasBuckets ? (
-                        <span className={`block text-center text-[13px] sm:text-sm tabular-nums font-semibold ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
+                        <span className={`${FIG} text-[13px] sm:text-sm tabular-nums font-semibold ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
                           {formatMoney(eff.accruedCents, currency)}
                         </span>
                       ) : (
@@ -1965,16 +2054,18 @@ function PerfTable({
                     </td>
                     {showClose ? (
                       <td className="px-1 py-1">
-                        <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
+                        <span className={`${FIG} text-[13px] sm:text-sm tabular-nums text-muted`}>
                           {eff.closeBalanceCents == null ? null : formatMoney(eff.closeBalanceCents, currency)}
                         </span>
                       </td>
                     ) : null}
                     {/* What the year added: money put in plus what it earned. */}
                     <td className="px-1 py-1">{bothCell(eff.contributedCents + eff.accruedCents)}</td>
+                    {showRet ? (
                     <td className={`px-2 py-2 text-center tabular-nums ${ret == null ? "" : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : ""}`}>
-                      {ret == null || ret === 0 ? null : formatPct(ret)}
+                      <span className={PCT}>{ret == null || ret === 0 ? null : formatPct(ret)}</span>
                     </td>
+                    ) : null}
                   </tr>
                   {hasBuckets && open ? (
                     <>
@@ -1986,16 +2077,18 @@ function PerfTable({
                           <td className="sticky left-0 z-10 bg-surface py-1 pl-10 pr-2 text-muted italic">Account (unallocated / seed)</td>
                           {showStart ? (
                             <td className="px-1 py-1">
-                              <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
+                              <span className={`${FIG} text-[13px] sm:text-sm tabular-nums text-muted`}>
                                 {parentCell?.startBalanceCents ? formatMoney(parentCell.startBalanceCents, currency) : null}
                               </span>
                             </td>
                           ) : null}
+                          {showEnd ? (
                           <td className="px-1 py-1">
-                            <span className={`block text-center text-[13px] sm:text-sm tabular-nums ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                            <span className={`${FIG} text-[13px] sm:text-sm tabular-nums ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                               {parentCell?.endBalanceCents ? formatMoney(parentCell.endBalanceCents, currency) : null}
                             </span>
                           </td>
+                          ) : null}
                           <td className="px-1 py-1">
                             <LedgerCell compact cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                           </td>
@@ -2004,13 +2097,15 @@ function PerfTable({
                           </td>
                           {showClose ? (
                             <td className="px-1 py-1">
-                              <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
+                              <span className={`${FIG} text-[13px] sm:text-sm tabular-nums text-muted`}>
                                 {parentCell?.closeBalanceCents == null ? null : formatMoney(parentCell.closeBalanceCents, currency)}
                               </span>
                             </td>
                           ) : null}
                           <td className="px-1 py-1">{bothCell((parentCell?.contributedCents ?? 0) + (parentCell?.accruedCents ?? 0))}</td>
+                          {showRet ? (
                           <td className="px-2 py-1" />
+                          ) : null}
                         </tr>
                       ) : null}
                       {a.buckets.map((b) => {
@@ -2022,16 +2117,18 @@ function PerfTable({
                             </td>
                             {showStart ? (
                               <td className="px-1 py-1">
-                                <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
+                                <span className={`${FIG} text-[13px] sm:text-sm tabular-nums text-muted`}>
                                   {bc?.startBalanceCents ? formatMoney(bc.startBalanceCents, currency) : null}
                                 </span>
                               </td>
                             ) : null}
+                            {showEnd ? (
                             <td className="px-1 py-1">
-                              <span className={`block text-center text-[13px] sm:text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                              <span className={`${FIG} text-[13px] sm:text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                                 {bc?.endBalanceCents ? formatMoney(bc.endBalanceCents, currency) : null}
                               </span>
                             </td>
+                            ) : null}
                             <td className="px-1 py-1">
                               <LedgerCell compact cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                             </td>
@@ -2041,13 +2138,15 @@ function PerfTable({
                             </td>
                             {showClose ? (
                               <td className="px-1 py-1">
-                                <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
+                                <span className={`${FIG} text-[13px] sm:text-sm tabular-nums text-muted`}>
                                   {bc?.closeBalanceCents == null ? null : formatMoney(bc.closeBalanceCents, currency)}
                                 </span>
                               </td>
                             ) : null}
                             <td className="px-1 py-1">{bothCell((bc?.contributedCents ?? 0) + (bc?.accruedCents ?? 0))}</td>
+                            {showRet ? (
                             <td className="px-2 py-1" />
+                            ) : null}
                           </tr>
                         );
                       })}
@@ -2062,28 +2161,32 @@ function PerfTable({
               <td className="sticky left-0 z-10 bg-surface py-2 pl-3 pr-2">Total</td>
               {showStart ? (
                 <td className="px-2 py-2 text-center tabular-nums text-muted">
-                  {formatMoney(startSum, currency)}
+                  <span className={FIG}>{formatMoney(startSum, currency)}</span>
                 </td>
               ) : null}
+              {showEnd ? (
               <td className="px-2 py-2 text-center tabular-nums font-semibold">
-                {endAny ? formatMoney(endSum, currency) : null}
+                <span className={FIG}>{endAny ? formatMoney(endSum, currency) : null}</span>
               </td>
-              <td className="px-2 py-2 text-center tabular-nums">{contribSum ? formatMoney(contribSum, currency) : null}</td>
+              ) : null}
+              <td className="px-2 py-2 text-center tabular-nums"><span className={FIG}>{contribSum ? formatMoney(contribSum, currency) : null}</span></td>
               <td
                 className={`px-2 py-2 text-center tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
                 style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}
               >
-                {formatMoney(accruedSum, currency)}
+                <span className={FIG}>{formatMoney(accruedSum, currency)}</span>
               </td>
               {showClose ? (
                 <td className="px-2 py-2 text-center tabular-nums text-muted">
-                  {formatMoney(closeSum, currency)}
+                  <span className={FIG}>{formatMoney(closeSum, currency)}</span>
                 </td>
               ) : null}
-              <td className="px-2 py-2 text-center tabular-nums">{contribSum + accruedSum ? formatMoney(contribSum + accruedSum, currency) : null}</td>
+              <td className="px-2 py-2 text-center tabular-nums"><span className={FIG}>{contribSum + accruedSum ? formatMoney(contribSum + accruedSum, currency) : null}</span></td>
+              {showRet ? (
               <td className={`px-2 py-2 text-center tabular-nums ${totalReturn == null ? "" : totalReturn > 0 ? "text-positive" : totalReturn < 0 ? "text-negative" : ""}`}>
-                {totalReturn == null || totalReturn === 0 ? null : formatPct(totalReturn)}
+                <span className={PCT}>{totalReturn == null || totalReturn === 0 ? null : formatPct(totalReturn)}</span>
               </td>
+              ) : null}
             </tr>
           </tfoot>
         </table>
@@ -2118,7 +2221,7 @@ function LedgerCell({
   // A zero contribution prints nothing: "$0.00" on most rows buried the few
   // accounts that actually received money this year.
   return (
-    <span className={`flex items-center justify-center gap-1 px-1 text-center tabular-nums ${compact ? "text-[13px] sm:text-sm" : "text-sm lg:text-base"} ${tone ?? ""}`}>
+    <span className={`flex items-center gap-1 tabular-nums ${compact ? "mx-auto w-fit min-w-[10.5ch] justify-end text-[13px] sm:text-sm" : "justify-center px-1 text-center text-sm lg:text-base"} ${tone ?? ""}`}>
       {cents ? formatMoney(cents, currency) : null}
     </span>
   );
@@ -2183,7 +2286,7 @@ function EditCell({
     <form
       ref={formRef}
       action={(fd) => start(() => setInvestmentYear(fd))}
-      className="flex w-full items-center justify-center gap-px"
+      className={`flex items-center gap-px ${compact ? "mx-auto w-fit min-w-[10.5ch] justify-end" : "w-full justify-center"}`}
     >
       {negative && !editing ? (
         <span className={`pointer-events-none select-none tabular-nums ${compact ? "text-[13px] font-semibold sm:text-sm" : "max-sm:text-[12px] sm:text-sm lg:text-base"} ${tone}`}>{MINUS}</span>
@@ -2195,6 +2298,14 @@ function EditCell({
       {bucketId ? <input type="hidden" name="bucketId" value={bucketId} /> : null}
       <input type="hidden" name="year" value={year} />
       <input type="hidden" name="field" value={field} />
+      {/* The box is sized by an invisible copy of the figure stacked under
+          the input, so it fits the digits exactly in whatever font renders
+          them — a ch-based guess ran about a digit wide, which left a gap
+          after the "$" and pushed the figure off its column's right edge. */}
+      <span className="inline-grid">
+      <span aria-hidden className={`invisible col-start-1 row-start-1 whitespace-pre py-0.5 pr-px tabular-nums ${compact ? "text-[13px] font-semibold sm:text-sm" : "max-sm:text-[12px] sm:text-sm lg:text-base"}`}>
+        {(editing ? initial : shown) || "0.00"}
+      </span>
       <input
         key={initial}
         name="value"
@@ -2202,16 +2313,6 @@ function EditCell({
         inputMode="decimal"
         defaultValue={shown}
         placeholder="0.00"
-        // Sized from the digits (tabular-nums makes 1ch one digit) rather than
-        // the `size` attribute, whose per-character estimate runs wide and left
-        // a gap between the "$" and the number.
-        // The 0.6ch tail is breathing room: without it the calc lands a
-        // fraction short and the browser clips the final digit.
-        style={{
-          width: `calc(${(initial || "0.00").replace(/[^0-9]/g, "").length}ch + ${
-            (initial || "0.00").length - (initial || "0.00").replace(/[^0-9]/g, "").length
-          } * 0.42ch + 0.6ch)`,
-        }}
         onFocus={(e) => {
           setEditingFor(initial);
           e.currentTarget.value = initial;
@@ -2225,13 +2326,11 @@ function EditCell({
             setEditingFor(null);
           }
         }}
-        // Left-aligned inside its own box so the digits sit against the "$".
-        // The form centres the pair, so the cell still reads centred; centring
-        // the text as well pushed the number away from the symbol.
-        className={`min-w-0 rounded-md bg-transparent px-0 py-0.5 text-left tabular-nums ${compact ? "text-[13px] font-semibold sm:text-sm" : "max-sm:text-[12px] sm:text-sm lg:text-base"} transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
+        className={`col-start-1 row-start-1 w-0 min-w-full rounded-md bg-transparent px-0 py-0.5 text-left tabular-nums ${compact ? "text-[13px] font-semibold sm:text-sm" : "max-sm:text-[12px] sm:text-sm lg:text-base"} transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
+      </span>
     </form>
   );
 }
