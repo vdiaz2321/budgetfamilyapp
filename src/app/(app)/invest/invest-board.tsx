@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { MINUS, centsToGroupedDisplay, currencySymbol, formatMoney, formatMoneyWhole } from "@/lib/money";
 import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
 import {
@@ -234,6 +234,85 @@ function returnPct(startCents: number | null, accruedCents: number): number | nu
 }
 
 const formatPct = (pct: number) => `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
+
+// Hero breakdowns from sm up: one row per line, name right-aligned up to its
+// colon and value left-aligned after it, so every colon sits on the card's
+// centre line — in all three cards, headings included. Phones keep their
+// own layout.
+const BREAKDOWN_ROW =
+  "sm:grid sm:grid-cols-2 sm:items-baseline sm:gap-x-1.5 sm:pl-0 sm:pb-0 sm:[&>:first-child]:text-right";
+
+type BreakdownItem = { key: string; label: React.ReactNode; value: React.ReactNode };
+
+// The rows under a hero heading. From sm up: as many "Name: value" pairs per
+// line as the card fits (measured, so any household's names work), each
+// column lined up on its colons. Phones keep one row per line, styled by
+// the caller.
+function BreakdownRows({
+  items,
+  className,
+  itemClassName,
+  labelClassName,
+}: {
+  items: BreakdownItem[];
+  className: string;
+  itemClassName: string;
+  labelClassName: string;
+}) {
+  const ref = useRef<HTMLUListElement>(null);
+  const [cols, setCols] = useState(1);
+  const keys = items.map((i) => i.key).join("|");
+  useLayoutEffect(() => {
+    const ul = ref.current;
+    if (!ul) return;
+    const fit = () => {
+      const style = getComputedStyle(ul);
+      if (style.display !== "grid") return;
+      const w = (sel: string) => [...ul.querySelectorAll<HTMLElement>(sel)].map((e) => e.getBoundingClientRect().width);
+      const labels = w("[data-bl]");
+      const values = w("[data-bv]");
+      const gap = parseFloat(style.columnGap) || 0;
+      const spacer = 12; // sm:ml-3 before each later column
+      let best = 1;
+      for (let n = 2; n <= labels.length; n++) {
+        let total = (2 * n - 1) * gap + (n - 1) * spacer;
+        for (let c = 0; c < n; c++) {
+          let l = 0;
+          let v = 0;
+          for (let i = c; i < labels.length; i += n) {
+            l = Math.max(l, labels[i]);
+            v = Math.max(v, values[i]);
+          }
+          total += l + v;
+        }
+        if (total <= ul.clientWidth) best = n;
+      }
+      setCols(best);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(ul);
+    return () => ro.disconnect();
+  }, [keys]);
+  return (
+    <ul
+      ref={ref}
+      className={`${className} sm:-mx-4 sm:grid sm:items-baseline sm:justify-center sm:gap-x-1 sm:gap-y-0.5 sm:space-y-0 sm:pl-0`}
+      style={{ gridTemplateColumns: `repeat(${cols}, max-content max-content)` }}
+    >
+      {items.map((it, i) => (
+        <li key={it.key} className={`${itemClassName} sm:contents`}>
+          {/* justify-self keeps each cell at its own width (not stretched to
+              the column), so the fit measurement above reads the text. */}
+          <span data-bl className={`${labelClassName} sm:justify-self-end sm:whitespace-nowrap sm:text-right ${i % cols > 0 ? "sm:ml-3" : ""}`}>
+            {it.label}
+          </span>{" "}
+          <span data-bv className="tabular-nums sm:justify-self-start sm:whitespace-nowrap">{it.value}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function InvestBoard({
   accounts,
@@ -542,11 +621,11 @@ export function InvestBoard({
                 </button>
                 {showBreakdowns ? (
                   // Where the year's gains came from, account by account.
-                  <ul className="mx-auto mt-1.5 max-w-xs space-y-0.5 border-t border-line/60 pt-2 text-left text-xs font-semibold sm:max-w-none sm:text-sm">
+                  <div className="mx-auto mt-1.5 max-w-xs border-t border-line/60 pt-2 text-left text-xs font-semibold sm:max-w-none sm:text-sm">
                     {/* Named heading, same as the middle card's "Retirement:"
                         group — without it the list read as balances under
                         the $ total above (Victor, 2026-10-27). */}
-                    <li className="-mx-2 rounded-md bg-sky-50 px-2 py-0.5 dark:bg-sky-950/40 flex items-baseline justify-between gap-3 font-bold">
+                    <p className={`-mx-2 rounded-md bg-sky-50 px-2 py-0.5 dark:bg-sky-950/40 flex items-baseline justify-between gap-3 font-bold ${BREAKDOWN_ROW}`}>
                       <span>Total Gains in {year}:</span>
                       <span
                         className="tabular-nums"
@@ -555,22 +634,28 @@ export function InvestBoard({
                         {summary.gains > 0 ? "+" : summary.gains < 0 ? "-" : ""}
                         {formatMoneyWhole(Math.abs(summary.gains), currency)}
                       </span>
-                    </li>
-                    {gainsByAccount.map((r) => (
-                      // Name left, amount right, so the figures line up in
-                      // one column; indented under the heading.
-                      <li key={r.name} className="flex items-baseline justify-between gap-3 pl-2.5">
-                        <span className="text-muted">{r.name}:</span>
-                        <span
-                          className="font-semibold tabular-nums"
-                          style={{ color: r.cents > 0 ? "var(--viz-bills)" : r.cents < 0 ? "var(--color-negative)" : undefined }}
-                        >
-                          {r.cents > 0 ? "+" : r.cents < 0 ? "-" : ""}
-                          {formatMoneyWhole(Math.abs(r.cents), currency)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                    </p>
+                    {/* Phone: name left, amount right, indented under the
+                        heading. */}
+                    <BreakdownRows
+                      className="mt-0.5 space-y-0.5"
+                      itemClassName="flex items-baseline justify-between gap-3 pl-2.5"
+                      labelClassName="text-muted"
+                      items={gainsByAccount.map((r) => ({
+                        key: r.name,
+                        label: `${r.name}:`,
+                        value: (
+                          <span
+                            className="font-semibold"
+                            style={{ color: r.cents > 0 ? "var(--viz-bills)" : r.cents < 0 ? "var(--color-negative)" : undefined }}
+                          >
+                            {r.cents > 0 ? "+" : r.cents < 0 ? "-" : ""}
+                            {formatMoneyWhole(Math.abs(r.cents), currency)}
+                          </span>
+                        ),
+                      }))}
+                    />
+                  </div>
                 ) : null}
               </>
             ) : null}
@@ -596,21 +681,23 @@ export function InvestBoard({
                   <div className="mt-1.5 space-y-1.5 border-t border-line/60 pt-2 text-left text-xs font-semibold sm:text-sm">
                     {investedSplit.groups.map((g) => (
                       <div key={g.name}>
-                        <p className="-mx-2 rounded-md bg-sky-50 px-2 py-0.5 dark:bg-sky-950/40 sm:flex sm:items-baseline sm:justify-between sm:gap-3">
+                        <p className={`-mx-2 rounded-md bg-sky-50 px-2 py-0.5 dark:bg-sky-950/40 ${BREAKDOWN_ROW}`}>
                           <span className="font-bold">Total {g.name}:</span>{" "}
                           <span className="font-bold tabular-nums">{formatMoneyWhole(g.cents, currency)}</span>
                         </p>
                         {/* Which holdings it went into. Two lines each on a
                             phone — a name like "Fidelity (Taxable) Vic" plus
                             its amount doesn't fit the half-width card. */}
-                        <ul className="mt-0.5 space-y-0.5 pl-3">
-                          {g.rows.map((r) => (
-                            <li key={r.label} className="max-sm:pb-0.5 sm:flex sm:items-baseline sm:justify-between sm:gap-3">
-                              <span className="block text-muted sm:inline">{r.label}:</span>{" "}
-                              <span className="tabular-nums">{formatMoneyWhole(r.cents, currency)}</span>
-                            </li>
-                          ))}
-                        </ul>
+                        <BreakdownRows
+                          className="mt-0.5 space-y-0.5 pl-3"
+                          itemClassName="max-sm:pb-0.5"
+                          labelClassName="block text-muted"
+                          items={g.rows.map((r) => ({
+                            key: r.label,
+                            label: `${r.label}:`,
+                            value: formatMoneyWhole(r.cents, currency),
+                          }))}
+                        />
                       </div>
                     ))}
                   </div>
@@ -691,41 +778,45 @@ export function InvestBoard({
                   </svg>
                 </button>
                 {showBreakdowns ? (
-                <ul className="mt-1.5 space-y-0.5 border-t border-line/60 pt-2 text-left text-xs font-semibold sm:text-sm">
-                  {limitRows.map((r) => {
+                <div className="mt-1.5 border-t border-line/60 pt-2 text-left text-xs font-semibold sm:text-sm">
+                  {/* Total first as the heading, like the other two cards, so
+                      the three breakdowns line up row for row. */}
+                  <p className={`-mx-2 flex flex-wrap items-baseline justify-between gap-x-3 rounded-md bg-sky-50 px-2 py-0.5 dark:bg-sky-950/40 ${BREAKDOWN_ROW}`}>
+                    <span className="font-bold">Total Invested in Retirement:</span>
+                    {/* ml-auto keeps it right-aligned when it wraps (phone). */}
+                    <span className="ml-auto tabular-nums sm:ml-0 sm:whitespace-nowrap">
+                      <span className="font-bold text-positive">
+                        {formatMoneyWhole(limitRows.reduce((sum, r) => sum + r.contributedCents, 0), currency)}
+                      </span>
+                      <span className="text-muted"> of {formatMoneyWhole(contributionLimitCents, currency)}</span>
+                    </span>
+                  </p>
+                {/* Two lines each on a phone (name, then amounts): one line
+                    doesn't fit the half-width card there. */}
+                <BreakdownRows
+                  className="mt-0.5 space-y-0.5 pl-3"
+                  itemClassName="max-sm:pb-1"
+                  labelClassName="block text-muted"
+                  items={limitRows.map((r) => {
                     const type =
                       r.capKind === "ira"
                         ? "IRA"
                         : (r.sourceNames ?? []).some((n) => /tsp/i.test(n))
                           ? "TSP"
                           : "401(k)";
-                    return (
-                      // Two lines on a phone (name, then amounts): one line
-                      // doesn't fit the half-width card there.
-                      <li key={r.subId} className="max-sm:pb-1 sm:flex sm:items-baseline sm:justify-between sm:gap-3">
-                        <span className="block text-muted sm:inline">{r.name}&rsquo;s {type}:</span>{" "}
-                        <span className="tabular-nums">
-                          <span className="font-semibold">{formatMoneyWhole(r.contributedCents, currency)}</span>
+                    return {
+                      key: r.subId,
+                      label: <>{r.name}&rsquo;s {type}:</>,
+                      value: (
+                        <>
+                          <span className="font-semibold text-positive">{formatMoneyWhole(r.contributedCents, currency)}</span>
                           <span className="text-muted"> of {formatMoneyWhole(r.limitCents, currency)}</span>
-                        </span>
-                      </li>
-                    );
+                        </>
+                      ),
+                    };
                   })}
-                  {/* The three added up. One line when the card is wide
-                      enough (Victor's monitor); wraps to two only when the
-                      label and figure can't share a line. */}
-                  <li className="mt-1.5 -mx-2 flex flex-wrap items-baseline justify-between gap-x-3 rounded-md bg-sky-50 px-2 py-0.5 dark:bg-sky-950/40">
-                    <span className="font-bold sm:whitespace-nowrap">Total Invested in Retirement:</span>
-                    {/* ml-auto keeps it right-aligned under the column above
-                        when it wraps to its own line. */}
-                    <span className="ml-auto tabular-nums sm:whitespace-nowrap">
-                      <span className="font-bold">
-                        {formatMoneyWhole(limitRows.reduce((sum, r) => sum + r.contributedCents, 0), currency)}
-                      </span>
-                      <span className="text-muted"> of {formatMoneyWhole(contributionLimitCents, currency)}</span>
-                    </span>
-                  </li>
-                </ul>
+                />
+                </div>
                 ) : null}
                 </>
               ) : undefined
@@ -952,13 +1043,12 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 items-center gap-2 text-left"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-muted transition-transform duration-200 ${open ? "rotate-90" : ""}`} aria-hidden>
             <path d="M9 6l6 6-6 6" />
           </svg>
           <h2 className="text-sm lg:text-base font-semibold">Holdings &amp; history</h2>
-          <span className="max-sm:text-xs sm:text-sm text-muted">Imported positions only</span>
         </button>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button
@@ -1575,7 +1665,7 @@ function PerfTable({
   // Rows sort by the clicked column instead of being dragged into order:
   // first click sorts high to low (A–Z for Account), the next flips it.
   // Opens on Current, biggest first.
-  type SortKey = "name" | "start" | "contrib" | "current" | "gains" | "eoy" | "ret";
+  type SortKey = "name" | "start" | "contrib" | "current" | "gains" | "eoy" | "both" | "ret";
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "current", dir: "desc" });
   const toggleSort = (key: SortKey) =>
     setSort((cur) =>
@@ -1618,6 +1708,7 @@ function PerfTable({
       case "current": return eff.endBalanceCents;
       case "gains": return eff.accruedCents;
       case "eoy": return eff.closeBalanceCents;
+      case "both": return eff.contributedCents + eff.accruedCents;
       case "ret": return returnPct(eff.startBalanceCents ?? priorEff.endBalanceCents ?? null, eff.accruedCents);
     }
   };
@@ -1639,6 +1730,11 @@ function PerfTable({
   // of dashes that pushed Gains and Return off the side of the card.
   const showClose = closeAny;
   const zeroCls = "text-muted/50";
+  const bothCell = (cents: number) => (
+    <span className="block text-center text-[13px] sm:text-sm tabular-nums font-semibold">
+      {cents ? formatMoney(cents, currency) : null}
+    </span>
+  );
 
   if (accounts.length === 0) return null;
 
@@ -1684,17 +1780,24 @@ function PerfTable({
       </button>
       {collapsed ? null : <>
       <div className="overflow-x-auto">
-        <table className="w-full font-semibold text-[13px] sm:text-sm">
+        {/* Fixed widths from sm up (name column, then equal shares) so the
+            Investments and Kids Funding tables' columns line up — auto
+            layout sized each to its own figures. */}
+        <table className="w-full font-semibold text-[13px] sm:table-fixed sm:text-sm">
+          <colgroup>
+            <col className="sm:w-[32%]" />
+          </colgroup>
           <thead>
             <tr className="max-sm:text-[12px] sm:text-sm lg:text-sm font-semibold text-muted">
               {(
                 [
                   ["name", "Account", true],
                   ["start", "Start", showStart],
-                  ["contrib", "Contrib", true],
                   ["current", "Current", true],
+                  ["contrib", "Contrib", true],
                   ["gains", "Gains", true],
                   ["eoy", "EOY", showClose],
+                  ["both", "Total Contrib/Gains", true],
                   ["ret", "Return", true],
                 ] as [SortKey, string, boolean][]
               ).filter(([, , shown]) => shown).map(([key, label]) => {
@@ -1832,15 +1935,6 @@ function PerfTable({
                     ) : null}
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className="block text-center text-[13px] sm:text-sm tabular-nums font-semibold">
-                          {eff.contributedCents ? formatMoney(eff.contributedCents, currency) : null}
-                        </span>
-                      ) : (
-                        <LedgerCell compact cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
-                      )}
-                    </td>
-                    <td className="px-1 py-1">
-                      {hasBuckets ? (
                         <span className={`block text-center text-[13px] sm:text-sm tabular-nums font-semibold ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {eff.endBalanceCents ? formatMoney(eff.endBalanceCents, currency) : null}
                         </span>
@@ -1848,6 +1942,15 @@ function PerfTable({
                         <span className={`block text-center text-[13px] sm:text-sm tabular-nums font-semibold ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {parentCell?.endBalanceCents ? formatMoney(parentCell.endBalanceCents, currency) : null}
                         </span>
+                      )}
+                    </td>
+                    <td className="px-1 py-1">
+                      {hasBuckets ? (
+                        <span className="block text-center text-[13px] sm:text-sm tabular-nums font-semibold">
+                          {eff.contributedCents ? formatMoney(eff.contributedCents, currency) : null}
+                        </span>
+                      ) : (
+                        <LedgerCell compact cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                       )}
                     </td>
                     <td className="relative px-1 py-1">
@@ -1867,6 +1970,8 @@ function PerfTable({
                         </span>
                       </td>
                     ) : null}
+                    {/* What the year added: money put in plus what it earned. */}
+                    <td className="px-1 py-1">{bothCell(eff.contributedCents + eff.accruedCents)}</td>
                     <td className={`px-2 py-2 text-center tabular-nums ${ret == null ? "" : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : ""}`}>
                       {ret == null || ret === 0 ? null : formatPct(ret)}
                     </td>
@@ -1887,12 +1992,12 @@ function PerfTable({
                             </td>
                           ) : null}
                           <td className="px-1 py-1">
-                            <LedgerCell compact cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
-                          </td>
-                          <td className="px-1 py-1">
                             <span className={`block text-center text-[13px] sm:text-sm tabular-nums ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                               {parentCell?.endBalanceCents ? formatMoney(parentCell.endBalanceCents, currency) : null}
                             </span>
+                          </td>
+                          <td className="px-1 py-1">
+                            <LedgerCell compact cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                           </td>
                           <td className="px-1 py-1">
                             <EditCell compact accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
@@ -1904,6 +2009,7 @@ function PerfTable({
                               </span>
                             </td>
                           ) : null}
+                          <td className="px-1 py-1">{bothCell((parentCell?.contributedCents ?? 0) + (parentCell?.accruedCents ?? 0))}</td>
                           <td className="px-2 py-1" />
                         </tr>
                       ) : null}
@@ -1922,12 +2028,12 @@ function PerfTable({
                               </td>
                             ) : null}
                             <td className="px-1 py-1">
-                              <LedgerCell compact cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
-                            </td>
-                            <td className="px-1 py-1">
                               <span className={`block text-center text-[13px] sm:text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                                 {bc?.endBalanceCents ? formatMoney(bc.endBalanceCents, currency) : null}
                               </span>
+                            </td>
+                            <td className="px-1 py-1">
+                              <LedgerCell compact cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                             </td>
                             <td className="relative px-1 py-1">
                               {bc?.accruedManual ? <PinnedMark /> : null}
@@ -1940,6 +2046,7 @@ function PerfTable({
                                 </span>
                               </td>
                             ) : null}
+                            <td className="px-1 py-1">{bothCell((bc?.contributedCents ?? 0) + (bc?.accruedCents ?? 0))}</td>
                             <td className="px-2 py-1" />
                           </tr>
                         );
@@ -1958,10 +2065,10 @@ function PerfTable({
                   {formatMoney(startSum, currency)}
                 </td>
               ) : null}
-              <td className="px-2 py-2 text-center tabular-nums">{contribSum ? formatMoney(contribSum, currency) : null}</td>
               <td className="px-2 py-2 text-center tabular-nums font-semibold">
                 {endAny ? formatMoney(endSum, currency) : null}
               </td>
+              <td className="px-2 py-2 text-center tabular-nums">{contribSum ? formatMoney(contribSum, currency) : null}</td>
               <td
                 className={`px-2 py-2 text-center tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
                 style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}
@@ -1973,6 +2080,7 @@ function PerfTable({
                   {formatMoney(closeSum, currency)}
                 </td>
               ) : null}
+              <td className="px-2 py-2 text-center tabular-nums">{contribSum + accruedSum ? formatMoney(contribSum + accruedSum, currency) : null}</td>
               <td className={`px-2 py-2 text-center tabular-nums ${totalReturn == null ? "" : totalReturn > 0 ? "text-positive" : totalReturn < 0 ? "text-negative" : ""}`}>
                 {totalReturn == null || totalReturn === 0 ? null : formatPct(totalReturn)}
               </td>
