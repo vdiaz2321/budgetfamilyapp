@@ -121,7 +121,7 @@ function CoverOverspend({
               value={fromId}
               onChange={(e) => setFromId(e.target.value)}
               aria-label="Move from"
-              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm text-center [text-align-last:center] ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm text-left ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Take from…</option>
               {donors.map((d) => (
@@ -439,7 +439,7 @@ function ItemGroupSelect({
           defaultValue={row.categoryId}
           disabled={pending}
           onChange={(event) => event.currentTarget.form?.requestSubmit()}
-          className="ml-auto max-w-[12rem] rounded-lg bg-surface px-2.5 py-1.5 text-center [text-align-last:center] font-semibold text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
+          className="ml-auto max-w-[12rem] rounded-lg bg-surface px-2.5 py-1.5 text-left font-semibold text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
         >
           {compatible.map((group) => (
             <option key={group.id} value={group.id}>{group.name}</option>
@@ -874,7 +874,7 @@ function PlannedForm({
                   key={paymentAccountId ?? "none"}
                   name="paymentAccountId"
                   defaultValue={paymentAccountId ?? ""}
-                  className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center [text-align-last:center] text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   <option value="">No linked account</option>
                   {paymentAccountOptions.map((account) => (
@@ -1019,7 +1019,7 @@ function ItemDetailsPopover({
                 value={toSubId}
                 onChange={(e) => setToSubId(e.target.value)}
                 required
-                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm text-center [text-align-last:center] ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm text-left ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Pick a budget item…</option>
                 {subOptions.filter((s) => s.id !== subId).map((s) => (
@@ -1117,7 +1117,7 @@ function DebtForm({
             key={d.debtKind ?? "none"}
             name="debtKind"
             defaultValue={d.debtKind ?? ""}
-            className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center [text-align-last:center] text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           >
             <option value="">Not set</option>
             {DEBT_KINDS.map((k) => (
@@ -1139,7 +1139,7 @@ function DebtForm({
               key={d.accountId ?? "none"}
               name="accountId"
               defaultValue={d.accountId ?? ""}
-              className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center [text-align-last:center] text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Not linked</option>
               {accountOptions.map((a) => (
@@ -1229,7 +1229,7 @@ function SavingsForm({ row, currency, bucketOptions, monthKey, formId, runSave }
                     ? `account:${s.linkedAccountId}`
                     : s.linkedBucketId ?? ""
                 }
-                className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center [text-align-last:center] text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Not linked</option>
                 {(() => {

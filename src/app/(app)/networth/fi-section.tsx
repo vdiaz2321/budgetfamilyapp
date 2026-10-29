@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ModalShell, useCloseOnEscape } from "@/components/modal-shell";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, displayToCents, formatMoney, formatMoneyWhole } from "@/lib/money";
 import {
@@ -47,7 +48,7 @@ import {
   planEndYear,
 } from "@/lib/retirement";
 import type { InflationHistory } from "@/lib/inflation";
-import { saveRetirementPlan, setWithdrawalRate } from "./actions";
+import { previewRetirementPlan, saveRetirementPlan, setWithdrawalRate, type PlanPreview } from "./actions";
 import {
   GROUP_KINDS,
   GROUP_LABEL,
@@ -187,11 +188,11 @@ export type FiProjectionYear = {
 };
 
 export function FiSection({
-  plan,
+  plan: savedPlan,
   measured,
   currency,
   thisYear,
-  projection,
+  projection: savedProjection,
   children,
 }: {
   plan: FiPlan;
@@ -207,9 +208,28 @@ export function FiSection({
     assumptions: React.ReactNode;
     details: React.ReactNode;
     /** Opens the assumptions at Income (a first Pay line at the amount given). */
-    editIncome: (suggestYearlyCents: number | null) => void;
+    /** `onBack` reopens where Edit income was clicked once the plan closes. */
+    editIncome: (suggestYearlyCents: number | null, onBack?: () => void) => void;
   }) => React.ReactNode;
 }) {
+  // Unsaved changes in Edit Future Projections, worked out by the server
+  // (previewRetirementPlan). While there is one, every figure here reads it,
+  // so the editor's results follow what's typed (Victor, 2026-10-29).
+  // Cleared on Save and on Close.
+  const [draft, setDraft] = useState<PlanPreview | null>(null);
+  const plan = useMemo<FiPlan>(() => (draft ? { ...savedPlan, ...draft.plan } : savedPlan), [draft, savedPlan]);
+  const projection = useMemo<FiProjectionYear[]>(() => {
+    if (!draft) return savedProjection;
+    const byYear = new Map(draft.projection.map((r) => [r.year, r]));
+    const merged = savedProjection.map((p) => ({ ...p, ...byYear.get(p.year) }));
+    // Years a longer plan adds after the saved table ends.
+    const last = savedProjection.at(-1);
+    for (const r of draft.projection) {
+      if (last && r.year > last.year) merged.push({ ...last, ...r, actualCents: null });
+    }
+    return merged;
+  }, [draft, savedProjection]);
+
   // Collapsed on a fresh login, remembered while navigating.
   const [collapse, setCollapse] = useSessionCollapse("networth-fi", () => ({ open: false }));
   const open = !!collapse.open;
@@ -222,8 +242,12 @@ export function FiSection({
   // open at Income (from a year's Edit income).
   const [editing, setEditing] = useState<boolean | "sbp" | "income">(false);
   const [suggestPayCents, setSuggestPayCents] = useState<number | null>(null);
-  const editIncome = (suggest: number | null) => {
+  // Where Close goes back to: the year popup Edit income was clicked in
+  // (Victor, 2026-10-29 — it used to land on the plan's tiles).
+  const [backFromPlan, setBackFromPlan] = useState<(() => void) | null>(null);
+  const editIncome = (suggest: number | null, onBack?: () => void) => {
     setSuggestPayCents(suggest);
+    setBackFromPlan(() => onBack ?? null);
     setEditing("income");
   };
 
@@ -578,14 +602,13 @@ export function FiSection({
   );
 
   // The button that opens the rates that rebuild the table, above it.
-  // A pill set apart by a pencil and a light orange fill — Victor asked for
-  // orange (2026-10-18) so it reads as an action. An action button,
-  // not data, so the no-orange-in-charts rule doesn't apply.
+  // A solid blue pill with a pencil so it reads as an action — Victor
+  // swapped the orange (2026-10-18) for the app's blue button (2026-10-29).
   const assumptions = (
     <button
       type="button"
       onClick={() => setEditing(true)}
-      className="inline-flex items-center gap-1.5 rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold text-foreground ring-1 ring-orange-300 whitespace-nowrap transition hover:bg-orange-100 sm:text-sm dark:bg-orange-900/40 dark:ring-orange-500/70 dark:hover:bg-orange-800/50"
+      className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-xs font-semibold text-white whitespace-nowrap transition hover:bg-brand-strong sm:text-sm"
     >
       <svg
         aria-hidden
@@ -603,49 +626,25 @@ export function FiSection({
     </button>
   );
 
-  // Everything behind the Retirement card, under the table, closed by default.
-  const details = (
-    <div className="border-t border-line px-4 py-3">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full min-w-0 items-center gap-2 text-left"
-      >
-        <svg
-          aria-hidden
-          viewBox="0 0 20 20"
-          className={`h-3.5 w-3.5 shrink-0 text-foreground transition-transform ${open ? "" : "-rotate-90"}`}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M5 7.5 10 12.5 15 7.5" />
-        </svg>
-        <span className="text-sm font-semibold sm:text-lg">Retirement details</span>
-      </button>
-      {open ? (
-        <div>
-          {/* Three panels side by side: what retirement pays, what the
-              investments have to do about the gap, and the family's income if
-              Victor dies first. Each reads top to bottom as one sum. */}
-          {/* Income and Investments stack on the left, the long survivor
-              card on the right — three across left two short cards over
-              empty space (Victor, 2026-10-25). */}
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <div className="flex flex-col gap-3">
+  // The three Retirement details cards, on the page and beside the plan
+  // editor's sections, laid out by the width of their box. The page: Income
+  // over Investments, the survivor card beside them. The editor: Income and
+  // Investments side by side, the survivor card under them (Victor,
+  // 2026-10-29).
+  const renderCards = (inEditor: boolean) => (
+    <div className="@container">
+          <div className={`mt-3 grid gap-3 ${inEditor ? "" : "@2xl:grid-cols-2"}`}>
+            <div className={inEditor ? "grid items-start gap-3 @2xl:grid-cols-2" : "flex flex-col gap-3"}>
             {retireIncome ? (
-              <div className="rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
+              <div className="rounded-lg bg-surface px-3 py-2.5 ring-1 ring-line sm:px-5 sm:py-4">
                 {/* A year picker in the title, like the survivor card's. */}
-                <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-lg">
+                <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-xl">
                   Income in
                   <select
                     value={incomeYear}
                     onChange={(e) => setIncomeYear(Number(e.target.value))}
                     aria-label="Year"
-                    className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-sm font-bold sm:text-lg text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                    className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-sm font-bold sm:text-xl text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                   >
                     {incomeYearOptions.map((y) => (
                       <option key={y} value={y}>{y}</option>
@@ -659,12 +658,12 @@ export function FiSection({
                 {retireIncome.parts.length === 0 ? (
                   <p className="mt-1 text-center text-xs sm:text-sm text-foreground">No retirement income yet — add it in Edit Future Projections.</p>
                 ) : (
-                  <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
-                    <li className="flex justify-between gap-3 py-1 max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
+                  <ul className="mt-2 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-[17px]">
+                    <li className="flex justify-between gap-3 py-1.5 max-sm:text-[12px] sm:text-sm font-semibold uppercase tracking-wide text-foreground">
                       <span />
                       <span className="flex shrink-0">
-                        <span className="w-[4.5rem] text-right sm:w-24 xl:w-20 2xl:w-24">Monthly</span>
-                        <span className="w-[5.75rem] text-right sm:w-28 xl:w-24 2xl:w-28">Yearly</span>
+                        <span className="w-[4.5rem] text-right sm:w-24">Monthly</span>
+                        <span className="w-[5.75rem] text-right sm:w-28">Yearly</span>
                       </span>
                     </li>
                     {retireIncome.parts.map((part, i) => (
@@ -721,9 +720,9 @@ export function FiSection({
               </div>
             ) : null}
 
-            <div className="flex-1 rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
-              <p className="text-center text-sm font-bold sm:text-lg">Investments</p>
-              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
+            <div className="flex-1 rounded-lg bg-surface px-3 py-2.5 ring-1 ring-line sm:px-5 sm:py-4">
+              <p className="text-center text-sm font-bold sm:text-xl">Investments</p>
+              <ul className="mt-2 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-[17px]">
                 {mile ? (
                   <>
                     {/* No gap means nothing for the investments to fund —
@@ -793,18 +792,18 @@ export function FiSection({
 
             {/* What-if: the same plan with Victor's income gone from the
                 year picked. */}
-            <div className="rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
+            <div className="rounded-lg bg-surface px-3 py-2.5 ring-1 ring-line sm:px-5 sm:py-4">
               {/* Title and the remarry pick share one line, so this card is
                   no taller than the two beside it (Victor, 2026-10-25). */}
               <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
-              <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-lg">
+              <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-xl">
                 If you die first, in
                 <select
                   value={deathYear}
                   onChange={(e) => setDeathYear(Number(e.target.value))}
                   aria-label="Year"
                   disabled={yearOptions.length === 0}
-                  className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-sm font-bold sm:text-lg text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-sm font-bold sm:text-xl text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   {(yearOptions.length ? yearOptions : [deathYear]).map((y) => (
                     <option key={y} value={y}>{y}</option>
@@ -830,16 +829,16 @@ export function FiSection({
                 </p>
               ) : null}
               </div>
-              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
-                <li className="flex justify-between gap-3 py-1 max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
+              <ul className="mt-2 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-[17px]">
+                <li className="flex justify-between gap-3 py-1.5 max-sm:text-[12px] sm:text-sm font-semibold uppercase tracking-wide text-foreground">
                   <span>Family income</span>
                   <span className="flex shrink-0">
-                    <span className="w-[4.5rem] text-right sm:w-24 xl:w-20 2xl:w-24">Monthly</span>
-                    <span className="w-[5.75rem] text-right sm:w-28 xl:w-24 2xl:w-28">Yearly</span>
+                    <span className="w-[4.5rem] text-right sm:w-24">Monthly</span>
+                    <span className="w-[5.75rem] text-right sm:w-28">Yearly</span>
                   </span>
                 </li>
                 {survivorYear.stops.length > 0 ? (
-                  <li className="flex justify-between gap-3 py-1">
+                  <li className="flex justify-between gap-3 py-1.5">
                     <span className="min-w-0">Stops</span>
                     <span className="text-right text-negative">{survivorYear.stops.join(" · ")}</span>
                   </li>
@@ -1005,6 +1004,41 @@ export function FiSection({
               ) : null}
             </div>
           </div>
+    </div>
+  );
+
+  // Everything behind the Retirement card, under the table, closed by default.
+  const details = (
+    <div className="border-t border-line px-4 py-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full min-w-0 items-center gap-2 text-left"
+      >
+        <svg
+          aria-hidden
+          viewBox="0 0 20 20"
+          className={`h-3.5 w-3.5 shrink-0 text-foreground transition-transform ${open ? "" : "-rotate-90"}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 7.5 10 12.5 15 7.5" />
+        </svg>
+        <span className="text-sm font-semibold sm:text-lg">Retirement details</span>
+      </button>
+      {open ? (
+        <div>
+          {/* Three panels side by side: what retirement pays, what the
+              investments have to do about the gap, and the family's income if
+              Victor dies first. Each reads top to bottom as one sum. */}
+          {/* Income and Investments stack on the left, the long survivor
+              card on the right — three across left two short cards over
+              empty space (Victor, 2026-10-25). */}
+          {renderCards(false)}
 
           {/* Which picture the chart draws. */}
           <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5 text-xs sm:text-sm">
@@ -1102,12 +1136,19 @@ export function FiSection({
       {children({ assumptions, details, editIncome })}
       {editing ? (
         <PlanModal
-          plan={plan}
+          plan={savedPlan}
           thisYear={thisYear}
           currency={currency}
+          onDraft={setDraft}
           focus={editing === "sbp" ? "sbp" : editing === "income" ? "income" : null}
           suggestPayCents={editing === "income" ? suggestPayCents : null}
-          onClose={() => setEditing(false)}
+          results={renderCards(true)}
+          onClose={() => {
+            setEditing(false);
+            setDraft(null);
+            backFromPlan?.();
+            setBackFromPlan(null);
+          }}
         />
       ) : null}
     </>
@@ -1607,12 +1648,12 @@ function ValueRow({
   return (
     // A bold line is the list's sum: the page's one tint marks it
     // (Victor, 2026-10-25).
-    <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "-mx-2 rounded-md bg-sky-50 px-2 font-bold dark:bg-sky-950/40" : ""}`}>
+    <li className={`flex items-center justify-between gap-3 py-1.5 ${bold ? "-mx-2 rounded-md bg-sky-50 px-2 font-bold dark:bg-sky-950/40" : ""}`}>
       <span className="min-w-0">
         {label}
         {note ? <span className="block text-xs font-normal text-foreground sm:text-sm">{note}</span> : null}
       </span>
-      <span className={`shrink-0 text-right tabular-nums ${tone}`}>{value}</span>
+      <span className={`shrink-0 text-right tabular-nums ${bold ? "" : "font-medium"} ${tone}`}>{value}</span>
     </li>
   );
 }
@@ -1728,6 +1769,8 @@ function PlanModal({
   currency,
   focus = null,
   suggestPayCents = null,
+  results,
+  onDraft,
   onClose,
 }: {
   plan: FiPlan;
@@ -1738,8 +1781,14 @@ function PlanModal({
   focus?: "sbp" | "income" | null;
   /** With focus "income" and no Pay line yet: start one at this yearly amount. */
   suggestPayCents?: number | null;
+  /** The Retirement details cards, shown beside the sections. */
+  results: React.ReactNode;
+  /** What's typed, worked out; null = the saved plan. */
+  onDraft: (draft: PlanPreview | null) => void;
   onClose: () => void;
 }) {
+  useScrollLock();
+  useCloseOnEscape(onClose);
   const focusSbp = focus === "sbp";
   useEffect(() => {
     if (focus === "sbp") {
@@ -1754,15 +1803,33 @@ function PlanModal({
   const [error, setError] = useState<string | null>(null);
   // Save keeps the popup open (Victor, 2026-10-16); the button says Saved for a moment instead.
   const [justSaved, setJustSaved] = useState(false);
-  // The popup lists the section headers only; clicking one opens that
-  // section in its own popup on top (Victor, 2026-10-25). Closed sections'
+  // The editor lists the section headers; clicking one opens its fields
+  // right under it, one at a time (Victor, 2026-10-29). Closed sections'
   // fields stay in the form, hidden, so Save still sends them.
   const [openSection, setOpenSection] = useState<string | null>(
     focus === "sbp" ? "military" : focus === "income" ? "income" : null,
   );
   const isOpen = (id: string) => openSection === id;
   const toggleSection = (id: string) => setOpenSection((prev) => (prev === id ? null : id));
-  const closeSection = () => setOpenSection(null);
+  // An Income card's Edit opens the section that owns it.
+  const openFromIncome = (id: string) => setOpenSection(id);
+  // A newly opened section's header moves to the top of the list, since the
+  // one closing above it shifts everything up; from xl, where the header is
+  // in the side list, its fields do. Not on opening the editor: the focus
+  // effect above places that.
+  const firstOpen = useRef(true);
+  useEffect(() => {
+    if (firstOpen.current) {
+      firstOpen.current = false;
+      return;
+    }
+    if (openSection == null) return;
+    const head = formRef.current?.querySelector<HTMLElement>('h3 > button[aria-expanded="true"]')?.parentElement;
+    const target = head?.offsetParent ? head : formRef.current?.querySelector<HTMLElement>('[role="region"]');
+    target?.scrollIntoView({ block: "start" });
+  }, [openSection]);
+  // Below xl the editor and the results take turns on the screen.
+  const [pane, setPane] = useState<"edit" | "results">("edit");
   // The Social Security popup's header row its toolbar portals into.
   const [ssToolbar, setSsToolbar] = useState<HTMLElement | null>(null);
 
@@ -2338,6 +2405,41 @@ function PlanModal({
   const [, setTyped] = useState(0);
   const snapshotOf = (form: HTMLFormElement) =>
     JSON.stringify([...planFormData(form).entries()].map(([k, v]) => [k, typeof v === "string" ? v : v.name]));
+  // The results beside the sections follow what's typed (Victor,
+  // 2026-10-29): a moment after the last change the server runs Save's own
+  // checks and rebuild on it — nothing is written — and the cards redraw.
+  // A half-typed value that fails a check keeps the last good result.
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const previewed = useRef<string | null>(null);
+  const previewTimer = useRef<number | undefined>(undefined);
+  const previewSeq = useRef(0);
+  function schedulePreview(form: HTMLFormElement, now: string) {
+    if (previewed.current == null) previewed.current = now;
+    if (now === previewed.current) return;
+    previewed.current = now;
+    window.clearTimeout(previewTimer.current);
+    const seq = ++previewSeq.current;
+    if (now === savedSnapshot.current) {
+      onDraft(null);
+      setPreviewBusy(false);
+      setPreviewError(null);
+      return;
+    }
+    setPreviewBusy(true);
+    previewTimer.current = window.setTimeout(async () => {
+      const result = await previewRetirementPlan(planFormData(form)).catch(() => ({ error: "Couldn't update — try again." }));
+      if (seq !== previewSeq.current) return;
+      setPreviewBusy(false);
+      if (result.error != null) setPreviewError(result.error);
+      else {
+        setPreviewError(null);
+        onDraft(result);
+      }
+    }, 500);
+  }
+  useEffect(() => () => window.clearTimeout(previewTimer.current), []);
+
   // No deps on purpose: any render may have changed what Save would send,
   // and setDirty with an unchanged value doesn't re-render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2347,6 +2449,7 @@ function PlanModal({
     const now = snapshotOf(form);
     if (savedSnapshot.current == null) savedSnapshot.current = now;
     setDirty(now !== savedSnapshot.current);
+    schedulePreview(form, now);
   });
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -2363,6 +2466,12 @@ function PlanModal({
         // returns the re-rendered page — the refresh was a second ~2s load.
         savedSnapshot.current = sent;
         setDirty(false);
+        // The page now holds what was saved; a preview still on its way is
+        // stale.
+        previewSeq.current++;
+        setPreviewBusy(false);
+        setPreviewError(null);
+        onDraft(null);
         setJustSaved(true);
         window.setTimeout(() => setJustSaved(false), 2000);
       }
@@ -2389,50 +2498,166 @@ function PlanModal({
       </button>
     ) : null;
 
+  // Retired pay and the GS pensions shown in the Income list too, read-only,
+  // so every income is in one list; each is edited in its own tile (Victor,
+  // 2026-10-29). Each carries its start (year × 12 + month) so it slots in
+  // among the lines by date.
+  const linkedIncome: { start: number; node: React.ReactNode }[] = [];
+  if (estimate && toYear(retireYear) != null) {
+    linkedIncome.push({
+      start: toYear(retireYear)! * 12 + (retireMonthNum ?? 1),
+      node: (
+        <LinkedIncomeCard
+          key="linked-military"
+          name="Military retired pay"
+          type="Military retirement"
+          amount={(estimate.grossAtRetireCents / 100).toFixed(2)}
+          per="/mo"
+          starts={[MONTHS[(retireMonthNum ?? 1) - 1], retireYear]}
+          raise="COLA"
+          footnote={
+            <>
+              Estimated Yearly Income: {formatMoneyWhole(estimate.grossAtRetireCents * 12, currency)}
+              {deductions(12)}
+            </>
+          }
+          editLabel="Edit in Military retirement income"
+          onEdit={() => openFromIncome("military")}
+        />
+      ),
+    });
+  }
+  for (const l of lines) {
+    if (l.kind !== "fers") continue;
+    const born = l.owner === "spouse" ? plan.spouseBirthYear : toYear(birthYear);
+    const s = toYear(l.startYear);
+    const e = toYear(l.endYear);
+    const high3 = Math.max(0, displayToCents(l.monthly || "0"));
+    const est =
+      born != null && s != null && e != null && high3 > 0
+        ? estimateFers(
+            {
+              owner: l.owner,
+              gsStartYear: s,
+              gsStartMonth: Number(l.startMonth) || null,
+              gsEndYear: e,
+              gsEndMonth: Number(l.endMonth) || null,
+              high3AnnualCents: high3,
+              survivorPct: Number(l.survivorPct) as 0 | 25 | 50,
+              startEarly: l.startEarly,
+            },
+            born,
+          )
+        : null;
+    if (!est?.path) continue;
+    linkedIncome.push({
+      start: est.startYear * 12 + est.startMonth,
+      node: (
+        <LinkedIncomeCard
+          key={`linked-${l.key}`}
+          name={l.owner === "spouse" ? "Spouse's GS pension" : "Your GS pension"}
+          type="GS pension (FERS)"
+          amount={String(Math.round(est.annualCents / 100))}
+          per="/yr"
+          starts={[MONTHS[est.startMonth - 1], String(est.startYear)]}
+          raise="FERS COLA"
+          footnote={<>Estimated Monthly Income: {formatMoneyWhole(est.annualCents / 12, currency)}</>}
+          editLabel="Edit in GS retirement pension"
+          onEdit={() => openFromIncome("fers")}
+        />
+      ),
+    });
+  }
+  linkedIncome.sort((a, b) => a.start - b.start);
+  // The linked cards that start before `start`, taken off the queue — the
+  // typed lines keep their own order, the cards go in between.
+  const linkedQueue = [...linkedIncome];
+  const linkedBefore = (start: number) => {
+    const out: React.ReactNode[] = [];
+    while (linkedQueue.length && linkedQueue[0].start < start) out.push(linkedQueue.shift()!.node);
+    return out;
+  };
+
+  // The xl section list, in the form's order. COLA only once an income gets one.
+  const navSections: [string, string][] = [
+    ["info", "General Profile Data"],
+    ["income", "Income"],
+    ["ss", "Social Security record"],
+    ["rates", "Return, Withdrawal, & Inflation Rates"],
+    ["military", "Military retirement income"],
+    ["fers", "GS retirement pension (FERS)"],
+    ["survivor", "Military survivor benefits"],
+    ...(colaStarts.military != null || colaStarts.va != null || colaStarts.socialSecurity != null
+      ? ([["cola", "COLA (yearly raise)"]] as [string, string][])
+      : []),
+    ["health", "Healthcare / Insurance Plan"],
+    ["rentals", "Rental properties"],
+  ];
+
+  const paneChip = (on: boolean) =>
+    `rounded-full px-3 py-1 text-sm font-semibold ring-1 transition ${
+      on ? "bg-sky-100 text-foreground ring-sky-400 dark:bg-sky-900/50" : "bg-surface text-foreground ring-line hover:ring-brand"
+    }`;
+
+  // Full screen, Boldin-style (Victor, 2026-10-29): the sections on the
+  // left, the Retirement details cards on the right, so a change is saved
+  // and its result read without closing anything. The safe area sits on the
+  // outer, non-scrolling box so the notch never covers Save or Close.
+  // m-0: the page's space-y would otherwise leave a strip open at the bottom.
   return (
-    <ModalShell
-      title={
-        // Capped on a phone so the title, Save and Close share one line. The
-        // modal's <h2> truncates (overflow hidden), so the padding keeps Close's
-        // 1px ring inside it instead of clipped at the edges.
-        <span className="flex min-w-0 max-w-[calc(100vw-2.5rem)] items-center gap-2 py-0.5 pr-0.5 text-base sm:max-w-none sm:gap-3 sm:text-lg">
-          <span className="min-w-0 whitespace-normal leading-tight sm:truncate">Edit Future Projections</span>
+    <div
+      onClick={(event) => event.stopPropagation()}
+      className="fixed inset-0 z-50 m-0 flex flex-col bg-background pt-[max(env(safe-area-inset-top),1.75rem)] sm:pt-0"
+    >
+      <div className="shrink-0 border-b border-line bg-surface px-4 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h2 className="text-lg font-bold sm:text-xl">Edit Future Projections</h2>
           {saveButton}
-          {/* A worded Close in place of the X, beside Save rather than at the
-              far edge (Victor, 2026-10-15). */}
           <button type="button" onClick={onClose} className={closeButtonClass}>
             Close
           </button>
-        </span>
-      }
-      onClose={onClose}
-      // Empty: Close sits in the title row above, so no X at the edge.
-      headerEnd={<></>}
-      // Wide enough on desktop for the seven rates, and the Social Security
-      // record's Total · Add SSA Year · Add Spousal Benefit · Explanation
-      // row, to each fit one line — and no wider: the old 1152px was dead
-      // space beside the collapsed sections (Victor, 2026-10-22).
-      className="sm:max-w-[54rem]"
-    >
+          <div className="flex basis-full gap-1.5 xl:hidden">
+            <button type="button" onClick={() => setPane("edit")} aria-pressed={pane === "edit"} className={paneChip(pane === "edit")}>
+              Edit
+            </button>
+            <button type="button" onClick={() => setPane("results")} aria-pressed={pane === "results"} className={paneChip(pane === "results")}>
+              Results
+            </button>
+          </div>
+        </div>
+        {/* A rejected save shows here, under Save. */}
+        {error ? <p className="mt-2 text-sm font-medium text-negative">{error}</p> : null}
+      </div>
+      {/* From xl: the section list, the open section, the results — three
+          columns, so nothing floats in empty space (Victor, 2026-10-29).
+          Below xl the list folds open in place, like before. The fields and
+          the results share whatever width there is, so a 27in or a 34in
+          screen both fill (Victor, 2026-10-29); the results cards sit side
+          by side once their own column is wide enough. */}
+      <div className="min-h-0 flex-1 xl:grid xl:grid-cols-[15rem_minmax(40rem,1fr)_minmax(30rem,1.5fr)]">
+      <nav aria-label="Sections" className="hidden h-full overflow-y-auto border-r border-line px-3 py-4 xl:block">
+        {navSections.map(([id, title]) => (
+          <SectionNavItem key={id} title={title} active={isOpen(id)} onClick={() => setOpenSection(id)} />
+        ))}
+      </nav>
+      <div className={`h-full overflow-y-auto ${pane === "results" ? "max-xl:hidden" : ""}`}>
       <form
         id="fi-plan-form"
         ref={formRef}
         onSubmit={submit}
         onChange={() => setTyped((n) => n + 1)}
-        className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2 lg:grid-cols-3"
+        className="mx-auto flex max-w-[60rem] flex-col gap-2 px-4 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:px-6"
       >
-        {/* A rejected save shows here, under the header's Save. */}
-        {error ? <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p> : null}
-        <SectionHead title="General Profile Data" onToggle={() => toggleSection("info")} />
+        {openSection == null ? (
+          <p className="hidden py-10 text-center text-base font-semibold xl:block">Pick a section on the left.</p>
+        ) : null}
+        <SectionHead title="General Profile Data" open={isOpen("info")} onToggle={() => toggleSection("info")} />
         {/* You and your spouse side by side on one row on a wide screen,
             each under their own heading so the labels can stay short
             (Victor, 2026-10-20). A blank spouse birth year hides Spouse Age. */}
         <SectionPopup
           open={isOpen("info")}
           title="General Profile Data"
-          onClose={closeSection}
-          actions={saveButton}
-          error={error}
           // In the header with the other add buttons (Victor, 2026-10-25).
           extra={
             <button
@@ -2531,14 +2756,11 @@ function PlanModal({
           id="fi-income"
           title="Income"
          
-          onToggle={() => toggleSection("income")}
+          open={isOpen("income")} onToggle={() => toggleSection("income")}
         />
         <SectionPopup
           open={isOpen("income")}
           title="Income"
-          onClose={closeSection}
-          actions={saveButton}
-          error={error}
           extra={
             <>
               {/* In the header beside Close, so its list opens down into
@@ -2566,10 +2788,13 @@ function PlanModal({
           }
         >
         <div className="space-y-2 sm:col-span-2">
-          {/* The GS pension has its own tile (Victor, 2026-10-25). */}
+          {/* Every income by start date, the read-only ones slotted in
+              among the typed lines. The GS pension's own line is edited in
+              its tile (Victor, 2026-10-25). */}
           {lines.filter((l) => l.kind !== "fers").map((l) => (
+            <Fragment key={l.key}>
+            {linkedBefore(lineStart(l, thisYear))}
             <div
-              key={l.key}
               data-line-key={l.key}
               // Re-sorted once you leave the row, not while typing a year.
               onBlur={(e) => {
@@ -2741,7 +2966,9 @@ function PlanModal({
                 </p>
               ) : null}
             </div>
+            </Fragment>
           ))}
+          {linkedBefore(Number.POSITIVE_INFINITY)}
         </div>
         </SectionPopup>
 
@@ -2751,9 +2978,9 @@ function PlanModal({
           id="fi-ss"
           title="Social Security record"
          
-          onToggle={() => toggleSection("ss")}
+          open={isOpen("ss")} onToggle={() => toggleSection("ss")}
         />
-        <SectionPopup open={isOpen("ss")} title="Social Security record" onClose={closeSection} actions={saveButton} error={error} toolbarRef={setSsToolbar}>
+        <SectionPopup open={isOpen("ss")} title="Social Security record" toolbarRef={setSsToolbar}>
           <SsRecordSection
             record={plan.ssRecord}
             birthYear={Number(birthYear) || plan.birthYear}
@@ -2767,8 +2994,8 @@ function PlanModal({
           />
         </SectionPopup>
 
-        <SectionHead title="Return, Withdrawal, & Inflation Rates" onToggle={() => toggleSection("rates")} />
-        <SectionPopup open={isOpen("rates")} title="Return, Withdrawal, & Inflation Rates" onClose={closeSection} actions={saveButton} error={error}>
+        <SectionHead title="Return, Withdrawal, & Inflation Rates" open={isOpen("rates")} onToggle={() => toggleSection("rates")} />
+        <SectionPopup open={isOpen("rates")} title="Return, Withdrawal, & Inflation Rates">
         <input type="hidden" name="investmentReturnPct" value={investDefault} />
         {/* Each category's own rate, side by side, Savings APY first;
             the year popup can still change one year. */}
@@ -2881,8 +3108,8 @@ function PlanModal({
 
         </SectionPopup>
 
-        <SectionHead title="Military retirement income" onToggle={() => toggleSection("military")} />
-        <SectionPopup open={isOpen("military")} title="Military retirement income" onClose={closeSection} actions={saveButton} error={error}>
+        <SectionHead title="Military retirement income" open={isOpen("military")} onToggle={() => toggleSection("military")} />
+        <SectionPopup open={isOpen("military")} title="Military retirement income">
         <Field label="Month & Year expected to retire" hint="Active-duty pay stops and retired pay starts that month.">
           <MonthYear
             monthName="targetRetireMonth"
@@ -3049,16 +3276,11 @@ function PlanModal({
         {/* The GS pension on its own tile, with how it works and OPM's pages
             right there: it's complicated and few people know it (Victor,
             2026-10-25). Its lines save with the income lines. */}
-        <SectionHead title="GS retirement pension (FERS)" onToggle={() => toggleSection("fers")} />
+        <SectionHead title="GS retirement pension (FERS)" open={isOpen("fers")} onToggle={() => toggleSection("fers")} />
         <SectionPopup
           open={isOpen("fers")}
           title="GS retirement pension (FERS)"
-          onClose={closeSection}
-          actions={saveButton}
-          error={error}
-          // + Add pension at the left, Close at the right (Victor,
-          // 2026-10-26). One pension per person.
-          closeAtRight
+          // One pension per person.
           extra={
             lines.some((l) => l.kind === "fers" && l.owner === "self") &&
             lines.some((l) => l.kind === "fers" && l.owner === "spouse") ? null : (
@@ -3120,9 +3342,9 @@ function PlanModal({
         <SectionHead
           title="Military survivor benefits"
          
-          onToggle={() => toggleSection("survivor")}
+          open={isOpen("survivor")} onToggle={() => toggleSection("survivor")}
         />
-        <SectionPopup open={isOpen("survivor")} title="Military survivor benefits" onClose={closeSection} actions={saveButton} error={error}>
+        <SectionPopup open={isOpen("survivor")} title="Military survivor benefits">
         <Field
           label="SGLI coverage"
           hint={
@@ -3200,14 +3422,11 @@ function PlanModal({
             <SectionHead
               title="COLA (yearly raise)"
              
-              onToggle={() => toggleSection("cola")}
+              open={isOpen("cola")} onToggle={() => toggleSection("cola")}
             />
             <SectionPopup
               open={isOpen("cola")}
               title="COLA (yearly raise)"
-              onClose={closeSection}
-              actions={saveButton}
-              error={error}
               // In the header with the other add buttons (Victor, 2026-10-25);
               // only once some income gets a COLA, as before.
               extra={
@@ -3307,13 +3526,10 @@ function PlanModal({
           <input type="hidden" name="colaPct" value={colaPct} />
         ) : null}
 
-        <SectionHead title="Healthcare / Insurance Plan" onToggle={() => toggleSection("health")} />
+        <SectionHead title="Healthcare / Insurance Plan" open={isOpen("health")} onToggle={() => toggleSection("health")} />
         <SectionPopup
           open={isOpen("health")}
           title="Healthcare / Insurance Plan"
-          onClose={closeSection}
-          actions={saveButton}
-          error={error}
           // In the header like Income's + Add income (Victor, 2026-10-25).
           aside={
             <select
@@ -3395,14 +3611,11 @@ function PlanModal({
         <SectionHead
           title="Rental properties"
          
-          onToggle={() => toggleSection("rentals")}
+          open={isOpen("rentals")} onToggle={() => toggleSection("rentals")}
         />
         <SectionPopup
           open={isOpen("rentals")}
           title="Rental properties"
-          onClose={closeSection}
-          actions={saveButton}
-          error={error}
           // Rentals come only from Accounts, so its add button opens the
           // Accounts page's Add property on a Rental property (Victor,
           // 2026-10-25).
@@ -3501,6 +3714,22 @@ function PlanModal({
         </SectionPopup>
 
       </form>
+      </div>
+      <div
+        className={`h-full overflow-y-auto border-line px-4 pt-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:px-6 xl:border-l ${pane === "edit" ? "max-xl:hidden" : ""}`}
+      >
+        <p className="text-center text-lg font-bold sm:text-xl">Retirement details</p>
+        {/* Whether the cards show the saved plan or what's typed. */}
+        {previewError ? (
+          <p className="text-center text-sm font-semibold text-negative">Not updated: {previewError}</p>
+        ) : (
+          <p className="text-center text-sm font-semibold text-foreground">
+            {previewBusy ? "Updating…" : dirty ? "With your changes · not saved yet" : "Saved plan"}
+          </p>
+        )}
+        {results}
+      </div>
+      </div>
       {/* Opened from inside a section popup (z-60), so they stack above it. */}
       <div className="relative z-[70]">
       {tflInfoOpen ? <TflInfo tflYear={tflYear} onClose={() => setTflInfoOpen(false)} /> : null}
@@ -3544,7 +3773,7 @@ function PlanModal({
         />
       ) : null}
       </div>
-    </ModalShell>
+    </div>
   );
 }
 
@@ -3620,29 +3849,47 @@ const SECTION_TILE: Record<string, { color: string; icon: React.ReactNode }> = {
   },
 };
 
-/** A section's tile in the plan popup's grid: tap to open that section in
- *  its own popup. Three across on desktop (Victor, 2026-10-25). */
+/** A section's header row in the plan editor: tap to open its fields right
+ *  under it (Victor, 2026-10-29). */
 function SectionHead({
   title,
+  open,
   onToggle,
   id,
 }: {
   title: string;
+  open: boolean;
   onToggle: () => void;
   id?: string;
 }) {
   const tile = SECTION_TILE[title];
   return (
-    <h3 id={id} className="scroll-mt-2">
+    // From xl the side list stands in for it.
+    <h3 id={id} className="scroll-mt-3 xl:hidden">
       <button
         type="button"
         onClick={onToggle}
-        aria-haspopup="dialog"
+        aria-expanded={open}
         style={{ "--tile": tile?.color ?? "var(--brand)" } as React.CSSProperties}
-        className="flex h-full w-full items-center gap-3 rounded-xl bg-surface px-4 py-3 text-left text-sm sm:flex-col sm:justify-center sm:gap-2 sm:py-4 sm:text-center font-bold uppercase leading-snug tracking-wide shadow-sm ring-1 ring-line transition hover:-translate-y-0.5 hover:bg-[color-mix(in_srgb,var(--tile)_6%,var(--color-surface))] hover:shadow-md hover:ring-[var(--tile)]"
+        className={`flex w-full items-center gap-3 bg-surface px-4 py-3 text-left text-sm font-bold uppercase leading-snug tracking-wide ring-1 ring-line transition sm:text-base ${
+          open
+            ? "rounded-t-xl"
+            : "rounded-xl shadow-sm hover:bg-[color-mix(in_srgb,var(--tile)_6%,var(--color-surface))] hover:ring-[var(--tile)]"
+        }`}
       >
-        {/* The icon in its colour on a light wash of the same colour. On a
-            phone it sits left of the title, so the list stays short. */}
+        <svg
+          aria-hidden
+          viewBox="0 0 20 20"
+          className={`h-4 w-4 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 7.5 10 12.5 15 7.5" />
+        </svg>
+        {/* The icon in its colour on a light wash of the same colour. */}
         <span
           aria-hidden
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
@@ -3658,102 +3905,77 @@ function SectionHead({
   );
 }
 
-/** One section's fields, shown in a popup over the plan popup while it's
- *  open. Closed, the same tree stays mounted but hidden — never unmounted —
- *  so typed values survive and Save still sends every section. */
+/** A section in the editor's side list (xl and up): its icon and title; the
+ *  open one is raised on a card. */
+function SectionNavItem({ title, active, onClick }: { title: string; active: boolean; onClick: () => void }) {
+  const tile = SECTION_TILE[title];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active ? "true" : undefined}
+      style={{ "--tile": tile?.color ?? "var(--brand)" } as React.CSSProperties}
+      className={`mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-bold uppercase leading-snug tracking-wide ring-1 transition ${
+        active ? "bg-surface shadow-sm ring-[var(--tile)]" : "ring-transparent hover:bg-surface hover:ring-line"
+      }`}
+    >
+      <span
+        aria-hidden
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+        style={{ color: "var(--tile)", backgroundColor: "color-mix(in srgb, var(--tile) 14%, transparent)" }}
+      >
+        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {tile?.icon}
+        </svg>
+      </span>
+      {title}
+    </button>
+  );
+}
+
+/** One section's fields, open under its header. Closed, the same tree stays
+ *  mounted but hidden — never unmounted — so typed values survive and Save
+ *  still sends every section. */
 function SectionPopup({
   open,
   title,
-  onClose,
-  actions,
-  error,
   toolbarRef,
   extra,
   aside,
-  closeAtRight,
   children,
 }: {
   open: boolean;
   title: string;
-  onClose: () => void;
-  actions: React.ReactNode;
-  error: string | null;
   /** A section's own tools (the SSA record's Import / Remove) get a row
-   *  under the title, in the non-scrolling header. */
+   *  above its fields. */
   toolbarRef?: (el: HTMLDivElement | null) => void;
-  /** Beside Close — Income's + Add income menu (Victor, 2026-10-25). */
+  /** The section's add button (Income's + Add income, + Add child…). */
   extra?: React.ReactNode;
-  /** At the header's right edge — the section's "How it works" link. */
+  /** At the tool row's right edge — the section's "How it works" link. */
   aside?: React.ReactNode;
-  /** Close at the header's right edge in place of `aside` (the GS pension
-   *  popup, Victor 2026-10-26). */
-  closeAtRight?: boolean;
   children: React.ReactNode;
 }) {
-  const closeButton = (
-    <button
-      type="button"
-      onClick={onClose}
-      className="shrink-0 rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/30 transition hover:bg-negative/20"
-    >
-      Close
-    </button>
-  );
-  const right = closeAtRight ? closeButton : aside;
   return (
-    <div className={open ? "fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4" : "hidden"}>
-      {open ? <SectionPopupBackdrop onClose={onClose} /> : null}
-      <div
-        role={open ? "dialog" : undefined}
-        aria-label={open ? title : undefined}
-        className={
-          open
-            ? "relative flex max-h-[95vh] w-full flex-col overflow-hidden rounded-t-2xl bg-surface shadow-lg ring-1 ring-black/5 dark:ring-white/10 sm:max-h-[85vh] sm:max-w-[54rem] sm:rounded-2xl"
-            : "contents"
-        }
-      >
-        {open ? (
-          // Save · Close at the left, the title centered across the popup
-          // (Victor, 2026-10-25). The empty third column balances the buttons
-          // so the title sits at the true center; on a phone the title gets
-          // its own line under the buttons. A line and a larger title mark it
-          // as the header — no colored band (Victor, 2026-10-25).
-          <div className="grid shrink-0 grid-cols-1 items-center gap-x-3 gap-y-2 border-b border-line bg-surface px-5 pb-3 pt-4 sm:grid-cols-[1fr_auto_1fr]">
-            <div className="flex flex-wrap items-center gap-3">
-              {actions}
-              {closeAtRight ? null : closeButton}
-              {extra}
-              {/* On a phone Close stays on this row, at its right end. */}
-              {closeAtRight ? <div className="ml-auto sm:hidden">{closeButton}</div> : null}
-            </div>
-            <h2 className="min-w-0 text-center text-base font-bold leading-tight tracking-tight sm:text-xl">{title}</h2>
-            {right ? (
-              <div className={`justify-center sm:justify-end ${closeAtRight ? "hidden sm:flex" : "flex"}`}>{right}</div>
-            ) : null}
-            {toolbarRef ? <div ref={toolbarRef} className="space-y-2 sm:col-span-3" /> : null}
-            {error ? <p className="text-sm font-medium text-negative sm:col-span-3">{error}</p> : null}
-          </div>
-        ) : null}
-        <div
-          data-column-tab-scope
-          className={
-            open
-              ? "grid grid-cols-1 content-start gap-x-8 gap-y-4 overflow-y-auto px-5 pt-5 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
-              : "contents"
-          }
-        >
-          {children}
+    <div
+      role={open ? "region" : undefined}
+      aria-label={open ? title : undefined}
+      className={open ? "-mt-2 rounded-b-xl bg-surface shadow-sm ring-1 ring-line xl:mt-0 xl:rounded-xl" : "hidden"}
+    >
+      {/* The section's tools; from xl its title too, since the header row is
+          in the side list there. */}
+      {open ? (
+        <div className={`${extra || aside || toolbarRef ? "flex" : "hidden xl:flex"} flex-wrap items-center gap-3 border-b border-line px-5 py-3`}>
+          <h2 className="hidden text-lg font-bold xl:block">{title}</h2>
+          {extra}
+          {aside ? <div className="ml-auto">{aside}</div> : null}
+          {toolbarRef ? <div ref={toolbarRef} className="basis-full space-y-2" /> : null}
         </div>
+      ) : null}
+      <div data-column-tab-scope className="grid grid-cols-1 content-start gap-x-8 gap-y-4 px-5 pb-5 pt-4 sm:grid-cols-2">
+        {children}
       </div>
     </div>
   );
-}
-
-/** Mounted only while a section popup is open, so Escape closes just that
- *  section and leaves the plan popup standing. */
-function SectionPopupBackdrop({ onClose }: { onClose: () => void }) {
-  useCloseOnEscape(onClose);
-  return <button type="button" aria-label="Close" onClick={onClose} className="fixed inset-0 bg-black/30" />;
 }
 
 /** A COLA checkbox, with the year that income's first raise lands. */
@@ -3766,6 +3988,12 @@ type GroupDraft = {
   taxPct: string;
 };
 
+/** A line's first month as year × 12 + month; a blank start is now. */
+function lineStart(l: LineDraft, thisYear: number): number {
+  const y = /^\d{4}$/.test(l.startYear.trim()) ? Number(l.startYear) : null;
+  return y == null ? thisYear * 12 + new Date().getMonth() + 1 : y * 12 + (Number(l.startMonth) || 1);
+}
+
 /** Income lines in date order: start, then end. A blank start is now, a
  *  blank end is never. */
 function byLineDates(
@@ -3773,10 +4001,7 @@ function byLineDates(
   thisYear: number,
 ): LineDraft[] {
   const yr = (v: string) => (/^\d{4}$/.test(v.trim()) ? Number(v) : null);
-  const start = (l: LineDraft) => {
-    const y = yr(l.startYear);
-    return y == null ? thisYear * 12 + new Date().getMonth() + 1 : y * 12 + (Number(l.startMonth) || 1);
-  };
+  const start = (l: LineDraft) => lineStart(l, thisYear);
   const end = (l: LineDraft) => {
     const y = yr(l.endYear);
     if (y != null) return y * 12 + (Number(l.endMonth) || 12);
@@ -3794,6 +4019,90 @@ function LineField({ label, className, children }: { label: string; className?: 
       <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">{label}</span>
       {children}
     </label>
+  );
+}
+
+/** An income worked out in another tile, shown in the Income list with the
+ *  same layout as a line but faded and not editable, plus a link to its tile. */
+function LinkedIncomeCard({
+  name,
+  type,
+  amount,
+  per,
+  starts,
+  raise,
+  footnote,
+  editLabel,
+  onEdit,
+}: {
+  name: string;
+  type: string;
+  amount: string;
+  per: string;
+  starts: [string, string];
+  raise: string;
+  footnote: React.ReactNode;
+  editLabel: string;
+  onEdit: () => void;
+}) {
+  const box = "block rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line";
+  return (
+    <div className="space-y-2 rounded-lg bg-surface p-2 ring-1 ring-line">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 opacity-60 sm:flex-none">
+          <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Name</span>
+          <span className={`${box} min-w-0 flex-1 truncate sm:w-56 sm:flex-none`}>{name}</span>
+        </div>
+        <div className="flex min-w-0 items-center gap-2 opacity-60 max-sm:order-last max-sm:basis-full">
+          <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Type</span>
+          <span className={`${box} min-w-0 flex-1 truncate sm:w-44 sm:flex-none`}>{type}</span>
+        </div>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="ml-auto h-[34px] shrink-0 rounded-md px-2 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/50"
+          style={{ color: "var(--viz-savings)" }}
+        >
+          {/* The long label squeezed Name to "M…" on a phone. */}
+          <span className="sm:hidden">Edit</span>
+          <span className="max-sm:hidden">{editLabel}</span>
+        </button>
+      </div>
+      <div className="grid grid-cols-2 items-end gap-2 opacity-60 sm:flex sm:justify-between sm:gap-4">
+        <LinkedField label="Amount">
+          <span className="flex gap-1">
+            <span className={`${box} min-w-0 flex-1 text-center tabular-nums sm:w-24 sm:flex-none`}>{amount}</span>
+            <span className={`${box} w-[4.25rem] shrink-0`}>{per}</span>
+          </span>
+        </LinkedField>
+        <LinkedField label="Starts" className="sm:w-[8.75rem]">
+          <span className="flex gap-1">
+            <span className={`${box} w-[4.5rem] shrink-0`}>{starts[0]}</span>
+            <span className={`${box} min-w-0 flex-1 text-center tabular-nums`}>{starts[1]}</span>
+          </span>
+        </LinkedField>
+        <LinkedField label="Ends" className="sm:w-[8.75rem]">
+          <span className="flex gap-1">
+            <span className={`${box} w-[4.5rem] shrink-0`}>Dec</span>
+            <span className={`${box} min-w-0 flex-1 text-center`}>Never</span>
+          </span>
+        </LinkedField>
+        <LinkedField label="Pay Increase %/yr">
+          <span className="block py-1.5 text-center text-sm text-foreground">{raise}</span>
+        </LinkedField>
+      </div>
+      <p className="text-center text-xs sm:text-sm text-foreground">{footnote}</p>
+    </div>
+  );
+}
+
+/** LineField's look without a <label>: nothing in it is an input. */
+function LinkedField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={`block min-w-0 ${className ?? ""}`}>
+      <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">{label}</span>
+      {children}
+    </div>
   );
 }
 
@@ -4517,14 +4826,14 @@ function IncomeRow({
   return (
     // A bold line is the list's sum: the page's one tint marks it
     // (Victor, 2026-10-25).
-    <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "-mx-2 rounded-md bg-sky-50 px-2 font-bold dark:bg-sky-950/40" : ""}`}>
+    <li className={`flex items-center justify-between gap-3 py-1.5 ${bold ? "-mx-2 rounded-md bg-sky-50 px-2 font-bold dark:bg-sky-950/40" : ""}`}>
       <span className="min-w-0">
         {label}
         {note ? <span className="block text-xs font-normal text-foreground sm:text-sm">{note}</span> : null}
       </span>
-      <span className={`flex shrink-0 tabular-nums ${tone}`}>
-        <span className="w-[4.5rem] text-right sm:w-24 xl:w-20 2xl:w-24">{formatMoneyWhole(monthly, currency)}</span>
-        <span className="w-[5.75rem] text-right sm:w-28 xl:w-24 2xl:w-28">{formatMoneyWhole(yearly, currency)}</span>
+      <span className={`flex shrink-0 tabular-nums ${bold ? "" : "font-medium"} ${tone}`}>
+        <span className="w-[4.5rem] text-right sm:w-24">{formatMoneyWhole(monthly, currency)}</span>
+        <span className="w-[5.75rem] text-right sm:w-28">{formatMoneyWhole(yearly, currency)}</span>
       </span>
     </li>
   );

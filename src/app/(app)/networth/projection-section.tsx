@@ -199,7 +199,7 @@ export function ProjectionSection({
   groupSlots: GroupSlot[];
   /** Opens Edit Future Projections at Income; with no Pay line yet,
    *  one is started at the given yearly amount. */
-  onEditIncome?: (suggestYearlyCents: number | null) => void;
+  onEditIncome?: (suggestYearlyCents: number | null, onBack?: () => void) => void;
   /** Today's live net worth — the figure Accounts and the sidebar show. */
   currentNwCents: number;
   /** From the retirement plan: the Edit assumptions line that rebuilds this
@@ -719,8 +719,10 @@ export function ProjectionSection({
               ? () => {
                   // Suggest this year's typed pay for a first Pay line.
                   const now = years.find((y) => y.year === thisYear);
+                  // Closing Income brings this year's popup back.
+                  const year = editing.year;
                   setEditingYear(null);
-                  onEditIncome(now && now.workIncomeCents > 0 ? now.workIncomeCents : null);
+                  onEditIncome(now && now.workIncomeCents > 0 ? now.workIncomeCents : null, () => setEditingYear(year));
                 }
               : undefined
           }

@@ -1,6 +1,6 @@
 import { toSsRecord } from "@/lib/ssa";
 import { inflationGrowth, parseInflationHistory } from "@/lib/inflation";
-import { CASH_KINDS, inflatedSpending, parseChildren, parseColaByYear, parseDentalPlans, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
+import { CASH_KINDS, inflatedSpending, toRentalProperty, type RentalRow } from "@/lib/retirement";
 import { withCurrentMonth, captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
@@ -12,6 +12,7 @@ import { investSlotKey, resolveContributedCents, transferOutCents } from "@/lib/
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
 import { loadUpcomingTravelPlanCents } from "../travel/upcoming-plan";
 import { loadGroupInputs } from "@/lib/account-groups-load";
+import { fiPlanFields, toIncomeLine } from "./fi-plan-rows";
 import {
   GROUP_KINDS,
   emptyBalances,
@@ -1177,54 +1178,8 @@ export default async function NetworthPage() {
       currency={household.currency}
       lockedFromMonth={currentMonthFirst()}
       fiPlan={{
-        birthYear: planRow?.birth_year ?? null,
-        targetRetireYear: planRow?.target_retire_year ?? null,
-        targetRetireMonth: planRow?.target_retire_month ?? null,
-        annualSpendCents: planRow?.annual_spend_cents ?? null,
-        annualContributionCents: planRow?.annual_contribution_cents ?? null,
-        investmentReturnPct: planRow?.investment_return_pct == null ? 7.5 : Number(planRow.investment_return_pct),
-        withdrawStartYear: planRow?.withdraw_start_year ?? null,
-        spouseRetireYear: planRow?.spouse_retire_year ?? null,
-        spouseBirthYear: planRow?.spouse_birth_year ?? null,
-        spouseSsClaimAge: planRow?.spouse_ss_claim_age ?? null,
+        ...fiPlanFields(planRow),
         ssRecord: toSsRecord(ssRow),
-        withdrawalRatePct:
-          planRow?.withdrawal_rate_pct == null ? 4 : Number(planRow.withdrawal_rate_pct),
-        // A pension, VA, Social Security — income the portfolio never has to
-        // fund, so the FI number stops pretending it does.
-        guaranteedIncomeCents: planRow?.guaranteed_income_cents ?? null,
-        guaranteedIncomeStartYear: planRow?.guaranteed_income_start_year ?? null,
-        serviceStartYear: planRow?.service_start_year ?? null,
-        serviceStartMonth: planRow?.service_start_month ?? null,
-        high3MonthlyCents: planRow?.high3_monthly_cents ?? null,
-        basePayByYear: (planRow?.base_pay_by_year ?? {}) as Record<string, number>,
-        inflationPct: planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
-        inflationHistory: parseInflationHistory(planRow?.inflation_history),
-        cashReturnPct: planRow?.cash_return_pct == null ? 3 : Number(planRow.cash_return_pct),
-        cola: {
-          pct: planRow?.cola_pct == null ? 2.5 : Number(planRow.cola_pct),
-          byYear: parseColaByYear(planRow?.cola_by_year),
-          military: planRow?.cola_military ?? true,
-          va: planRow?.cola_va ?? true,
-          socialSecurity: planRow?.cola_social_security ?? true,
-        },
-        sbpEnabled: !!planRow?.sbp_enabled,
-        sbpPct: planRow?.sbp_pct == null ? 6.5 : Number(planRow.sbp_pct),
-        longevityAge: planRow?.longevity_age ?? 90,
-        spouseLongevityAge: planRow?.spouse_longevity_age ?? 90,
-        children: parseChildren(planRow?.children),
-        insurance: {
-          sgliCents: Number(planRow?.sgli_cents ?? 50000000),
-          sgliPayout: planRow?.sgli_payout === "monthly36" ? "monthly36" : "lump",
-          // Kept only when switched on.
-          vgliCents: planRow?.vgli_enabled ? Number(planRow?.vgli_cents ?? 0) : 0,
-          vgliPayout: planRow?.vgli_payout === "monthly36" ? "monthly36" : "lump",
-        },
-        healthcareAnnualCents: planRow?.healthcare_annual_cents ?? null,
-        healthcareAnnualPer: planRow?.healthcare_annual_per === "yr" ? "yr" : "mo",
-        healthPlans: parseHealthPlans(planRow?.health_plans),
-        dentalPlans: parseDentalPlans(planRow?.dental_plans),
-        healthcareStartAge: planRow?.healthcare_start_age ?? 65,
         rentalRows: (rentalRows ?? []) as RentalRow[],
         rentals: ((rentalRows ?? []) as RentalRow[]).map((r) =>
           toRentalProperty(
@@ -1250,24 +1205,7 @@ export default async function NetworthPage() {
           benefits: benefits.map((i) => ({ name: i.name as string, monthlyCents: i.amount_cents as number })),
         },
         accountGroups: groupInputs,
-        incomeLines: (incomeLineRows ?? []).map((l) => ({
-          id: l.id,
-          name: l.name,
-          kind: l.kind,
-          // Typed per year: exactly a twelfth of it.
-          monthlyCents: l.annual_cents != null ? Number(l.annual_cents) / 12 : l.monthly_cents,
-          annualCents: l.annual_cents == null ? null : Number(l.annual_cents),
-          startYear: l.start_year,
-          startMonth: l.start_month ?? null,
-          endYear: l.end_year,
-          endMonth: l.end_month ?? null,
-          raisePct: l.raise_pct == null ? null : Number(l.raise_pct),
-          piaCents: l.pia_cents == null ? null : Number(l.pia_cents),
-          taxable: l.taxable,
-          owner: l.owner === "spouse" ? ("spouse" as const) : ("self" as const),
-          survivorPct: [25, 50].includes(Number(l.survivor_pct)) ? (Number(l.survivor_pct) as 25 | 50) : (0 as const),
-          fersStartEarly: !!l.fers_start_early,
-        })),
+        incomeLines: (incomeLineRows ?? []).map(toIncomeLine),
       }}
       fiMeasured={{
         assetsCents: fiAssetsCents,

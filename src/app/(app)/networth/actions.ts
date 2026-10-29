@@ -57,6 +57,9 @@ import {
   type TypedGroups,
 } from "@/lib/account-groups";
 import { loadGroupInputs } from "@/lib/account-groups-load";
+import type { GroupRow } from "@/lib/account-groups";
+import { fiPlanFields, toIncomeLine } from "./fi-plan-rows";
+import type { FiPlan } from "./fi-section";
 
 const MONTH_RE = /^\d{4}-\d{2}-01$/;
 
@@ -368,9 +371,14 @@ export async function upsertNetworthYear(formData: FormData) {
 // ---- The Financial Independence assumptions. Only the things the app can't
 // measure live here; portfolio, contributions and spending come from the
 // accounts and transactions already recorded.
-export async function saveRetirementPlan(formData: FormData) {
-  const { supabase, householdId } = await requireHousehold();
-
+//
+// Reads and checks Edit Future Projections' form into the rows Save writes —
+// without writing them, so the live preview can run the same checks.
+async function parsePlanForm(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  householdId: string,
+  formData: FormData,
+) {
   const num = (key: string): number | null => {
     const raw = String(formData.get(key) ?? "").trim();
     if (!raw) return null;
@@ -828,8 +836,7 @@ export async function saveRetirementPlan(formData: FormData) {
           new Date().getFullYear(),
         );
 
-  const { error } = await supabase.from("retirement_plan").upsert(
-    {
+  const planRow = {
       household_id: householdId,
       birth_year: birthYear,
       target_retire_year: targetYear,
@@ -882,9 +889,17 @@ export async function saveRetirementPlan(formData: FormData) {
       guaranteed_income_cents: null,
       guaranteed_income_start_year: null,
       updated_at: new Date().toISOString(),
-    },
-    { onConflict: "household_id" },
-  );
+  };
+  return { planRow, lines, rentals, groupRows, movesIn };
+}
+
+export async function saveRetirementPlan(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const parsed = await parsePlanForm(supabase, householdId, formData);
+  if ("error" in parsed) return { error: parsed.error };
+  const { planRow, lines, rentals, groupRows, movesIn } = parsed;
+
+  const { error } = await supabase.from("retirement_plan").upsert(planRow, { onConflict: "household_id" });
   if (error) {
     console.error("[saveRetirementPlan]", error);
     return { error: `Couldn't save the plan — ${error.message}` };
@@ -1036,7 +1051,20 @@ async function recomputeRetirementIncome(
   supabase: Awaited<ReturnType<typeof createClient>>,
   householdId: string,
 ): Promise<boolean> {
-  const thisYear = new Date().getFullYear();
+  const built = buildProjectionRows(householdId, await loadRecomputeInputs(supabase, householdId));
+  if (!built) return false;
+  const { error } = await supabase
+    .from("networth_projection")
+    .upsert(built.out, { onConflict: "household_id,year" });
+  if (error) throw new Error(`Could not update the projection: ${error.message}`);
+  return true;
+}
+
+/** Everything the plan table is rebuilt from, as stored. */
+async function loadRecomputeInputs(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  householdId: string,
+) {
   const [planRes, linesRes, rowsRes, rentalsRes, acctRes, loanRes, groupInputs, ssRes] = await Promise.all([
     supabase.from("retirement_plan").select("*").eq("household_id", householdId).maybeSingle(),
     supabase.from("retirement_income_lines").select("*").eq("household_id", householdId),
@@ -1068,36 +1096,35 @@ async function recomputeRetirementIncome(
   if (planRes.error) throw new Error(`Could not read the retirement plan: ${planRes.error.message}`);
   if (linesRes.error) throw new Error(`Could not read the income lines: ${linesRes.error.message}`);
   if (rowsRes.error) throw new Error(`Could not read the projection: ${rowsRes.error.message}`);
+  return {
+    plan: planRes.data,
+    lines: linesRes.data ?? [],
+    rows: rowsRes.data ?? [],
+    rentals: rentalsRes.data ?? [],
+    accounts: acctRes.data ?? [],
+    loans: loanRes.data ?? [],
+    groupInputs,
+    ss: ssRes.data,
+  };
+}
+type RecomputeInputs = Awaited<ReturnType<typeof loadRecomputeInputs>>;
 
-  const plan = planRes.data;
-  const rows = (rowsRes.data ?? []).map((r) => ({ ...r, one_off_cents: r.one_off_cents ?? 0 }));
-  if (!plan || rows.length === 0) return false;
+/** The plan table's future rows, worked out from the inputs — pure, so the
+ *  live preview runs it on unsaved ones. null = no plan or no table yet. */
+function buildProjectionRows(householdId: string, d: RecomputeInputs) {
+  const thisYear = new Date().getFullYear();
+  const plan = d.plan;
+  const rows = d.rows.map((r) => ({ ...r, one_off_cents: r.one_off_cents ?? 0 }));
+  if (!plan || rows.length === 0) return null;
 
   const retireYear: number | null = plan.target_retire_year;
   const retireMonth: number | null = plan.target_retire_month ?? null;
   // A blank end means the line never stops (Victor, 2026-10-17).
-  const typedLines: IncomeLine[] = (linesRes.data ?? []).map((l) => ({
-      id: l.id,
-      name: l.name,
-      kind: l.kind,
-      // Typed per year: exactly a twelfth of it, not the rounded monthly.
-      monthlyCents: l.annual_cents != null ? Number(l.annual_cents) / 12 : l.monthly_cents,
-      annualCents: l.annual_cents == null ? null : Number(l.annual_cents),
-      startYear: l.start_year,
-      startMonth: l.start_month ?? null,
-      endYear: l.end_year,
-      endMonth: l.end_month ?? null,
-      raisePct: l.raise_pct == null ? null : Number(l.raise_pct),
-      piaCents: l.pia_cents == null ? null : Number(l.pia_cents),
-      taxable: l.taxable,
-      owner: l.owner === "spouse" ? "spouse" : "self",
-      survivorPct: [25, 50].includes(Number(l.survivor_pct)) ? (Number(l.survivor_pct) as 25 | 50) : 0,
-      fersStartEarly: !!l.fers_start_early,
-    }));
+  const typedLines: IncomeLine[] = d.lines.map(toIncomeLine);
   // With an earnings record saved, Social Security is worked out from it;
   // a GS career becomes the pension it pays.
   const lines = applyFers(
-    applySsRecord(typedLines, toSsRecord(ssRes.data), {
+    applySsRecord(typedLines, toSsRecord(d.ss), {
       birthYear: plan.birth_year ?? null,
       spouseBirthYear: plan.spouse_birth_year ?? null,
       spouseClaimAge: plan.spouse_ss_claim_age ?? null,
@@ -1128,13 +1155,13 @@ async function recomputeRetirementIncome(
     va: plan.cola_va ?? true,
     socialSecurity: plan.cola_social_security ?? true,
   };
-  const balances = new Map((acctRes.data ?? []).map((a) => [a.id as string, Number(a.current_balance_cents ?? 0)]));
+  const balances = new Map(d.accounts.map((a) => [a.id as string, Number(a.current_balance_cents ?? 0)]));
   const loanByProperty = new Map<string, number>();
-  for (const d of loanRes.data ?? []) {
-    const id = d.property_account_id as string;
-    loanByProperty.set(id, (loanByProperty.get(id) ?? 0) + Number(d.current_balance_cents ?? 0));
+  for (const l of d.loans) {
+    const id = l.property_account_id as string;
+    loanByProperty.set(id, (loanByProperty.get(id) ?? 0) + Number(l.current_balance_cents ?? 0));
   }
-  const rentals = ((rentalsRes.data ?? []) as RentalRow[]).map((r) => toRentalProperty(r, balances, loanByProperty));
+  const rentals = (d.rentals as RentalRow[]).map((r) => toRentalProperty(r, balances, loanByProperty));
   const health: HealthcarePlan = {
     birthYear: plan.birth_year,
     retireYear,
@@ -1147,10 +1174,10 @@ async function recomputeRetirementIncome(
   // Each group's return, contributions, withdrawals and tax; a blank return
   // is the plan's (Cash: the savings APY), blank contributions what the last
   // twelve months put in.
-  const settings = resolveGroupSettings(groupInputs.rows, {
+  const settings = resolveGroupSettings(d.groupInputs.rows, {
     investReturnPct: Number(plan.investment_return_pct ?? 7.5),
     cashReturnPct: Number(plan.cash_return_pct ?? 3),
-    measuredAddCents: groupInputs.measuredAddCents,
+    measuredAddCents: d.groupInputs.measuredAddCents,
     // A blank "Add to" stops the year before you stop working.
     stopWorkYear: plan.withdraw_start_year ?? plan.target_retire_year ?? null,
   });
@@ -1262,7 +1289,7 @@ async function recomputeRetirementIncome(
       // later drift lands in Cash.
       const investable = boy - rent.equityStartCents;
       if (groupBal == null) {
-        groupBal = scaleBalances(groupInputs.liveCents, investable);
+        groupBal = scaleBalances(d.groupInputs.liveCents, investable);
       } else {
         const sum = GROUP_KINDS.reduce((t, k) => t + groupBal![k], 0);
         groupBal.cash += investable - sum;
@@ -1306,13 +1333,51 @@ async function recomputeRetirementIncome(
     });
     carry = eoy;
   }
-  if (out.length === 0) return false;
+  if (out.length === 0) return null;
+  return { out, rentals };
+}
 
-  const { error } = await supabase
-    .from("networth_projection")
-    .upsert(out, { onConflict: "household_id,year" });
-  if (error) throw new Error(`Could not update the projection: ${error.message}`);
-  return true;
+/** What Edit Future Projections' results show while a change is unsaved. */
+export type PlanPreview = {
+  error: null;
+  /** The plan as typed, in the shape the Retirement details cards read. */
+  plan: Partial<FiPlan>;
+  /** The plan table's future years, rebuilt from what's typed. */
+  projection: { year: number; incomeCents: number; spendingCents: number; oneOffCents: number; eoyCents: number; growthCents: number }[];
+};
+
+// The live preview (Victor, 2026-10-29): the same checks and the same
+// rebuild as Save, on what's typed, with nothing written.
+export async function previewRetirementPlan(formData: FormData): Promise<PlanPreview | { error: string }> {
+  const { supabase, householdId } = await requireHousehold();
+  const parsed = await parsePlanForm(supabase, householdId, formData);
+  if ("error" in parsed) return { error: parsed.error };
+  const stored = await loadRecomputeInputs(supabase, householdId);
+  const plan = { ...(stored.plan ?? {}), ...parsed.planRow };
+  const built = buildProjectionRows(householdId, {
+    ...stored,
+    plan,
+    lines: parsed.lines,
+    rentals: parsed.rentals,
+    groupInputs: { ...stored.groupInputs, rows: parsed.groupRows as unknown as GroupRow[] },
+  });
+  return {
+    error: null,
+    plan: {
+      ...fiPlanFields(plan),
+      incomeLines: parsed.lines.map(toIncomeLine),
+      rentalRows: parsed.rentals as unknown as RentalRow[],
+      ...(built ? { rentals: built.rentals } : {}),
+    },
+    projection: (built?.out ?? []).map((r) => ({
+      year: r.year as number,
+      incomeCents: r.income_cents as number,
+      spendingCents: r.spending_cents as number,
+      oneOffCents: r.one_off_cents as number,
+      eoyCents: r.eoy_cents as number,
+      growthCents: r.growth_cents as number,
+    })),
+  };
 }
 
 // ---- The year-by-year net worth projection (Victor's sheet, now data).
