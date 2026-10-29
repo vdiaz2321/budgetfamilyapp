@@ -15,7 +15,7 @@ import { earningsByYear, parseSsaStatementText, type SsStatement } from "@/lib/s
 import { clearSsRecord, deleteSsYear, importSsStatement, saveSsBenefits, saveSsYear } from "./actions";
 
 const box = "rounded-md bg-surface px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
-const label = "block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground";
+const label = "block max-sm:text-[12px] sm:text-sm font-semibold text-foreground";
 const chip = "rounded-md px-3 py-1.5 text-sm font-semibold text-foreground ring-1 ring-line transition hover:ring-brand";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 

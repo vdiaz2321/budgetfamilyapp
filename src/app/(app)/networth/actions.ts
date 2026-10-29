@@ -20,6 +20,7 @@ import {
   inflatedSpending,
   ageInYear,
   retiredShareOfYear,
+  pensionServiceMonths,
   type HealthcarePlan,
   type CostDates,
   type DentalPlan,
@@ -574,6 +575,7 @@ async function parsePlanForm(
     owner?: string;
     survivorPct?: string;
     startEarly?: boolean;
+    waiveMilitary?: boolean;
   };
   let linesIn: LineIn[] = [];
   try {
@@ -604,6 +606,7 @@ async function parsePlanForm(
     owner: "self" | "spouse";
     survivor_pct: 0 | 25 | 50;
     fers_start_early: boolean;
+    fers_waive_military: boolean;
     sort_order: number;
   }> = [];
   for (const [i, l] of linesIn.entries()) {
@@ -660,6 +663,8 @@ async function parsePlanForm(
       owner: kind === "fers" && l.owner === "spouse" ? "spouse" : "self",
       survivor_pct: kind === "fers" && (l.survivorPct === "25" || l.survivorPct === "50") ? (Number(l.survivorPct) as 25 | 50) : 0,
       fers_start_early: kind === "fers" && !!l.startEarly,
+      // Only his own GS line can trade military retired pay.
+      fers_waive_military: kind === "fers" && l.owner !== "spouse" && !!l.waiveMilitary,
       sort_order: i,
     });
   }
@@ -952,6 +957,7 @@ export async function saveRetirementPlan(formData: FormData) {
           owner: l.owner,
           survivor_pct: l.survivor_pct,
           fers_start_early: l.fers_start_early,
+          fers_waive_military: l.fers_waive_military,
           sort_order: l.sort_order,
         })),
       );
@@ -1121,17 +1127,6 @@ function buildProjectionRows(householdId: string, d: RecomputeInputs) {
   const retireMonth: number | null = plan.target_retire_month ?? null;
   // A blank end means the line never stops (Victor, 2026-10-17).
   const typedLines: IncomeLine[] = d.lines.map(toIncomeLine);
-  // With an earnings record saved, Social Security is worked out from it;
-  // a GS career becomes the pension it pays.
-  const lines = applyFers(
-    applySsRecord(typedLines, toSsRecord(d.ss), {
-      birthYear: plan.birth_year ?? null,
-      spouseBirthYear: plan.spouse_birth_year ?? null,
-      spouseClaimAge: plan.spouse_ss_claim_age ?? null,
-      thisYear,
-    }),
-    { birthYear: plan.birth_year ?? null, spouseBirthYear: plan.spouse_birth_year ?? null },
-  );
   const pension = estimatePension(
     {
       retireYear,
@@ -1141,6 +1136,22 @@ function buildProjectionRows(householdId: string, d: RecomputeInputs) {
       high3MonthlyCents: plan.high3_monthly_cents,
       sbpEnabled: !!plan.sbp_enabled,
       sbpPct: Number(plan.sbp_pct ?? 6.5),
+    },
+  );
+  // With an earnings record saved, Social Security is worked out from it;
+  // a GS career becomes the pension it pays.
+  const lines = applyFers(
+    applySsRecord(typedLines, toSsRecord(d.ss), {
+      birthYear: plan.birth_year ?? null,
+      spouseBirthYear: plan.spouse_birth_year ?? null,
+      spouseClaimAge: plan.spouse_ss_claim_age ?? null,
+      thisYear,
+    }),
+    {
+      birthYear: plan.birth_year ?? null,
+      spouseBirthYear: plan.spouse_birth_year ?? null,
+      // A waived retired pay brings the active-duty years into the GS pension.
+      militaryMonths: pensionServiceMonths(pension),
     },
   );
   const inflationPct = Number(plan.inflation_pct ?? 2.5);
@@ -1246,7 +1257,10 @@ function buildProjectionRows(householdId: string, d: RecomputeInputs) {
       row.year === thisYear ? Math.round((row.work_income_cents ?? row.income_cents) * (1 - retiredShare)) : 0;
     // Income is gross: taxes are budgeted as spending.
     const yearIncome = incomeForYear(row.year, pension, retireYear, lines, 0, cola, { thisYear, birthYear: plan.birth_year ?? null });
-    const pensionYearly = (yearIncome.parts.find((p) => p.kind === "pension")?.monthlyAfterTaxCents ?? 0) * 12;
+    // Retired pay itself — not a kept SBP's cost after a waiver, which is
+    // its own "pension" part (lib/retirement incomeForYear).
+    const retiredPay = yearIncome.parts.find((p) => p.kind === "pension" && p.name === "Military retired pay");
+    const pensionYearly = retiredPay ? retiredPay.monthlyAfterTaxCents * (retiredPay.months ?? 12) : 0;
     // This year's typed pay already is the pay, so a Pay line isn't added on top.
     const payThisYear =
       row.year === thisYear
@@ -1264,7 +1278,7 @@ function buildProjectionRows(householdId: string, d: RecomputeInputs) {
     for (const p of yearIncome.parts) {
       if (row.year === thisYear && p.kind === "pay") continue;
       const cents =
-        p.kind === "pension"
+        p === retiredPay
           ? pensionYearly - Math.round(pensionYearly * (1 - retiredShare))
           : p.monthlyAfterTaxCents * (p.months ?? 12);
       if (cents) incomeParts.push({ name: p.name, cents });

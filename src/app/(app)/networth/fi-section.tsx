@@ -13,6 +13,8 @@ import {
   firstPensionColaYear,
   lineColaBase,
   estimatePension,
+  pensionColaGrowth,
+  pensionServiceMonths,
   high3FromBasePay,
   high3Window,
   incomeForYear,
@@ -298,9 +300,15 @@ export function FiSection({
           spouseClaimAge: plan.spouseSsClaimAge,
           thisYear,
         }),
-        { birthYear: plan.birthYear, spouseBirthYear: plan.spouseBirthYear },
+        {
+          birthYear: plan.birthYear,
+          spouseBirthYear: plan.spouseBirthYear,
+          // A waived retired pay brings the active-duty years into the GS pension.
+          militaryMonths: pensionServiceMonths(pension),
+        },
       ),
-    [plan.incomeLines, plan.ssRecord, plan.birthYear, plan.spouseBirthYear, plan.spouseSsClaimAge, thisYear],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pension is rebuilt each render from these plan fields
+    [plan.incomeLines, plan.ssRecord, plan.birthYear, plan.spouseBirthYear, plan.spouseSsClaimAge, thisYear, plan.targetRetireYear, plan.targetRetireMonth, plan.serviceStartYear, plan.serviceStartMonth, plan.high3MonthlyCents],
   );
   // Income is gross: taxes are budgeted as spending.
   const incomeIn = (year: number) =>
@@ -1693,6 +1701,8 @@ type LineDraft = {
   owner: "self" | "spouse";
   survivorPct: "0" | "25" | "50";
   startEarly: boolean;
+  /** His own GS line: military retired pay traded so the active-duty years count. */
+  waiveMilitary: boolean;
 };
 
 /** A health or dental & vision plan row as typed. */
@@ -1801,8 +1811,7 @@ function PlanModal({
   }, [focus]);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  // Save keeps the popup open (Victor, 2026-10-16); the button says Saved for a moment instead.
-  const [justSaved, setJustSaved] = useState(false);
+  // Save keeps the popup open (Victor, 2026-10-16); the button then reads "All saved".
   // The editor lists the section headers; clicking one opens its fields
   // right under it, one at a time (Victor, 2026-10-29). Closed sections'
   // fields stay in the form, hidden, so Save still sends them.
@@ -1830,6 +1839,22 @@ function PlanModal({
   }, [openSection]);
   // Below xl the editor and the results take turns on the screen.
   const [pane, setPane] = useState<"edit" | "results">("edit");
+  // The xl section list folds to an icon strip so a 13in laptop has room
+  // for the fields (Victor, 2026-10-29). Remembered per browser.
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setNavCollapsed(localStorage.getItem("fi-plan-nav-collapsed") === "true");
+    } catch {}
+  }, []);
+  const toggleNav = () =>
+    setNavCollapsed((c) => {
+      try {
+        localStorage.setItem("fi-plan-nav-collapsed", String(!c));
+      } catch {}
+      return !c;
+    });
   // The Social Security popup's header row its toolbar portals into.
   const [ssToolbar, setSsToolbar] = useState<HTMLElement | null>(null);
 
@@ -2004,6 +2029,15 @@ function PlanModal({
       sbpPct: Number(sbpPct) || 0,
     },
   );
+  // Retired pay and its SBP in a year, with the COLAs as saved — what a
+  // waiver for the GS pension gives up.
+  const retiredPayIn = (year: number) =>
+    estimate
+      ? (() => {
+          const g = plan.cola.military ? pensionColaGrowth(plan.cola, estimate.retireYear, estimate.retireMonth, year) : 1;
+          return { gross: Math.round(estimate.grossAtRetireCents * g), sbp: Math.round(estimate.sbpAtRetireCents * g) };
+        })()
+      : null;
   // Health and dental & vision premiums running in the retirement month, a
   // month of each as typed — what the table's Spending counts. Listed in red
   // under retired pay beside SBP, since they come out of the retired pay
@@ -2067,6 +2101,7 @@ function PlanModal({
       owner: l.owner ?? "self",
       survivorPct: String(l.survivorPct ?? 0) as LineDraft["survivorPct"],
       startEarly: !!l.fersStartEarly,
+      waiveMilitary: !!l.fersWaiveMilitary,
     }));
     // Opened from a year's Add income with no Pay yet: start one at this
     // year's pay — per year, the way pay is thought of — ending when you stop
@@ -2089,6 +2124,7 @@ function PlanModal({
         owner: "self",
         survivorPct: "0",
         startEarly: false,
+        waiveMilitary: false,
       });
     }
     return byLineDates(saved, thisYear);
@@ -2309,6 +2345,7 @@ function PlanModal({
         owner,
         survivorPct: "0",
         startEarly: false,
+        waiveMilitary: false,
       },
     ]);
   };
@@ -2362,6 +2399,7 @@ function PlanModal({
           owner: l.owner,
           survivorPct: l.survivorPct,
           startEarly: l.startEarly,
+          waiveMilitary: l.waiveMilitary,
         })),
       ),
     );
@@ -2472,8 +2510,6 @@ function PlanModal({
         setPreviewBusy(false);
         setPreviewError(null);
         onDraft(null);
-        setJustSaved(true);
-        window.setTimeout(() => setJustSaved(false), 2000);
       }
     });
   }
@@ -2485,18 +2521,30 @@ function PlanModal({
 
   // Outside the <form> (or in a section popup inside it), so it points at
   // the form by id.
-  // Hidden while nothing has changed; "Saved" stays a moment after a save.
-  const saveButton =
-    dirty || pending || justSaved ? (
+  // Always in the same spot so it's never hunted for (Victor, 2026-10-29):
+  // a calm "All saved" when nothing changed, a solid "Save changes" plus an
+  // "Unsaved changes" pill the moment anything is edited.
+  const saveButton = (
+    <>
       <button
         type="submit"
         form="fi-plan-form"
         disabled={pending || !dirty}
-        className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+        className={`shrink-0 rounded-md px-4 py-1.5 text-sm font-semibold transition ${
+          dirty || pending
+            ? "bg-brand text-white shadow-sm hover:bg-brand-strong"
+            : "bg-surface text-positive ring-1 ring-line"
+        }`}
       >
-        {pending ? "Saving…" : justSaved && !dirty ? "Saved" : "Save"}
+        {pending ? "Saving…" : dirty ? "Save changes" : "✓ All saved"}
       </button>
-    ) : null;
+      {dirty && !pending ? (
+        <span className="shrink-0 rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold text-foreground dark:bg-sky-900/50">
+          Unsaved changes
+        </span>
+      ) : null}
+    </>
+  );
 
   // Retired pay and the GS pensions shown in the Income list too, read-only,
   // so every income is in one list; each is edited in its own tile (Victor,
@@ -2545,6 +2593,7 @@ function PlanModal({
               high3AnnualCents: high3,
               survivorPct: Number(l.survivorPct) as 0 | 25 | 50,
               startEarly: l.startEarly,
+              militaryMonths: l.waiveMilitary && l.owner === "self" ? pensionServiceMonths(estimate) : 0,
             },
             born,
           )
@@ -2604,10 +2653,13 @@ function PlanModal({
   // and its result read without closing anything. The safe area sits on the
   // outer, non-scrolling box so the notch never covers Save or Close.
   // m-0: the page's space-y would otherwise leave a strip open at the bottom.
+  // Type: Geist at 400 with the app's grayscale smoothing read thin and
+  // "skeleton" on a Mac (Victor, 2026-10-29) — so this editor uses the
+  // system smoothing, a 450 body weight, and medium-weight typed figures.
   return (
     <div
       onClick={(event) => event.stopPropagation()}
-      className="fixed inset-0 z-50 m-0 flex flex-col bg-background pt-[max(env(safe-area-inset-top),1.75rem)] sm:pt-0"
+      className="fixed inset-0 z-50 m-0 flex flex-col bg-background pt-[max(env(safe-area-inset-top),1.75rem)] font-[450] subpixel-antialiased sm:pt-0 [&_input]:font-medium [&_input]:tabular-nums [&_select]:font-medium"
     >
       <div className="shrink-0 border-b border-line bg-surface px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -2633,11 +2685,32 @@ function PlanModal({
           Below xl the list folds open in place, like before. The fields and
           the results share whatever width there is, so a 27in or a 34in
           screen both fill (Victor, 2026-10-29); the results cards sit side
-          by side once their own column is wide enough. */}
-      <div className="min-h-0 flex-1 xl:grid xl:grid-cols-[15rem_minmax(40rem,1fr)_minmax(30rem,1.5fr)]">
+          by side once their own column is wide enough. Collapsed, the freed
+          room goes to the fields first, up to the form's own 60rem. */}
+      <div
+        className={`min-h-0 flex-1 xl:grid ${
+          navCollapsed
+            ? "xl:grid-cols-[4.5rem_minmax(40rem,60rem)_minmax(35rem,1fr)]"
+            : "xl:grid-cols-[15rem_minmax(40rem,1fr)_minmax(30rem,1.5fr)]"
+        }`}
+      >
       <nav aria-label="Sections" className="hidden h-full overflow-y-auto border-r border-line px-3 py-4 xl:block">
+        <button
+          type="button"
+          onClick={toggleNav}
+          aria-label={navCollapsed ? "Show section names" : "Hide section names"}
+          aria-expanded={!navCollapsed}
+          className={`mb-2 flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-50 hover:ring-brand dark:hover:bg-sky-950/40 ${
+            navCollapsed ? "w-full justify-center" : ""
+          }`}
+        >
+          <svg viewBox="0 0 24 24" className={`h-4 w-4 transition-transform ${navCollapsed ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+          {navCollapsed ? null : "Collapse"}
+        </button>
         {navSections.map(([id, title]) => (
-          <SectionNavItem key={id} title={title} active={isOpen(id)} onClick={() => setOpenSection(id)} />
+          <SectionNavItem key={id} title={title} compact={navCollapsed} active={isOpen(id)} onClick={() => setOpenSection(id)} />
         ))}
       </nav>
       <div className={`h-full overflow-y-auto ${pane === "results" ? "max-xl:hidden" : ""}`}>
@@ -2682,7 +2755,7 @@ function PlanModal({
             under the rates or the military section: it is the plan's own
             retirement, and a military retirement can be followed by a second
             career (Victor, 2026-10-17). */}
-        <Field center label={<>Retirement <br className="max-sm:hidden" /> Year</>}>
+        <Field center label={<>Retirement <br className="max-sm:hidden" /> year</>}>
           <input
             name="withdrawStartYear"
             inputMode="numeric"
@@ -2702,7 +2775,7 @@ function PlanModal({
         <Field center label={<>Birth <br className="max-sm:hidden" /> year</>}>
           <input name="spouseBirthYear" inputMode="numeric" defaultValue={plan.spouseBirthYear ?? ""} className={`${inputClass} sm:!w-20`} />
         </Field>
-        <Field center label={<>Retirement <br className="max-sm:hidden" /> Year</>}>
+        <Field center label={<>Retirement <br className="max-sm:hidden" /> year</>}>
           <input
             name="spouseRetireYear"
             inputMode="numeric"
@@ -2810,7 +2883,7 @@ function PlanModal({
                     treated — COLA, survivor, when Pay stops (Victor, 2026-10-16).
                     Blank shows the type's name as a hint and saves it. */}
                 <label className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
-                  <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Name</span>
+                  <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Name</span>
                   <input
                     value={l.name}
                     onChange={(e) => updateLine(l.key, { name: e.target.value })}
@@ -2821,7 +2894,7 @@ function PlanModal({
                 {/* On a phone Type drops to its own row so Name isn't
                     squeezed to nothing beside it. */}
                 <label className="flex min-w-0 items-center gap-2 max-sm:order-last max-sm:basis-full">
-                  <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Type</span>
+                  <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Type</span>
                   <select
                     value={l.kind}
                     onChange={(e) => {
@@ -2897,7 +2970,7 @@ function PlanModal({
               {/* Pay-like income rises by its own raise each January; VA and
                   Social Security rise by the COLA instead. */}
               {RAISE_KINDS.includes(l.kind) ? (
-                <LineField label="Pay Increase %/yr">
+                <LineField label="Pay increase %/yr">
                   <input
                     inputMode="decimal"
                     value={l.raisePct}
@@ -2907,7 +2980,7 @@ function PlanModal({
                   />
                 </LineField>
               ) : (
-                <LineField label="Pay Increase %/yr">
+                <LineField label="Pay increase %/yr">
                   <span className="block py-1.5 text-center text-sm text-foreground">COLA</span>
                 </LineField>
               )}
@@ -2919,7 +2992,7 @@ function PlanModal({
                 <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
                   {/* Says what it's for: it read as if it should follow the
                       start year, which only moves the amount (Victor, 2026-10-23). */}
-                  <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Full benefit at 67 (PIA)</span>
+                  <span className="max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Full benefit at 67 (PIA)</span>
                   <span className="text-sm font-semibold tabular-nums" style={{ color: "var(--viz-income)" }}>
                     {formatMoneyWhole(fromRecord(l)!.pia, currency)}/mo
                   </span>
@@ -2927,7 +3000,7 @@ function PlanModal({
                 </p>
               ) : l.kind === "social_security" ? (
                 <label className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-                  <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Full retirement benefit (PIA)</span>
+                  <span className="max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Full retirement benefit (PIA)</span>
                   <span className="flex items-center gap-1">
                     <input
                       inputMode="decimal"
@@ -3008,7 +3081,7 @@ function PlanModal({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-6 lg:grid-cols-[repeat(7,auto)]">
             {/* The accounts button sits right after the title (Victor, 2026-10-25). */}
             <div className="col-span-full flex flex-wrap items-center justify-center gap-x-3 gap-y-1 lg:col-span-6 lg:col-start-2">
-              <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
+              <span className="max-sm:text-[12px] sm:text-sm font-semibold text-foreground">
                 Rate of return by category
               </span>
               <button
@@ -3025,7 +3098,7 @@ function PlanModal({
               </button>
             </div>
             <label className="order-last min-w-0 self-start lg:order-none lg:col-start-1 lg:row-start-2 lg:border-r-2 lg:border-sky-300 lg:pr-2 dark:lg:border-sky-900">
-              <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
+              <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-semibold text-foreground">
                 Spending<br />inflation
               </span>
               <PctBox value={inflation} textClassName="text-sm font-bold">
@@ -3054,7 +3127,7 @@ function PlanModal({
               const [first, ...rest] = (kind === "cash" ? "Savings APY" : GROUP_LABEL[kind]).split(" ");
               return (
                 <div key={kind} className="min-w-0 self-start lg:row-start-2">
-                  <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
+                  <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-semibold text-foreground">
                     {rest.length > 0 ? <>{first}<br />{rest.join(" ")}</> : <><br />{first}</>}
                   </span>
                   <PctBox value={kind === "cash" ? cashDefault : groupDrafts[kind].returnPct} placeholder={kind === "cash" ? "" : investDefault} textClassName="text-sm font-bold">
@@ -3093,7 +3166,7 @@ function PlanModal({
                 const names = groupAccountNames(plan.accountGroups.slots, (x) => x.group === kind);
                 return (
                   <div key={kind} className="grid gap-x-3 px-3 py-1.5 sm:grid-cols-[15rem_1fr]">
-                    <dt className="max-sm:text-[12px] sm:text-sm sm:text-right sm:whitespace-nowrap font-bold uppercase tracking-wide text-foreground">
+                    <dt className="max-sm:text-[12px] sm:text-sm sm:text-right sm:whitespace-nowrap font-semibold text-foreground">
                       {kind === "cash" ? "Savings APY" : GROUP_LABEL[kind]}:
                     </dt>
                     <dd className="text-xs leading-snug text-foreground sm:text-sm">
@@ -3110,7 +3183,7 @@ function PlanModal({
 
         <SectionHead title="Military retirement income" open={isOpen("military")} onToggle={() => toggleSection("military")} />
         <SectionPopup open={isOpen("military")} title="Military retirement income">
-        <Field label="Month & Year expected to retire" hint="Active-duty pay stops and retired pay starts that month.">
+        <Field label="Month & year expected to retire" hint="Active-duty pay stops and retired pay starts that month.">
           <MonthYear
             monthName="targetRetireMonth"
             month={retireMonth}
@@ -3122,7 +3195,7 @@ function PlanModal({
           />
         </Field>
         <Field
-          label="Month & Year service started"
+          label="Month & year service started"
           hint={
             estimate
               ? `${estimate.yearsOfService} years${estimate.extraMonths ? ` ${estimate.extraMonths} month${estimate.extraMonths === 1 ? "" : "s"}` : ""} of service × 2.5% = ${estimate.multiplierPct}% of High-3.`
@@ -3207,7 +3280,7 @@ function PlanModal({
         {/* Not a Field: a checkbox and two dropdowns are too wide to sit
             beside a note on a phone, so the note goes under them. */}
         <div>
-          <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
+          <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-semibold text-foreground">
             VGLI (Veterans&rsquo; Group Life Insurance)
           </span>
           <span className="flex flex-wrap items-center gap-2">
@@ -3324,6 +3397,8 @@ function PlanModal({
                   birthYear={toYear(birthYear)}
                   spouseBirthYear={plan.spouseBirthYear}
                   hasMilitaryRetirement={hasMilitaryRetirement}
+                  militaryMonths={pensionServiceMonths(estimate)}
+                  retiredPayIn={retiredPayIn}
                   ssKnown={lines.some((x) => x.kind === "social_security" && (!!fromRecord(x) || !!x.pia.trim()))}
                   currency={currency}
                 />
@@ -3382,7 +3457,7 @@ function PlanModal({
             child to turn it on. */}
         {childDrafts.length > 0 ? (
           <div className="space-y-1.5 sm:col-span-2">
-            <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">In college after high school</span>
+            <span className="block max-sm:text-[12px] sm:text-sm font-semibold text-foreground">In college after high school</span>
             <div className="flex flex-wrap gap-2">
               {childDrafts.map((c, i) => (
                 <button
@@ -3447,7 +3522,7 @@ function PlanModal({
             {/* Two columns on desktop: which incomes rise and any year the COLA
                 differs on the left; the yearly rate on the right. */}
             <div className="space-y-2">
-            <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Rises with COLA</span>
+            <span className="block max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Rises with COLA</span>
             {firstCola != null ? (
               <div className="space-y-0.5 text-xs sm:text-sm text-foreground">
                 {colaNotes.map((n) => (
@@ -3464,7 +3539,7 @@ function PlanModal({
               </div>
             ) : null}
             <div className="pt-2">
-            <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">COLA changes by year (all incomes)</span>
+            <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-semibold text-foreground">COLA changes by year (all incomes)</span>
             {firstCola == null ? (
               <p className="text-xs sm:text-sm text-foreground">No income set to rise.</p>
             ) : (
@@ -3564,7 +3639,7 @@ function PlanModal({
         {/* Dental & vision: a list like the health plans, each row FEDVIP or
             private. TFL covers neither, so these run for life by default. */}
         <div className="space-y-2 sm:col-span-2">
-          <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Dental &amp; vision</span>
+          <span className="block max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Dental &amp; vision</span>
           {dentalPlans.filter((r) => !planEnded(r)).length === 0 ? (
             <p className="text-xs sm:text-sm text-foreground">No dental or vision premium.</p>
           ) : null}
@@ -3651,7 +3726,7 @@ function PlanModal({
               <div key={r.key} className="space-y-2 rounded-lg bg-surface p-2 ring-1 ring-line">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                   <label className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
-                    <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Name</span>
+                    <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Name</span>
                     <input value={r.name} onChange={(e) => updateRental(r.key, { name: e.target.value })} className={`${lineInput} sm:w-56`} />
                   </label>
                   <span className="text-xs sm:text-sm text-foreground max-sm:basis-full max-sm:text-center">
@@ -3740,7 +3815,7 @@ function PlanModal({
           items={[
             ["Only income", "Future years use only these lines and retired pay. No lines: $0."],
             ["Pay (work)", "Your pay from work. Blank end: never stops."],
-            ["Pay Increase %/yr", "Added every January after the start year, on top of last year. VA and Social Security use the COLA."],
+            ["Pay increase %/yr", "Added every January after the start year, on top of last year. VA and Social Security use the COLA."],
             ["Rises with COLA", "VA and Social Security. Other lines stay the same."],
             ["Amount changes", "End the old line, then + Add income with the new amount from the month after."],
           ]}
@@ -3907,15 +3982,27 @@ function SectionHead({
 
 /** A section in the editor's side list (xl and up): its icon and title; the
  *  open one is raised on a card. */
-function SectionNavItem({ title, active, onClick }: { title: string; active: boolean; onClick: () => void }) {
+function SectionNavItem({
+  title,
+  active,
+  compact = false,
+  onClick,
+}: {
+  title: string;
+  active: boolean;
+  /** Icon only — the collapsed strip. */
+  compact?: boolean;
+  onClick: () => void;
+}) {
   const tile = SECTION_TILE[title];
   return (
     <button
       type="button"
       onClick={onClick}
       aria-current={active ? "true" : undefined}
+      aria-label={compact ? title : undefined}
       style={{ "--tile": tile?.color ?? "var(--brand)" } as React.CSSProperties}
-      className={`mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-bold uppercase leading-snug tracking-wide ring-1 transition ${
+      className={`mb-1 flex w-full items-center gap-2.5 rounded-lg py-2 text-left ${compact ? "justify-center px-0" : "px-2.5"} text-sm font-bold uppercase leading-snug tracking-wide ring-1 transition ${
         active ? "bg-surface shadow-sm ring-[var(--tile)]" : "ring-transparent hover:bg-surface hover:ring-line"
       }`}
     >
@@ -3928,7 +4015,7 @@ function SectionNavItem({ title, active, onClick }: { title: string; active: boo
           {tile?.icon}
         </svg>
       </span>
-      {title}
+      {compact ? null : title}
     </button>
   );
 }
@@ -4016,7 +4103,7 @@ const lineInput =
 function LineField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
   return (
     <label className={`block min-w-0 ${className ?? ""}`}>
-      <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">{label}</span>
+      <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-semibold text-foreground">{label}</span>
       {children}
     </label>
   );
@@ -4050,11 +4137,11 @@ function LinkedIncomeCard({
     <div className="space-y-2 rounded-lg bg-surface p-2 ring-1 ring-line">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex min-w-0 flex-1 items-center gap-2 opacity-60 sm:flex-none">
-          <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Name</span>
+          <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Name</span>
           <span className={`${box} min-w-0 flex-1 truncate sm:w-56 sm:flex-none`}>{name}</span>
         </div>
         <div className="flex min-w-0 items-center gap-2 opacity-60 max-sm:order-last max-sm:basis-full">
-          <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Type</span>
+          <span className="shrink-0 max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Type</span>
           <span className={`${box} min-w-0 flex-1 truncate sm:w-44 sm:flex-none`}>{type}</span>
         </div>
         <button
@@ -4087,7 +4174,7 @@ function LinkedIncomeCard({
             <span className={`${box} min-w-0 flex-1 text-center`}>Never</span>
           </span>
         </LinkedField>
-        <LinkedField label="Pay Increase %/yr">
+        <LinkedField label="Pay increase %/yr">
           <span className="block py-1.5 text-center text-sm text-foreground">{raise}</span>
         </LinkedField>
       </div>
@@ -4100,7 +4187,7 @@ function LinkedIncomeCard({
 function LinkedField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
   return (
     <div className={`block min-w-0 ${className ?? ""}`}>
-      <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">{label}</span>
+      <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-semibold text-foreground">{label}</span>
       {children}
     </div>
   );
@@ -4182,6 +4269,8 @@ function FersLineFields({
   birthYear,
   spouseBirthYear,
   hasMilitaryRetirement,
+  militaryMonths,
+  retiredPayIn,
   ssKnown,
   currency,
 }: {
@@ -4190,6 +4279,10 @@ function FersLineFields({
   birthYear: number | null;
   spouseBirthYear: number | null;
   hasMilitaryRetirement: boolean;
+  /** Active-duty months behind his retired pay — what the waiver adds. */
+  militaryMonths: number;
+  /** Gross retired pay and SBP per month in a year, with COLAs. */
+  retiredPayIn: (year: number) => { gross: number; sbp: number } | null;
   /** His Social Security has a full benefit (PIA): the supplement can be worked out. */
   ssKnown: boolean;
   currency: string;
@@ -4199,22 +4292,25 @@ function FersLineFields({
   const start = yr(line.startYear);
   const end = yr(line.endYear);
   const high3 = Math.max(0, displayToCents(line.monthly || "0"));
-  const est: FersEstimate | null =
+  // Only his own line can trade military retired pay.
+  const canWaive = line.owner === "self" && hasMilitaryRetirement && militaryMonths > 0;
+  const inputs =
     start != null && end != null
-      ? estimateFers(
-          {
-            owner: line.owner,
-            gsStartYear: start,
-            gsStartMonth: Number(line.startMonth) || null,
-            gsEndYear: end,
-            gsEndMonth: Number(line.endMonth) || null,
-            high3AnnualCents: high3,
-            survivorPct: Number(line.survivorPct) as 0 | 25 | 50,
-            startEarly: line.startEarly,
-          },
-          born,
-        )
+      ? {
+          owner: line.owner,
+          gsStartYear: start,
+          gsStartMonth: Number(line.startMonth) || null,
+          gsEndYear: end,
+          gsEndMonth: Number(line.endMonth) || null,
+          high3AnnualCents: high3,
+          survivorPct: Number(line.survivorPct) as 0 | 25 | 50,
+          startEarly: line.startEarly,
+          militaryMonths: canWaive && line.waiveMilitary ? militaryMonths : 0,
+        }
       : null;
+  const est: FersEstimate | null = inputs ? estimateFers(inputs, born) : null;
+  // The same career without the trade, to show what it adds.
+  const plain: FersEstimate | null = inputs && inputs.militaryMonths ? estimateFers({ ...inputs, militaryMonths: 0 }, born) : null;
   const $ = (c: number) => formatMoneyWhole(c, currency);
   const whose = line.owner === "spouse" ? "your spouse's" : "your";
   const result = (() => {
@@ -4274,7 +4370,7 @@ function FersLineFields({
       </div>
       {est?.canStartEarly ? (
         <label className="flex flex-wrap items-center justify-center gap-2">
-          <span className="max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Pension starts</span>
+          <span className="max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Pension starts</span>
           <select
             value={line.startEarly ? "early" : "62"}
             onChange={(e) => onChange({ startEarly: e.target.value === "early" })}
@@ -4337,29 +4433,100 @@ function FersLineFields({
                 </span>
               </div>
             ) : null}
-            {line.owner === "self" && hasMilitaryRetirement ? (
-              <p>Military years not counted: you keep your military retired pay.</p>
-            ) : null}
           </>
         ) : null}
       </div>
+      {/* Trade retired pay for the military years (Victor, 2026-10-29).
+          OPM: the waiver starts the day the GS pension does, and the
+          military deposit is paid before leaving GS. */}
+      {canWaive ? (
+        <div className="space-y-1 rounded-lg px-3 py-2 text-center text-xs ring-1 ring-line sm:text-sm">
+          <label className="inline-flex cursor-pointer items-center gap-2 font-semibold">
+            <input
+              type="checkbox"
+              checked={line.waiveMilitary}
+              onChange={(e) => onChange({ waiveMilitary: e.target.checked })}
+              className="size-4 cursor-pointer accent-[var(--brand)]"
+            />
+            Trade retired pay for military years
+          </label>
+          {!line.waiveMilitary ? (
+            <p>Off: GS years only, and you keep your military retired pay.</p>
+          ) : est?.path ? (
+            (() => {
+              const pay = retiredPayIn(est.startYear);
+              const gain = est.annualCents / 12 - (plain?.path ? plain.annualCents / 12 : 0);
+              const net = pay ? gain - pay.gross : null;
+              return (
+                <>
+                  <p>
+                    From {MONTHS[est.startMonth - 1]} {est.startYear}: GS pension{" "}
+                    <span className="font-semibold" style={{ color: "var(--positive)" }}>+{$(gain)}/mo</span>
+                    {pay ? (
+                      <>
+                        {" "}· retired pay <span className="font-semibold text-negative">−{$(pay.gross)}/mo</span> · net{" "}
+                        <span className={`font-semibold ${net! < 0 ? "text-negative" : ""}`} style={net! >= 0 ? { color: "var(--positive)" } : undefined}>
+                          {net! < 0 ? "−" : "+"}
+                          {$(Math.abs(net!))}/mo
+                        </span>
+                      </>
+                    ) : null}
+                  </p>
+                  <p>Military deposit (3% of basic pay plus interest) due before leaving GS — not in the plan.</p>
+                  {pay && pay.sbp > 0 && line.survivorPct !== "0" ? (
+                    <p className="font-semibold text-negative">Pick one survivor plan: keep SBP and set Survivor to None, or keep this one and turn SBP off.</p>
+                  ) : pay && pay.sbp > 0 ? (
+                    <p>SBP stays: its {$(pay.sbp)}/mo is then paid to DFAS directly.</p>
+                  ) : null}
+                </>
+              );
+            })()
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** One "Label: text" line of the GS pension guide. */
-function FersPoint({ label, children }: { label: string; children: React.ReactNode }) {
+/** One rule of the GS pension guide: a short bold title, a line or two
+ *  under it, and the OPM page that explains it, right beside it. */
+function FersPoint({ label, href, children }: { label: string; href?: string; children: React.ReactNode }) {
   return (
-    <p>
-      <span className="font-semibold">{label}:</span> {children}
-    </p>
+    <li className="rounded-lg bg-surface px-4 py-3 ring-1 ring-line">
+      <p className="font-semibold">{label}</p>
+      <div className="mt-0.5 text-sm leading-relaxed">{children}</div>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1.5 inline-block text-sm font-semibold underline underline-offset-2"
+          style={{ color: "var(--viz-savings)" }}
+        >
+          Read on OPM ↗
+        </a>
+      ) : null}
+    </li>
   );
 }
 
-/** How the GS pension works, shown at the top of its popup with OPM's pages
- *  — worded by status: someone retiring from the military with retired pay
+const OPM = {
+  eligibility: "https://www.opm.gov/retirement-center/fers-information/eligibility/",
+  computation: "https://www.opm.gov/retirement-center/fers-information/computation/",
+  militaryPay: "https://www.opm.gov/retirement-center/fers-information/military-retired-pay/",
+  buyback: "https://www.opm.gov/retirement-center/fers-information/service-credit/",
+  health: "https://www.opm.gov/healthcare-insurance/life-events/retirement/im-thinking-about-retiring/tabs/health/",
+  survivor: "https://www.opm.gov/retirement-center/survivor-benefits/",
+  quickGuide: "https://www.opm.gov/retirement-center/apply/quick-guide/",
+};
+
+/** How the GS pension works, shown under its fields with OPM's pages —
+ *  worded by status: someone retiring from the military with retired pay
  *  can't count those years, and a full GS career follows the usual rules
- *  (Victor, 2026-10-25). Rules from OPM, checked 2026-10-25. */
+ *  (Victor, 2026-10-25). Rules from OPM, checked 2026-10-25.
+ *  Laid out to be skimmed (Victor, 2026-10-29): three key numbers first,
+ *  then one situation at a time behind a switch, each rule a short card
+ *  with its own OPM link. */
 function FersGuide({
   hasMilitaryRetirement,
   birthYear,
@@ -4370,75 +4537,113 @@ function FersGuide({
   spouseBirthYear: number | null;
 }) {
   const mraOf = (y: number | null) => (y != null ? mraLabel(fersMraMonths(y)) : "57");
-  const links: [string, string][] = [
-    ["Who qualifies", "https://www.opm.gov/retirement-center/fers-information/eligibility/"],
-    ["How it's worked out", "https://www.opm.gov/retirement-center/fers-information/computation/"],
-    ["Military retired pay & FERS", "https://www.opm.gov/retirement-center/fers-information/military-retired-pay/"],
-    ["Buying back military time", "https://www.opm.gov/retirement-center/fers-information/service-credit/"],
-    ["Health insurance in retirement", "https://www.opm.gov/healthcare-insurance/life-events/retirement/im-thinking-about-retiring/tabs/health/"],
-    ["Survivor benefits", "https://www.opm.gov/retirement-center/survivor-benefits/"],
-    ["Retirement quick guide", "https://www.opm.gov/retirement-center/apply/quick-guide/"],
-  ];
   // Whoever in the household works GS — either person, with or without a
   // military past (Victor, 2026-10-26) — so the cases are by situation, not
   // by "you" and "your spouse". MRA shown for the household's birth years.
   const mras = [...new Set([birthYear, spouseBirthYear].filter((y): y is number => y != null).map(mraOf))];
   const mra = mras.length ? mras.join(" or ") : "57";
-  const careerPoints = (
-    <>
-      <FersPoint label="Full pension">at 62 with 5 GS years, at 60 with 20, or at {mra} with 30.</FersPoint>
-      <FersPoint label="Early">with 10–29 years, start at {mra}, cut 5% for each year under 62.</FersPoint>
-      <FersPoint label="Supplement">leaving before 62 with no cut adds a FERS supplement until 62 — about Social Security at 62 × GS years ÷ 40.</FersPoint>
-    </>
-  );
-  const career = (
-    <div className="space-y-2">
-      <p className="font-bold uppercase tracking-wide">A GS career — no military retirement:</p>
-      {careerPoints}
-      <FersPoint label="Military time">active-duty years without a military retirement can be bought back (3% of basic pay plus interest) before leaving GS; then they count.</FersPoint>
-    </div>
-  );
-  const military = (
-    <div className="space-y-2">
-      <p className="font-bold uppercase tracking-wide">GS after a military retirement:</p>
-      <FersPoint label="Military years">
-        don&rsquo;t count while getting military retired pay. Counting them means giving up retired pay for life — so most
-        keep retired pay and earn a GS pension on GS years only.
-      </FersPoint>
-      <FersPoint label="GS years needed">5 earns a pension at 62. With 10+, start at {mra}, cut 5% a year under 62.</FersPoint>
-      <FersPoint label="Health insurance">be on FEHB for the 5 years before retiring — TRICARE years count, but be in an FEHB plan on the retirement date.</FersPoint>
-    </div>
-  );
+  // The household's own situation opens first.
+  const [tab, setTab] = useState<"military" | "career">(hasMilitaryRetirement ? "military" : "career");
+
+  const facts: { big: string; small: string; href: string }[] = [
+    { big: "1% per GS year", small: "of your best 3-year average salary — 1.1% if you leave at 62+ with 20+ years", href: OPM.computation },
+    { big: "Raises from 62", small: "a COLA each January, a little under Social Security's when inflation tops 2%", href: OPM.computation },
+    { big: "Survivor costs 5–10%", small: "leaving a spouse 50% costs 10% of the pension; 25% costs 5%", href: OPM.survivor },
+  ];
+
+  const tabClass = (on: boolean) =>
+    `rounded-full px-3.5 py-1.5 text-xs font-semibold ring-1 transition sm:text-sm ${
+      on ? "bg-sky-100 text-foreground ring-sky-400 dark:bg-sky-900/50" : "bg-surface text-foreground ring-line hover:ring-brand"
+    }`;
+
   return (
-    <div className="space-y-3 rounded-xl p-4 ring-1 ring-line sm:col-span-2">
-      <p className="text-center text-base font-bold uppercase tracking-wide underline underline-offset-4 sm:text-lg">How the GS pension works</p>
-      {/* The household's own situation first. */}
-      <div className="grid gap-4 text-sm leading-relaxed md:grid-cols-2">
-        {hasMilitaryRetirement ? military : career}
-        {hasMilitaryRetirement ? career : military}
+    <section className="space-y-4 rounded-xl bg-sky-50/60 p-4 ring-1 ring-line sm:col-span-2 sm:p-5 dark:bg-sky-950/20">
+      {/* Title and the situation switch on one row, the switch right
+          above the cards it changes (Victor, 2026-10-29). */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <h4 className="text-base font-bold sm:text-lg">How the GS pension works</h4>
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Situation">
+          <button type="button" role="tab" aria-selected={tab === "military"} onClick={() => setTab("military")} className={tabClass(tab === "military")}>
+            GS after a military retirement
+          </button>
+          <button type="button" role="tab" aria-selected={tab === "career"} onClick={() => setTab("career")} className={tabClass(tab === "career")}>
+            GS career only (no military service)
+          </button>
+        </div>
       </div>
-      <div className="space-y-2 border-t border-line pt-3 text-sm leading-relaxed">
-        <p className="font-bold uppercase tracking-wide">Everyone:</p>
-        <FersPoint label="How much">1% of the best 3-year average salary for each GS year — 1.1% when leaving at 62+ with 20+ years.</FersPoint>
-        <FersPoint label="Raises">a COLA each January from 62, a little less than Social Security&rsquo;s when inflation is over 2%.</FersPoint>
-        <FersPoint label="Survivor">leaving a spouse 50% costs 10% of the pension; 25% costs 5%.</FersPoint>
-      </div>
-      {/* OPM's own pages, right here rather than behind a link. */}
-      <div className="flex flex-wrap gap-2 border-t border-line pt-3">
-        {links.map(([label, href]) => (
-          <a
-            key={href}
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-line transition hover:ring-brand sm:text-sm"
-            style={{ color: "var(--viz-savings)" }}
-          >
-            {label} ↗
-          </a>
+      {tab === "military" ? (
+        <ul className="grid grid-cols-1 gap-2 md:grid-cols-3">
+          {/* OPM, checked 2026-10-29: counting them takes the waiver AND the
+              deposit; reserve (ch. 1223) and combat-disability retired pay
+              are the exceptions that need no waiver. */}
+          <FersPoint label="Military years: keep or trade" href={OPM.militaryPay}>
+            <ul className="space-y-1">
+              <li>
+                <span className="font-semibold">Keep retired pay:</span> GS years only. Most do this.
+              </li>
+              <li>
+                <span className="font-semibold">Trade it:</span> waive retired pay and military years join the GS pension. Pay the deposit first.
+              </li>
+              <li>
+                <span className="font-semibold">Reserve or combat disability:</span> military years count, no trade.
+              </li>
+            </ul>
+          </FersPoint>
+          <FersPoint label="5 GS years earns a pension" href={OPM.eligibility}>
+            Starts at 62. With 10+ years, start at {mra}, cut 5% for each year under 62.
+          </FersPoint>
+          <FersPoint label="Keep FEHB 5 years" href={OPM.health}>
+            Be on FEHB the 5 years before retiring. TRICARE years count, but be in an FEHB plan on the retirement date.
+          </FersPoint>
+        </ul>
+      ) : (
+        <ul className="grid grid-cols-1 gap-2 md:grid-cols-2">
+          <FersPoint label="Full pension" href={OPM.eligibility}>
+            At 62 with 5 GS years, at 60 with 20, or at {mra} with 30.
+          </FersPoint>
+          <FersPoint label="Early pension" href={OPM.eligibility}>
+            With 10–29 years, start at {mra}, cut 5% for each year under 62.
+          </FersPoint>
+          <FersPoint label="Supplement until 62" href={OPM.computation}>
+            Leaving before 62 with no cut adds about Social Security at 62 × GS years ÷ 40.
+          </FersPoint>
+          <FersPoint label="Buy back military time" href={OPM.buyback}>
+            <span className="font-semibold">Only if you served.</span> Active-duty years without a military retirement count once bought back — 3% of basic pay plus interest, before leaving GS.
+          </FersPoint>
+        </ul>
+      )}
+
+      {/* The three numbers that hold in either situation. */}
+      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {facts.map((f) => (
+          <li key={f.big} className="flex flex-col rounded-lg bg-surface px-4 py-3 ring-1 ring-line">
+            <p className="text-base font-bold" style={{ color: "var(--viz-savings)" }}>
+              {f.big}
+            </p>
+            <p className="mt-0.5 flex-1 text-sm leading-relaxed">{f.small}</p>
+            <a
+              href={f.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1.5 text-sm font-semibold underline underline-offset-2"
+              style={{ color: "var(--viz-savings)" }}
+            >
+              Read on OPM ↗
+            </a>
+          </li>
         ))}
-      </div>
-    </div>
+      </ul>
+
+      <a
+        href={OPM.quickGuide}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-block text-sm font-semibold underline underline-offset-2"
+        style={{ color: "var(--viz-savings)" }}
+      >
+        OPM retirement quick guide ↗
+      </a>
+    </section>
   );
 }
 
@@ -4792,7 +4997,7 @@ function Field({
       id={id}
       className={`block ${className ?? ""} ${highlight ? "-m-2 rounded-md bg-sky-50 p-2 ring-2 ring-sky-400 dark:bg-sky-950/40" : ""}`}
     >
-      <span className={`mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground ${center ? "text-center" : ""}`}>{label}</span>
+      <span className={`mb-1 block max-sm:text-[12px] sm:text-sm font-semibold text-foreground ${center ? "text-center" : ""}`}>{label}</span>
       <span className={center ? "flex justify-center" : "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3"}>
         {children}
         {hint ? <span className="text-xs leading-snug text-foreground sm:text-sm">{hint}</span> : null}

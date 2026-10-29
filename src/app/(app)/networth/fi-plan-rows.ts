@@ -80,5 +80,6 @@ export function toIncomeLine(l: Record<string, any>): IncomeLine { // eslint-dis
     owner: l.owner === "spouse" ? "spouse" : "self",
     survivorPct: [25, 50].includes(Number(l.survivor_pct)) ? (Number(l.survivor_pct) as 25 | 50) : 0,
     fersStartEarly: !!l.fers_start_early,
+    fersWaiveMilitary: !!l.fers_waive_military,
   };
 }

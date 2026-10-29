@@ -209,7 +209,7 @@ export default async function NetworthPage() {
     // Retirement income that switches on and off by year (VA, SS, a job…).
     supabase
       .from("retirement_income_lines")
-      .select("id, name, kind, monthly_cents, start_year, start_month, end_year, end_month, raise_pct, annual_cents, pia_cents, taxable, owner, survivor_pct, fers_start_early")
+      .select("id, name, kind, monthly_cents, start_year, start_month, end_year, end_month, raise_pct, annual_cents, pia_cents, taxable, owner, survivor_pct, fers_start_early, fers_waive_military")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("created_at"),

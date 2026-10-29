@@ -27,12 +27,19 @@ export type FersInputs = {
   survivorPct: 0 | 25 | 50;
   /** 10–29 years: take the reduced annuity at the MRA instead of waiting for 62. */
   startEarly: boolean;
+  /** Military retired pay waived (Victor, 2026-10-29): these active-duty
+   *  months join the GS service — 0 when not waived. */
+  militaryMonths: number;
 };
 
 export type FersEstimate = {
-  /** Whole years and months of GS service. */
+  /** Whole years and months of service: GS, plus military when waived. */
   serviceYears: number;
   serviceMonths: number;
+  /** Whole GS years alone — what the supplement counts. */
+  gsYears: number;
+  /** Active-duty months added by the waiver (0 when not waived). */
+  militaryMonths: number;
   /** Age (whole years) on leaving the GS job. */
   ageAtSeparation: number;
   /** The owner's minimum retirement age, in months. */
@@ -103,7 +110,10 @@ export function estimateFers(inp: FersInputs, birthYear: number | null): FersEst
   const start = at(inp.gsStartYear, inp.gsStartMonth, 1);
   const end = at(inp.gsEndYear, inp.gsEndMonth, 12);
   if (end < start) return null;
-  const service = end - start + 1;
+  // Waived military years count for both eligibility and the amount
+  // (OPM, once the deposit is paid); the supplement counts GS years only.
+  const gsService = end - start + 1;
+  const service = gsService + Math.max(0, inp.militaryMonths);
   const birth = birthYear * 12;
   const ageAt = (m: number) => m - birth;
   const sep = end + 1; // the month after the last one worked
@@ -148,6 +158,8 @@ export function estimateFers(inp: FersInputs, birthYear: number | null): FersEst
   return {
     serviceYears: Math.floor(service / 12),
     serviceMonths: service % 12,
+    gsYears: Math.floor(gsService / 12),
+    militaryMonths: Math.max(0, inp.militaryMonths),
     ageAtSeparation: Math.floor(age / 12),
     mraMonths: mra,
     path,
@@ -176,8 +188,10 @@ export function fersColaGrowth(cola: ColaPlan, fromYear: number, year: number): 
   return f;
 }
 
-/** A FERS line's GS career, read off the line as stored. */
-export function fersInputsOf(line: IncomeLine): FersInputs | null {
+/** A FERS line's GS career, read off the line as stored. `militaryMonths`
+ *  is the plan's active-duty service — counted only on his own line with
+ *  the waiver ticked. */
+export function fersInputsOf(line: IncomeLine, militaryMonths = 0): FersInputs | null {
   if (line.kind !== "fers" || line.startYear == null || line.endYear == null) return null;
   return {
     owner: line.owner ?? "self",
@@ -188,6 +202,7 @@ export function fersInputsOf(line: IncomeLine): FersInputs | null {
     high3AnnualCents: line.annualCents ?? Math.round(line.monthlyCents * 12),
     survivorPct: line.survivorPct ?? 0,
     startEarly: !!line.fersStartEarly,
+    militaryMonths: line.fersWaiveMilitary && line.owner !== "spouse" ? militaryMonths : 0,
   };
 }
 
@@ -205,7 +220,7 @@ const SS_AT_62_SHARE = 0.7;
  */
 export function applyFers(
   lines: IncomeLine[],
-  people: { birthYear: number | null; spouseBirthYear: number | null },
+  people: { birthYear: number | null; spouseBirthYear: number | null; militaryMonths?: number },
 ): IncomeLine[] {
   const out: IncomeLine[] = [];
   for (const line of lines) {
@@ -213,7 +228,7 @@ export function applyFers(
       out.push(line);
       continue;
     }
-    const inp = fersInputsOf(line);
+    const inp = fersInputsOf(line, people.militaryMonths ?? 0);
     const born = inp?.owner === "spouse" ? people.spouseBirthYear : people.birthYear;
     const est = inp ? estimateFers(inp, born) : null;
     if (!inp || !est || !est.path || born == null) continue;
@@ -236,7 +251,7 @@ export function applyFers(
       const ss = lines.find((l) => l.kind === "social_security" && !l.spousal && l.piaCents);
       const ssAt62 = inp.owner === "spouse" ? (line.piaCents ?? 0) : ss?.piaCents ? ss.piaCents * SS_AT_62_SHARE : 0;
       if (ssAt62 > 0) {
-        const monthly = Math.round((ssAt62 * Math.min(est.serviceYears, 40)) / 40);
+        const monthly = Math.round((ssAt62 * Math.min(est.gsYears, 40)) / 40);
         // Paid through the month before 62.
         out.push({
           ...line,

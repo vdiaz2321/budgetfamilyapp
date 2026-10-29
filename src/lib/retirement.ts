@@ -450,6 +450,9 @@ export type IncomeLine = {
   owner?: FersOwner;
   survivorPct?: 0 | 25 | 50;
   fersStartEarly?: boolean;
+  /** FERS, his own line only: military retired pay waived so the active-duty
+   *  years count in the GS pension — retired pay stops when it starts. */
+  fersWaiveMilitary?: boolean;
   /** Set by applyFers: the annuity worked out — the line then pays it. */
   fers?: FersEstimate;
   /** Set by applyFers: the FERS supplement, flat until 62. */
@@ -694,6 +697,15 @@ function lineIn(line: IncomeLine, year: number, cola: ColaPlan, when: ColaWhen):
   return base == null ? line.monthlyCents : Math.round(line.monthlyCents * colaGrowth(cola, base, year));
 }
 
+/** The first month of a GS pension that waives military retired pay, if any. */
+export function waiverStart(lines: IncomeLine[]): { year: number; month: number } | null {
+  const w = lines.find((l) => l.fers && l.fers.militaryMonths > 0);
+  return w?.fers ? { year: w.fers.startYear, month: w.fers.startMonth } : null;
+}
+
+/** Whole months of active-duty service behind retired pay. */
+export const pensionServiceMonths = (p: PensionEstimate | null) => (p ? p.yearsOfService * 12 + p.extraMonths : 0);
+
 /** A part's money for the whole year. */
 const yearlyOf = (p: IncomePart, cents: number) => cents * (p.months ?? 12);
 
@@ -714,12 +726,30 @@ export function incomeForYear(
   const parts: IncomePart[] = [];
   if (pension && pensionStartYear != null && year >= pensionStartYear) {
     const { gross, sbp } = pensionIn(pension, year, cola);
-    parts.push({
-      name: "Military retired pay",
-      kind: "pension",
-      monthlyAfterTaxCents: Math.round((gross - sbp) * keep),
-      monthlyBeforeTaxCents: gross - sbp,
-    });
+    // Waived for the GS pension (Victor, 2026-10-29): retired pay stops the
+    // month that pension starts. Kept SBP is then paid straight to DFAS —
+    // the same cost, now out of pocket, and no longer tax-free.
+    const waiver = waiverStart(lines);
+    const paidMonths =
+      waiver == null || year < waiver.year ? 12 : year === waiver.year ? waiver.month - 1 : 0;
+    if (paidMonths > 0) {
+      parts.push({
+        name: "Military retired pay",
+        kind: "pension",
+        monthlyAfterTaxCents: Math.round((gross - sbp) * keep),
+        monthlyBeforeTaxCents: gross - sbp,
+        ...(paidMonths < 12 ? { months: paidMonths, firstMonth: 1 } : {}),
+      });
+    }
+    if (paidMonths < 12 && sbp > 0) {
+      parts.push({
+        name: "SBP cost (paid to DFAS)",
+        kind: "pension",
+        monthlyAfterTaxCents: -sbp,
+        monthlyBeforeTaxCents: -sbp,
+        ...(paidMonths > 0 ? { months: 12 - paidMonths, firstMonth: paidMonths + 1 } : {}),
+      });
+    }
   }
   for (const line of lines) {
     if (!active(year, line.startYear, line.endYear) || line.monthlyCents <= 0) continue;
