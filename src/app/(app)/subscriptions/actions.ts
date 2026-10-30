@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { unwrap } from "@/lib/supabase-result";
 import { subscriptionChargesIn } from "@/lib/planned-by-sub";
+import { currentMonthStart, nextRenewalAfter, rollRenewalForward } from "@/lib/subscription-renewal";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -74,28 +75,35 @@ async function findOrCreateBillsSubcategory(
   householdId: string,
   name: "Subscriptions" | "Irregular Bills",
 ): Promise<string> {
-  const billsCat = unwrap(
-    await supabase
-      .from("categories")
-      .select("id")
-      .eq("household_id", householdId)
-      .eq("kind", "bills")
-      .single(),
-    "categories",
-  );
-  if (!billsCat) throw new Error("Bills category not found");
-
+  // Several groups share kind "bills" (Bills, Taxes, Insurance), so find the
+  // item by name across all of them rather than assuming one Bills group —
+  // `.single()` on the group failed once Taxes and Insurance were added.
   const existing = unwrap(
     await supabase
       .from("subcategories")
-      .select("id")
+      .select("id, categories!inner(kind)")
       .eq("household_id", householdId)
-      .eq("category_id", billsCat.id)
+      .eq("categories.kind", "bills")
       .ilike("name", name)
+      .limit(1)
       .maybeSingle(),
     "subcategories",
   );
   if (existing) return existing.id;
+
+  // Not there yet: create it under the group named Bills, else the first
+  // bills-kind group.
+  const billsCats = unwrap(
+    await supabase
+      .from("categories")
+      .select("id, name")
+      .eq("household_id", householdId)
+      .eq("kind", "bills")
+      .order("sort_order"),
+    "categories",
+  );
+  const billsCat = billsCats?.find((c) => c.name.toLowerCase() === "bills") ?? billsCats?.[0];
+  if (!billsCat) throw new Error("Bills category not found");
 
   const maxRow = unwrap(
     await supabase
@@ -121,13 +129,63 @@ async function findOrCreateBillsSubcategory(
   return created.id;
 }
 
+// Before a subscription's price changes, freeze the old price into each month
+// before `beforeMonth` that it billed in and has no figure of its own. The
+// Budget page derives every month's plan from amount_cents, so without this a
+// new price rewrites history — Spotify's full price showed up in August, the
+// month it was charged the discount.
+async function freezePastPrice(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  householdId: string,
+  id: string,
+  newAmountCents: number,
+  beforeMonth: string,
+) {
+  const sub = unwrap(
+    await supabase
+      .from("subscriptions")
+      .select("amount_cents, billing_cycle, next_renewal_date, is_active, subcategory_id, created_at")
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "subscription",
+  );
+  if (!sub || sub.amount_cents === newAmountCents || !sub.subcategory_id || !sub.is_active || !sub.next_renewal_date) return;
+  const existing = unwrap(
+    await supabase
+      .from("subscription_plans")
+      .select("month")
+      .eq("household_id", householdId)
+      .eq("subscription_id", id)
+      .lt("month", beforeMonth),
+    "subscription month plans",
+  );
+  const covered = new Set((existing ?? []).map((row) => String(row.month)));
+  // From the month the sub was added, up to (not including) beforeMonth.
+  const start = new Date(`${String(sub.created_at).slice(0, 7)}-01T00:00:00Z`);
+  const snapshots: { household_id: string; subscription_id: string; month: string; planned_cents: number }[] = [];
+  for (const d = start; d.toISOString().slice(0, 10) < beforeMonth; d.setUTCMonth(d.getUTCMonth() + 1)) {
+    const first = `${d.toISOString().slice(0, 7)}-01`;
+    if (covered.has(first)) continue;
+    // Same billing rule as the Budget page.
+    if (!subscriptionChargesIn(sub, first)) continue;
+    snapshots.push({ household_id: householdId, subscription_id: id, month: first, planned_cents: sub.amount_cents });
+  }
+  if (snapshots.length > 0) {
+    unwrap(await supabase.from("subscription_plans").insert(snapshots), "saving past subscription plans");
+  }
+}
+
 export async function upsertSubscription(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "").trim() || null;
   const name = String(formData.get("name") ?? "").trim();
   const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
   const billingCycle = String(formData.get("billingCycle") ?? "monthly");
-  const nextRenewalDate = String(formData.get("nextRenewalDate") ?? "").trim() || null;
+  // A first charge typed in an earlier month (e.g. "started Aug 28") is saved
+  // as its next renewal from this month on, not left in the past.
+  const typedRenewal = String(formData.get("nextRenewalDate") ?? "").trim() || null;
+  const nextRenewalDate = typedRenewal && rollRenewalForward(typedRenewal, billingCycle);
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const isActive = formData.get("isActive") === "on";
   const isRecurring = formData.get("isRecurring") === "on";
@@ -151,6 +209,9 @@ export async function upsertSubscription(formData: FormData) {
   };
 
   if (id) {
+    // A price change from this popup starts this month; earlier months keep
+    // the price they were planned at.
+    await freezePastPrice(supabase, householdId, id, amountCents, currentMonthStart());
     await supabase.from("subscriptions").update(row).eq("id", id).eq("household_id", householdId);
   } else {
     const maxRow = unwrap(
@@ -197,17 +258,11 @@ export async function advanceSubscriptionRenewal(formData: FormData) {
   );
   if (!row?.next_renewal_date) return;
 
-  const [y, m, d] = row.next_renewal_date.split("-").map(Number);
-  const current = new Date(y, m - 1, d);
-  const next = new Date(current);
-  switch (row.billing_cycle) {
-    case "weekly":    next.setDate(current.getDate() + 7); break;
-    case "quarterly": next.setMonth(current.getMonth() + 3); break;
-    case "annual":    next.setFullYear(current.getFullYear() + 1); break;
-    case "monthly":
-    default:          next.setMonth(current.getMonth() + 1); break;
-  }
-  const iso = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+  // Due this week sends the date it showed, which may be a stale saved date
+  // rolled forward — advance from whichever is later so one Pay catches up.
+  const shown = String(formData.get("dueDate") ?? "").trim();
+  const base = /^\d{4}-\d{2}-\d{2}$/.test(shown) && shown > row.next_renewal_date ? shown : row.next_renewal_date;
+  const iso = nextRenewalAfter(rollRenewalForward(base, row.billing_cycle), row.billing_cycle);
 
   await supabase
     .from("subscriptions")
@@ -220,8 +275,15 @@ export async function advanceSubscriptionRenewal(formData: FormData) {
 export async function updateSubscriptionDueDate(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "").trim();
-  const nextRenewalDate = String(formData.get("nextRenewalDate") ?? "").trim() || null;
+  const typedRenewal = String(formData.get("nextRenewalDate") ?? "").trim() || null;
   if (!id) return;
+  const sub = typedRenewal
+    ? unwrap(
+        await supabase.from("subscriptions").select("billing_cycle").eq("id", id).eq("household_id", householdId).maybeSingle(),
+        "subscriptions",
+      )
+    : null;
+  const nextRenewalDate = typedRenewal && rollRenewalForward(typedRenewal, sub?.billing_cycle ?? "monthly");
 
   await supabase
     .from("subscriptions")
@@ -318,46 +380,7 @@ export async function updateSubscriptionAmount(formData: FormData) {
   // amount_cents, so before changing it, freeze the old price into each
   // earlier month the sub billed in that has no figure of its own — the
   // months already paid at the old price keep the plan they had.
-  const sub = unwrap(
-    await supabase
-      .from("subscriptions")
-      .select("amount_cents, billing_cycle, next_renewal_date, is_active, subcategory_id, created_at")
-      .eq("id", id)
-      .eq("household_id", householdId)
-      .maybeSingle(),
-    "subscription",
-  );
-  if (!sub) return;
-  if (sub.amount_cents !== amountCents && validMonth && sub.subcategory_id && sub.is_active && sub.next_renewal_date) {
-    const existing = unwrap(
-      await supabase
-        .from("subscription_plans")
-        .select("month")
-        .eq("household_id", householdId)
-        .eq("subscription_id", id)
-        .lt("month", month),
-      "subscription month plans",
-    );
-    const covered = new Set((existing ?? []).map((row) => String(row.month)));
-    // From the month the sub was added, up to (not including) the edited one.
-    const start = new Date(`${String(sub.created_at).slice(0, 7)}-01T00:00:00Z`);
-    const snapshots: { household_id: string; subscription_id: string; month: string; planned_cents: number }[] = [];
-    for (const d = start; d.toISOString().slice(0, 10) < month; d.setUTCMonth(d.getUTCMonth() + 1)) {
-      const key = d.toISOString().slice(0, 7);
-      const first = `${key}-01`;
-      if (covered.has(first)) continue;
-      // Same billing rule as subscriptionChargesIn on the Budget page.
-      const charges =
-        sub.billing_cycle === "monthly" ||
-        (sub.billing_cycle === "annual" && sub.next_renewal_date.slice(5, 7) === key.slice(5)) ||
-        sub.next_renewal_date.slice(0, 7) === key;
-      if (!charges) continue;
-      snapshots.push({ household_id: householdId, subscription_id: id, month: first, planned_cents: sub.amount_cents });
-    }
-    if (snapshots.length > 0) {
-      unwrap(await supabase.from("subscription_plans").insert(snapshots), "saving past subscription plans");
-    }
-  }
+  if (validMonth) await freezePastPrice(supabase, householdId, id, amountCents, month);
   unwrap(
     await supabase
       .from("subscriptions")

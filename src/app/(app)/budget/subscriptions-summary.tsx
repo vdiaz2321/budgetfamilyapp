@@ -12,6 +12,7 @@ import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 import type { TxData, TxPrefill } from "./types";
 import { planNavKeyDown } from "./plan-nav";
 import { MATCH_BTN_CLASS } from "./budget-row";
+import { currentMonthStart } from "@/lib/subscription-renewal";
 
 // One column template for the header and every row, so a column added on one
 // can't drift from the other. Mobile keeps Name / Plan / Left — Spent is the
@@ -62,6 +63,7 @@ export function SubscriptionsSummaryCard({
   onToggle,
   monthPlannedCents,
   monthSpentCents,
+  otherSpentCents = 0,
   onOpenSpent,
   overspentOnly = false,
   transactions = [],
@@ -73,6 +75,8 @@ export function SubscriptionsSummaryCard({
   selectedId = null,
   onSelect,
 }: {
+  /** Charges on Subscriptions that match no subscription by payee. */
+  otherSpentCents?: number;
   currency: string;
   subscriptions: SubscriptionRow[];
   /** First of the month being viewed (YYYY-MM-01) — the month a Plan edit
@@ -105,6 +109,7 @@ export function SubscriptionsSummaryCard({
   onSelect?: (id: string) => void;
 }) {
   const [editorTarget, setEditorTarget] = useState<string | "new" | null>(null);
+  const planLocked = monthFirstOfMonth < currentMonthStart();
   useEffect(() => {
     if (!editRequestId) return;
     const open = window.setTimeout(() => {
@@ -306,6 +311,9 @@ export function SubscriptionsSummaryCard({
                         row by row. */}
                     {offCycle ? (
                       <span className="text-center tabular-nums text-muted/50">—</span>
+                    ) : planLocked ? (
+                      // A finished month plans what was charged — nothing to edit.
+                      <span className="text-center text-sm font-medium tabular-nums">{formatMoney(planned, currency)}</span>
                     ) : (
                       <span onClick={(event) => event.stopPropagation()}>
                         <PlanInput
@@ -339,6 +347,9 @@ export function SubscriptionsSummaryCard({
                   </div>
                 );
               })}
+              {!overspentOnly && otherSpentCents > 0 ? (
+                <OtherChargesRow cols={ROW_COLS} spentCents={otherSpentCents} planLocked={planLocked} currency={currency} />
+              ) : null}
               </div>
             </>
           )}
@@ -523,6 +534,7 @@ export function IrregularBillsSummaryCard({
   onOpenSpent,
   overspentOnly = false,
   dormantBills = [],
+  otherSpentCents = 0,
   transactions = [],
   accountNameById,
   onEditTransaction,
@@ -530,6 +542,8 @@ export function IrregularBillsSummaryCard({
 }: {
   currency: string;
   monthFirstOfMonth: string;
+  /** Charges on Irregular Bills that match no bill by payee. */
+  otherSpentCents?: number;
   /** Month total for the header. Usually the sum of the rows below, but for
       months predating this card it falls back to the subcategory's own
       planned figure so the header matches the Bills group row. */
@@ -570,7 +584,12 @@ export function IrregularBillsSummaryCard({
   // Planned is per month — an irregular bill has no plan in a month it isn't
   // expected to hit, so a fresh month totals $0 until amounts are entered.
   const totalPlanned = plannedTotalCents;
-  const totalSpent = irregularBills.reduce((sum, b) => sum + (b.monthSpentCents ?? 0), 0);
+  // "Other" charges count too, so the header matches the Bills group row.
+  const totalSpent = irregularBills.reduce((sum, b) => sum + (b.monthSpentCents ?? 0), 0) + otherSpentCents;
+  // A finished month plans what was charged — the Planned cells are fixed.
+  const planLocked = monthFirstOfMonth < currentMonthStart();
+  const IRREGULAR_COLS =
+    "grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_6.5rem_8rem_minmax(0,1.2fr)]";
   const isOver = (b: IrregularBillRow) => (b.monthSpentCents ?? 0) > (b.plannedCents ?? 0);
   const visibleRows = overspentOnly ? rows.filter(isOver) : rows;
   const paymentsBill = paymentsFor ? rows.find((b) => b.id === paymentsFor) ?? null : null;
@@ -683,7 +702,11 @@ export function IrregularBillsSummaryCard({
                       onClick={(e) => e.stopPropagation()}
                       onMouseDown={(e) => e.stopPropagation()}
                     >
-                      <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} spentCents={b.monthSpentCents ?? 0} currency={currency} />
+                      {planLocked ? (
+                        <span className="font-medium tabular-nums">{formatMoney(b.plannedCents ?? 0, currency)}</span>
+                      ) : (
+                        <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} spentCents={b.monthSpentCents ?? 0} currency={currency} />
+                      )}
                     </div>
                     <span className="hidden text-center font-medium tabular-nums sm:block">
                       {formatMoney(b.monthSpentCents ?? 0, currency)}
@@ -697,7 +720,11 @@ export function IrregularBillsSummaryCard({
                     <div className="flex shrink-0 items-center gap-2 sm:hidden">
                       <span className="text-xs text-muted">Plan</span>
                       <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-                        <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} spentCents={b.monthSpentCents ?? 0} currency={currency} />
+                        {planLocked ? (
+                          <span className="font-medium tabular-nums">{formatMoney(b.plannedCents ?? 0, currency)}</span>
+                        ) : (
+                          <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} spentCents={b.monthSpentCents ?? 0} currency={currency} />
+                        )}
                       </span>
                       <span className="text-xs text-muted">Spent</span>
                       <span className="font-medium tabular-nums">{formatMoney(b.monthSpentCents ?? 0, currency)}</span>
@@ -705,6 +732,9 @@ export function IrregularBillsSummaryCard({
                   </div>
                 );
               })}
+              {!overspentOnly && otherSpentCents > 0 ? (
+                <OtherChargesRow variant="irregular" cols={IRREGULAR_COLS} spentCents={otherSpentCents} planLocked={planLocked} currency={currency} />
+              ) : null}
             </div>
           )}
 
@@ -748,6 +778,56 @@ export function IrregularBillsSummaryCard({
         </ModalShell>
       ) : null}
     </section>
+  );
+}
+
+// Charges logged on Subscriptions / Irregular Bills whose payee matches no
+// row (a Nintendo game, a $127 eye exam). Listed so the card adds up to its
+// Budget row. A finished month plans what was charged; this month plans $0.
+function OtherChargesRow({
+  variant = "subscriptions",
+  cols,
+  spentCents,
+  planLocked,
+  currency,
+}: {
+  variant?: "subscriptions" | "irregular";
+  cols: string;
+  spentCents: number;
+  planLocked: boolean;
+  currency: string;
+}) {
+  const planned = planLocked ? spentCents : 0;
+  const left = planned - spentCents;
+  if (variant === "irregular") {
+    return (
+      <div className={`grid items-center gap-3 px-4 py-2 text-sm ${cols}`}>
+        <span className="w-3" aria-hidden />
+        <span className="min-w-0 truncate px-1 py-0.5">Other</span>
+        <span className="hidden text-center font-medium tabular-nums sm:block">{formatMoney(planned, currency)}</span>
+        <span className="hidden text-center font-medium tabular-nums sm:block">{formatMoney(spentCents, currency)}</span>
+        <span className="hidden sm:block" aria-hidden />
+        <span className="hidden sm:block" aria-hidden />
+        <div className="flex shrink-0 items-center gap-2 sm:hidden">
+          <span className="text-xs text-muted">Plan</span>
+          <span className="font-medium tabular-nums">{formatMoney(planned, currency)}</span>
+          <span className="text-xs text-muted">Spent</span>
+          <span className="font-medium tabular-nums">{formatMoney(spentCents, currency)}</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className={`grid items-center gap-3 px-4 py-2 text-sm ${cols}`}>
+      <span className="w-3" aria-hidden />
+      <span className="min-w-0 truncate">Other</span>
+      <span className="text-center text-sm font-medium tabular-nums">{formatMoney(planned, currency)}</span>
+      <span className={`hidden text-center tabular-nums sm:inline ${actualColorClass("bills", spentCents)}`}>{formatMoney(spentCents, currency)}</span>
+      <span className={`text-center tabular-nums ${remainingColorClass("bills", left, planned)}`}>{formatMoney(left, currency)}</span>
+      <span className="hidden sm:inline" aria-hidden />
+      <span className="hidden sm:inline" aria-hidden />
+      <span className="hidden sm:inline" aria-hidden />
+    </div>
   );
 }
 

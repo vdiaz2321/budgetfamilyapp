@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
+import { rollRenewalForward } from "@/lib/subscription-renewal";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { addToPlan, copyPlansFromPreviousMonth, listPayees, matchIrregularPlansToSpent, matchPlansToSpent, restoreIrregularPlansSnapshot, restorePlansSnapshot, setRollover, setRolloverOverride, trimFromPlan } from "./actions";
@@ -51,6 +52,7 @@ type Props = {
     liveAvailableCents: number; // always the live-calculated amount
     overrideCents: number | null; // null = no override
     enabled: boolean; // is last month's leftover included in this month?
+    deficitCents: number; // ≤ 0: past overspending not yet paid back, always included
     prevMonthLabel: string;
   };
   subOptions: SubOption[];
@@ -73,8 +75,10 @@ type Props = {
     items: { subId: string; name: string; kind: CategoryKind; plannedCents: number; spentCents: number }[];
   };
   irregularMonthPlanned: number;
+  irregularOtherCents: number;
   subscriptionMonthPlanned: number;
   subscriptionMonthSpent: number;
+  subscriptionOtherCents: number;
 };
 
 export function BudgetBoard({
@@ -99,8 +103,10 @@ export function BudgetBoard({
   creditCards,
   prevMonthOverspent,
   irregularMonthPlanned,
+  irregularOtherCents,
   subscriptionMonthPlanned,
   subscriptionMonthSpent,
+  subscriptionOtherCents,
 }: Props) {
   // Trips for the transaction modal's pickers, ready before it opens.
   usePrefetchTripTagging();
@@ -251,6 +257,7 @@ export function BudgetBoard({
     if (item.source === "subscription") {
       const fd = new FormData();
       fd.set("id", item.id);
+      fd.set("dueDate", item.dueDate);
       void advanceSubscriptionRenewal(fd);
     }
     loadPayees();
@@ -321,7 +328,10 @@ export function BudgetBoard({
       });
     const subscriptionItems = subscriptions.flatMap((subscription) => {
       if (!subscription.isActive || !subscription.nextRenewalDate || !subscription.subcategoryId) return [];
-      const due = new Date(`${subscription.nextRenewalDate}T00:00:00`);
+      // The page already rolls a stale saved date up to this month; rolling to
+      // the viewed month too lets a future month show what falls due in it.
+      const dueDate = rollRenewalForward(subscription.nextRenewalDate, subscription.billingCycle, month.firstOfMonth);
+      const due = new Date(`${dueDate}T00:00:00`);
       if (!inWindow(due)) return [];
       // Paid when THIS subscription's own charge has been logged. Every
       // subscription shares one "Subscriptions" budget row, so checking that
@@ -339,7 +349,7 @@ export function BudgetBoard({
         name: subscription.name,
         kind: "bills" as const,
         subId: subscription.subcategoryId,
-        dueDate: subscription.nextRenewalDate,
+        dueDate,
         amountCents: subscription.amountCents,
         accountId: subscription.accountId,
         accountName: subscription.accountId ? accountNameById.get(subscription.accountId) ?? null : null,
@@ -356,7 +366,7 @@ export function BudgetBoard({
   // leftover. The rollover is real spendable money, so it always adds to the
   // displayed number — not just when covering a deficit.
   const ownLeft = leftToBudget; // incomePlanned − outflowPlanned
-  const displayLeft = ownLeft + rollover.inCents;
+  const displayLeft = ownLeft + rollover.inCents + rollover.deficitCents;
 
   // Actuals for the pill: what's actually been received vs actually spent so
   // far this month (income group's spent = money received).
@@ -749,6 +759,7 @@ export function BudgetBoard({
                   onToggle={() => toggleGroup("subscriptions")}
                   monthPlannedCents={subscriptionMonthPlanned}
                   monthSpentCents={subscriptionMonthSpent}
+                  otherSpentCents={subscriptionOtherCents}
                   onOpenSpent={() => {
                     const subId = subscriptions.find((s) => s.subcategoryId)?.subcategoryId;
                     if (subId) {
@@ -775,6 +786,7 @@ export function BudgetBoard({
                   open={openGroups["irregularBills"] ?? false}
                   onToggle={() => toggleGroup("irregularBills")}
                   dormantBills={dormantIrregularBills}
+                  otherSpentCents={irregularOtherCents}
                   onOpenSpent={() => {
                     const subId = irregularBills.find((b) => b.subcategoryId)?.subcategoryId;
                     if (subId) {
@@ -1828,6 +1840,16 @@ function SummaryHeroCard({
                 />
               </div>
             ) : null}
+            {rollover.deficitCents < 0 && (
+              <div className="mt-1.5 @3xl:flex @3xl:justify-center">
+                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-negative/25 bg-negative/10 px-2 py-1 text-[11px] text-negative sm:gap-1.5 sm:px-2.5">
+                  <span className="font-bold tabular-nums">{formatMoney(rollover.deficitCents, currency)}</span>
+                  <span className="font-semibold opacity-80">
+                    <span className="max-sm:hidden">rolled over </span>from {shortMonth(rollover.prevMonthLabel)}
+                  </span>
+                </span>
+              </div>
+            )}
             {rolloverCents > 0 && (
               <div className="mt-1.5">
                 <RolloverAddedLine

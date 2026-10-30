@@ -7,6 +7,7 @@ import { BudgetBoard } from "./budget-board";
 import type { AccountOption, BucketOption, GroupData, PayeeLineItem, SubOption, TxData } from "./types";
 import { isHiddenPaidOffDebt } from "./types";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
+import { currentMonthStart, healStaleRenewals } from "@/lib/subscription-renewal";
 import { throwIfAny } from "@/lib/supabase-result";
 import { attachSplitParts } from "@/lib/split-parts";
 import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
@@ -61,7 +62,7 @@ export default async function BudgetPage({
     { data: payees, error: payeesError },
     { data: accounts, error: accountsError },
     { data: buckets, error: bucketsError },
-    { data: subscriptions, error: subscriptionsError },
+    { data: rawSubscriptions, error: subscriptionsError },
     { data: irregularBills, error: irregularBillsError },
     { data: irregularPlanRows, error: irregularBillPlansError },
     { data: subscriptionPlanRows, error: subscriptionPlansError },
@@ -209,6 +210,9 @@ export default async function BudgetPage({
     fetchTripPlans(supabase, household.id, { months: [prevFirstOfMonth, month.firstOfMonth] }),
   ]);
   throwIfAny({ subs: subsError, plans: plansError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, irregularBillPlans: irregularBillPlansError, subscriptionPlans: subscriptionPlansError, rolloverRows: rolloverRowsError, cardOwed: cardOwedError });
+  // Saved renewal dates that fell behind (a charge logged outside Due this
+  // week's Pay) are rolled forward here, in the page and the database.
+  const subscriptions = await healStaleRenewals(supabase, household.id, rawSubscriptions ?? []);
 
   // ---- Split the two-month reads back into the shapes the page works with.
   const txRows = (txWindow ?? []).filter((t) => t.occurred_on >= month.firstOfMonth);
@@ -390,10 +394,25 @@ export default async function BudgetPage({
     subPrevSpentById.set(sub.id, total((prevTxRows ?? []).filter(isThisSub)));
     subYtdSpentById.set(sub.id, total(yearTxThroughViewedMonth.filter(isThisSub)));
   }
+  // ---- Finished months: plan = what was charged (Victor, 2026-10-30) -------
+  // Subscriptions and Irregular Bills vary month to month (a Disney charge of
+  // $6.34 against a $7.44 price, a one-off $127 eye exam with no bill of its
+  // own), so in any month before this one their plan simply follows the
+  // charges. Nothing to match by hand afterwards, and nothing can show
+  // overspent there. This month and later keep the plans as typed.
+  const isClosedMonth = (firstOfMonth: string) => firstOfMonth < currentMonthStart();
+  const viewedClosed = isClosedMonth(month.firstOfMonth);
+  if (viewedClosed) {
+    subMonthPlannedById.clear();
+    for (const [id, spent] of subMonthSpentById) if (spent > 0) subMonthPlannedById.set(id, spent);
+  }
+
   // Planned per bill for THIS month only (absent row = $0), and the per
   // subcategory sum the Bills group row reads.
   const irregularPlannedByBillId = new Map<string, number>(
-    (irregularBillPlans ?? []).map((p) => [p.bill_id as string, p.planned_cents as number]),
+    viewedClosed
+      ? [...irregularMonthDetailById].map(([id, detail]) => [id, detail.spentCents])
+      : (irregularBillPlans ?? []).map((p) => [p.bill_id as string, p.planned_cents as number]),
   );
   // Every subcategory fed by the Irregular Bills card. Its budget row is
   // read-only whether or not this month has per-bill plans yet: the card is
@@ -401,6 +420,25 @@ export default async function BudgetPage({
   // a second source that silently disagrees with it.
   const irregularSubcategoryIds = new Set(
     (irregularBills ?? []).filter((b) => b.subcategory_id).map((b) => b.subcategory_id!),
+  );
+  const subSubcategoryIds = new Set(
+    (subscriptions ?? []).filter((s) => s.subcategory_id).map((s) => s.subcategory_id!),
+  );
+  // The items whose plan follows their charges in a finished month.
+  const followsChargesWhenClosed = (subId: string) =>
+    subSubcategoryIds.has(subId) || irregularSubcategoryIds.has(subId);
+
+  // Charges on these items that match no subscription or bill by payee. The
+  // cards list them as "Other" so a card always adds up to its Budget row.
+  const otherSpent = (subIds: Set<string>, matchedCents: number) =>
+    Math.max(0, [...subIds].reduce((sum, id) => sum + (spentBySub.get(id) ?? 0), 0) - matchedCents);
+  const subscriptionOtherCents = otherSpent(
+    subSubcategoryIds,
+    [...subMonthSpentById.values()].reduce((sum, c) => sum + c, 0),
+  );
+  const irregularOtherCents = otherSpent(
+    irregularSubcategoryIds,
+    [...irregularMonthDetailById.values()].reduce((sum, d) => sum + d.spentCents, 0),
   );
 
   // ---- Unfinished business from last month -------------------------------
@@ -414,8 +452,11 @@ export default async function BudgetPage({
       if (kind !== "bills" && kind !== "expenses") return null;
       // The board's own rule, re-derived for last month, so this figure is
       // the one that month's board shows.
-      const plannedCents = plan.plannedFor(s.id, prevFirstOfMonth);
       const spentCents = prevSpentBySub.get(s.id) ?? 0;
+      const plannedCents =
+        isClosedMonth(prevFirstOfMonth) && followsChargesWhenClosed(s.id)
+          ? spentCents
+          : plan.plannedFor(s.id, prevFirstOfMonth);
       if (spentCents <= plannedCents) return null;
       return { subId: s.id, name: s.name, kind, plannedCents, spentCents };
     })
@@ -435,8 +476,9 @@ export default async function BudgetPage({
         // row never overrides them (the rule lives in plan.plannedFor).
         const isAutoSub = plan.subscriptionTotalFor(s.id, month.firstOfMonth) !== undefined;
         const isAutoIrregular = plan.irregularTotalFor(s.id, month.firstOfMonth) !== undefined;
-        const plannedCents = plan.plannedFor(s.id, month.firstOfMonth);
         const spentCents = spentBySub.get(s.id) ?? 0;
+        const plannedCents =
+          viewedClosed && followsChargesWhenClosed(s.id) ? spentCents : plan.plannedFor(s.id, month.firstOfMonth);
         const g = goalBySub.get(s.id);
         const d = debtBySub.get(s.id);
         const linkedBucketId = linkedBucketBySub.get(s.id) ?? null;
@@ -467,7 +509,7 @@ export default async function BudgetPage({
           // subscriptions, and Irregular Bills — including a month that has
           // no per-bill plans yet, where the row still shows the legacy
           // budget_plans figure but is edited from the Irregular Bills card.
-          autoPlanned: isAutoIrregular || isAutoSub || irregularSubcategoryIds.has(s.id),
+          autoPlanned: isAutoIrregular || isAutoSub || irregularSubcategoryIds.has(s.id) || (viewedClosed && followsChargesWhenClosed(s.id)),
           isKids,
           savings:
             kind === "savings"
@@ -568,6 +610,10 @@ export default async function BudgetPage({
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
   };
 
+  // A deficit carries forward and is paid back by later leftovers (Victor,
+  // 2026-10-30: "if Jan is negative, it should take that portion in Feb").
+  // January's overspend uses up February's and March's leftovers, so
+  // rollover reappears in April. Do not floor the carry at $0 each month.
   let carry = 0;
   let cursor = ROLLOVER_ANCHOR;
   while (cursor < month.firstOfMonth) {
@@ -575,13 +621,16 @@ export default async function BudgetPage({
     cursor = stepMonth(cursor);
   }
 
-  // A cumulative deficit doesn't carry as negative money.
+  // Only what's left after paying back past deficits can be rolled in.
   const liveAvailableCents = Math.max(0, carry);
+  // A deficit still owed is not optional: it always comes off this month's
+  // Income Planned Remaining, so February shows January's shortfall.
+  const deficitCents = Math.min(0, carry);
   const rolloverRow = rolloverByMonth.get(month.firstOfMonth) ?? null;
   const rolloverInEnabled = rolloverRow != null;
   const overrideCents: number | null = rolloverRow?.override_cents ?? null;
   const incomingAvailableCents = overrideCents ?? liveAvailableCents;
-  const rolloverInCents = rolloverInEnabled ? incomingAvailableCents : 0;
+  const rolloverInCents = rolloverInEnabled && deficitCents === 0 ? incomingAvailableCents : 0;
 
   const labelForKey = (key: string) => {
     const [y, m] = key.split("-");
@@ -830,24 +879,28 @@ export default async function BudgetPage({
 
   // Subscription month totals — sum across all sub subcategories so the card
   // header can show Plan/Spent matching what the Bills group row shows.
-  const subSubcategoryIds = new Set(
-    (subscriptions ?? []).filter((s) => s.subcategory_id).map((s) => s.subcategory_id!),
-  );
-  const subscriptionMonthPlanned = [...subSubcategoryIds].reduce(
-    (sum, id) => sum + (plan.subscriptionTotalFor(id, month.firstOfMonth) ?? 0),
-    0,
-  );
   const subscriptionMonthSpent = [...subSubcategoryIds].reduce(
     (sum, id) => sum + (spentBySub.get(id) ?? 0),
     0,
   );
+  // A finished month plans exactly what was charged (see isClosedMonth).
+  const subscriptionMonthPlanned = viewedClosed
+    ? subscriptionMonthSpent
+    : [...subSubcategoryIds].reduce(
+        (sum, id) => sum + (plan.subscriptionTotalFor(id, month.firstOfMonth) ?? 0),
+        0,
+      );
 
   // Same idea for the Irregular Bills card header, but it has to honour the
   // legacy fallback above: in a month with no per-bill plans the header shows
   // the subcategory's manual budget_plans figure, so it agrees with the Bills
   // group row instead of contradicting it with $0.
   const irregularMonthPlanned = [...irregularSubcategoryIds].reduce(
-    (sum, id) => sum + (plan.irregularTotalFor(id, month.firstOfMonth) ?? plannedBySub.get(id) ?? 0),
+    (sum, id) =>
+      sum +
+      (viewedClosed
+        ? spentBySub.get(id) ?? 0
+        : plan.irregularTotalFor(id, month.firstOfMonth) ?? plannedBySub.get(id) ?? 0),
     0,
   );
 
@@ -881,6 +934,7 @@ export default async function BudgetPage({
         liveAvailableCents,
         overrideCents,
         enabled: rolloverInEnabled,
+        deficitCents,
         prevMonthLabel: labelForKey(month.prevKey),
       }}
       subOptions={subOptions}
@@ -901,8 +955,10 @@ export default async function BudgetPage({
         items: prevOverspentItems,
       }}
       irregularMonthPlanned={irregularMonthPlanned}
+      irregularOtherCents={irregularOtherCents}
       subscriptionMonthPlanned={subscriptionMonthPlanned}
       subscriptionMonthSpent={subscriptionMonthSpent}
+      subscriptionOtherCents={subscriptionOtherCents}
     />
   );
 }
