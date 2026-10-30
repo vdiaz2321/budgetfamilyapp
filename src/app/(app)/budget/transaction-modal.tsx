@@ -236,6 +236,21 @@ function TransactionModalForm({
   });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  // The pickers are overlays: closing one unmounts whatever had focus, so the
+  // browser dropped it on <body> and the next Tab started over at the top of
+  // the form. Hand focus back to the field that opened the picker instead.
+  const accountButtonRef = useRef<HTMLButtonElement>(null);
+  const itemButtonRef = useRef<HTMLButtonElement>(null);
+  const accountPickerWasOpen = useRef(false);
+  const itemPickerWasOpen = useRef(false);
+  useEffect(() => {
+    if (accountPickerWasOpen.current && !accountPickerOpen) accountButtonRef.current?.focus({ preventScroll: true });
+    accountPickerWasOpen.current = accountPickerOpen;
+  }, [accountPickerOpen]);
+  useEffect(() => {
+    if (itemPickerWasOpen.current && !pickerOpen) itemButtonRef.current?.focus({ preventScroll: true });
+    itemPickerWasOpen.current = pickerOpen;
+  }, [pickerOpen]);
   // Why the save button wouldn't fire. The footer button used to be silently
   // disabled until a budget item was picked, which read as a broken button.
   // It now stays clickable and submitting with something missing lists the
@@ -915,6 +930,7 @@ function TransactionModalForm({
               {/* The app's own picker at every width, not a native <select>:
                   the list needs search and each account's owed/balance. */}
               <button
+                ref={accountButtonRef}
                 type="button"
                 onClick={() => setAccountPickerOpen(true)}
                 className={
@@ -957,6 +973,7 @@ function TransactionModalForm({
               {/* Budget item: the same searchable picker for add and edit. */}
               <div className="flex flex-col gap-1">
                 <button
+                  ref={itemButtonRef}
                   type="button"
                   onClick={() => setPickerOpen(true)}
                   className={

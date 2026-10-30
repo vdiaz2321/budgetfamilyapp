@@ -832,14 +832,16 @@ export function BudgetBoard({
           {railContent ?? (
             <>
               {/* Summary | Transactions toggle */}
-              <div className="grid grid-cols-2 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+              <div className="grid grid-cols-2 gap-1 rounded-2xl border border-line bg-surface p-1 shadow-sm">
                 <button
                   type="button"
                   onClick={() => setRailTab("summary")}
-                  className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
+                  className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-sm font-bold transition-colors ${
                     railTab === "summary"
-                      ? "bg-brand-soft text-brand"
-                      : "text-muted hover:text-foreground"
+                      // Tinted with each panel's own accent: Summary navy,
+                      // Transactions sky.
+                      ? "bg-[color-mix(in_srgb,var(--viz-income)_12%,var(--surface))] text-foreground shadow-sm ring-1 ring-[color-mix(in_srgb,var(--viz-income)_30%,var(--border))] [&>svg]:text-[color:var(--viz-income)]"
+                      : "text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
                   }`}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -850,10 +852,10 @@ export function BudgetBoard({
                 <button
                   type="button"
                   onClick={() => { loadPayees(); setRailTab("transactions"); }}
-                  className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
+                  className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-sm font-bold transition-colors ${
                     railTab === "transactions"
-                      ? "bg-brand-soft text-brand"
-                      : "text-muted hover:text-foreground"
+                      ? "bg-[color-mix(in_srgb,var(--viz-expenses)_12%,var(--surface))] text-foreground shadow-sm ring-1 ring-[color-mix(in_srgb,var(--viz-expenses)_30%,var(--border))] [&>span]:text-[color:var(--viz-expenses)]"
+                      : "text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
                   }`}
                 >
                   <span className="font-bold">$</span>
@@ -1303,7 +1305,9 @@ function MatchSpentButton({
         type="button"
         // Nothing-spent items start unticked; see matchCandidates.
         onClick={() => { setError(null); setSkipped(new Set(candidates.filter((c) => c.spentCents === 0).map((c) => c.subId))); setOpen(true); }}
-        className="mt-1.5 inline-flex w-fit cursor-pointer items-center whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+        // Wraps on a phone: inside the half-width Actual Spent tile the
+        // one-line "Match Spent & Received" ran past the tile's edge.
+        className="mt-1.5 inline-flex w-fit max-w-full cursor-pointer items-center rounded-xl border border-line bg-surface px-2.5 py-1 text-left text-[11px] font-bold text-foreground transition hover:bg-sky-50 sm:whitespace-nowrap sm:rounded-full dark:hover:bg-sky-950/40"
       >
         {label}
       </button>
@@ -1441,6 +1445,7 @@ function CategoryProgressCard({
   dotClass,
   fillClass,
   currency,
+  accentVar = "var(--viz-soft)",
 }: {
   label: string;
   actualLabel: string;
@@ -1450,35 +1455,67 @@ function CategoryProgressCard({
   dotClass: string;
   fillClass: string;
   currency: string;
+  /** Raw CSS colour for the card's wash, edge, bar and %, e.g. "var(--positive)". */
+  accentVar?: string;
 }) {
   const pct = planned > 0 ? Math.min((actual / planned) * 100, 100) : 0;
   return (
-    <div className="rounded-xl bg-background/60 px-3 py-2 ring-1 ring-line">
+    // Each card carries its own colour: a soft wash fading into the surface,
+    // a 3px left edge and a tinted border. Built from the token + --surface
+    // with color-mix, so dark mode follows on its own.
+    <div
+      className="relative overflow-hidden rounded-xl border border-l-[3px] px-3 py-2 shadow-[0_1px_2px_rgb(0_0_0/0.04)]"
+      style={{
+        // Each side on its own: React warns when the borderColor shorthand
+        // and borderLeftColor are mixed on one element.
+        borderTopColor: `color-mix(in srgb, ${accentVar} 22%, var(--border))`,
+        borderRightColor: `color-mix(in srgb, ${accentVar} 22%, var(--border))`,
+        borderBottomColor: `color-mix(in srgb, ${accentVar} 22%, var(--border))`,
+        borderLeftColor: accentVar,
+        background: `linear-gradient(135deg, color-mix(in srgb, ${accentVar} 10%, var(--surface)) 0%, var(--surface) 70%)`,
+      }}
+    >
       {/* Wraps rather than truncates: when the card is full-width on mobile the
           amounts are long enough to squeeze a truncating label down to an
           ellipsis, so they drop to their own line instead. */}
       {/* Wide (4 across): name centered on line 1, amounts centered on line 2. */}
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 @3xl:justify-center">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
-        <span className="whitespace-nowrap max-sm:text-[12px] sm:text-sm text-muted">{label}</span>
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`}
+          style={{ boxShadow: `0 0 0 3px color-mix(in srgb, ${accentVar} 18%, transparent)` }}
+          aria-hidden
+        />
+        <span className="whitespace-nowrap font-semibold max-sm:text-[12px] sm:text-sm text-foreground">{label}</span>
         {/* The planned figure and the "/ Spent $x" pair each hold together,
             but the line may break between them. Holding the whole thing on one
             line clipped it against the card's edge whenever the summary panel
             squeezed this column — the amounts were wider than the card. */}
         <span className="ml-auto max-sm:text-[12px] tabular-nums sm:text-sm @3xl:ml-0 @3xl:basis-full @3xl:text-center">
-          <span className="whitespace-nowrap font-semibold text-foreground">{formatMoney(planned, currency)}</span>{" "}
+          <span className="whitespace-nowrap font-bold text-foreground">{formatMoney(planned, currency)}</span>{" "}
           <span className="whitespace-nowrap">
-            <span className="text-muted">/ {actualLabel} </span>
-            {/* Nothing in yet reads gray, not green/red — same as actualColorClass on the rows. */}
-            <span className={`font-semibold ${actual === 0 ? "text-muted" : actualColorClass}`}>{formatMoney(actual, currency)}</span>
+            <span className="font-semibold text-foreground">/ {actualLabel} </span>
+            {/* Nothing in yet reads plain, not green/red. */}
+            <span className={`font-bold ${actual === 0 ? "text-foreground" : actualColorClass}`}>{formatMoney(actual, currency)}</span>
           </span>
         </span>
       </div>
-      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900/50">
+      {/* Bar + % share one row, so the % adds no extra line. */}
+      <div className="mt-1.5 flex items-center gap-2">
         <div
-          className={`h-full rounded-full transition-[width] duration-400 ease-out ${fillClass}`}
-          style={{ width: `${pct}%` }}
-        />
+          className="h-2 flex-1 overflow-hidden rounded-full"
+          style={{ background: `color-mix(in srgb, ${accentVar} 14%, var(--surface))` }}
+        >
+          <div
+            className={`h-full rounded-full transition-[width] duration-500 ease-out ${fillClass}`}
+            style={{
+              width: `${pct}%`,
+              backgroundImage: `linear-gradient(90deg, color-mix(in srgb, ${accentVar} 65%, var(--surface)), ${accentVar})`,
+            }}
+          />
+        </div>
+        <span className="shrink-0 text-[11px] font-bold leading-none tabular-nums" style={{ color: accentVar }}>
+          {Math.round(pct)}%
+        </span>
       </div>
     </div>
   );
@@ -1537,6 +1574,7 @@ function RolloverLeftLine({
   currency,
   editing,
   setEditing,
+  shortfallCents,
 }: {
   rolloverCents: number;
   liveAvailableCents: number;
@@ -1544,12 +1582,14 @@ function RolloverLeftLine({
   currency: string;
   editing: boolean;
   setEditing: (v: boolean) => void;
+  shortfallCents: number;
 }) {
   if (editing) {
     return (
       <RolloverAmountForm
         monthFirstOfMonth={monthFirstOfMonth}
-        currentCents={Math.min(rolloverCents, liveAvailableCents)}
+        alreadyCents={Math.min(rolloverCents, liveAvailableCents)}
+        shortfallCents={shortfallCents}
         liveAvailableCents={liveAvailableCents}
         currency={currency}
         submitLabel="Save"
@@ -1563,7 +1603,7 @@ function RolloverLeftLine({
     <button type="button" onClick={() => setEditing(true)} className={ROLLOVER_PILL}>
       {/* Phone columns are too narrow for the full label. */}
       <span className="font-semibold opacity-80">
-        Left<span className="max-sm:hidden"> to roll over</span>:
+        Left<span className="max-sm:hidden @max-[14rem]/stat:hidden"> to roll over</span>:
       </span>
       <span className="font-bold tabular-nums">{formatMoney(leftCents, currency)}</span>
       <PencilIcon />
@@ -1573,7 +1613,8 @@ function RolloverLeftLine({
 
 // Under Income Planned Remaining: what was rolled over. Clicking it opens a
 // box to hand some (or all) of it back to the rollover pool. Undo Roll Over
-// shows under it for 30s after rolling in, then only while that box is open.
+// shows under it only for 30s after rolling in — not inside the return box,
+// where returning the full amount already does the same thing.
 function RolloverAddedLine({
   rolloverCents,
   liveAvailableCents,
@@ -1605,7 +1646,7 @@ function RolloverAddedLine({
       >
         <span className="font-bold tabular-nums">+{formatMoney(rolloverCents, currency)}</span>
         <span className="font-semibold opacity-80">
-          <span className="max-sm:hidden">rolled over </span>from {shortMonth(prevMonthLabel)}
+          <span className="max-sm:hidden @max-[14rem]/stat:hidden">rolled over </span>from {shortMonth(prevMonthLabel)}
         </span>
         <PencilIcon />
       </button>
@@ -1618,7 +1659,7 @@ function RolloverAddedLine({
           onDone={() => setReturning(false)}
         />
       )}
-      {(showUndo || returning) && <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />}
+      {showUndo && !returning && <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />}
     </div>
   );
 }
@@ -1684,23 +1725,26 @@ function ReturnRolloverForm({
         </span>
       </span>
       <div className="flex flex-wrap items-center gap-1.5 @3xl:justify-center">
-        <input
-          type="text"
-          inputMode="decimal"
-          value={value}
-          placeholder="0.00"
-          autoFocus
-          aria-label="Amount to return"
-          onChange={(e) => {
-            setValue(e.target.value);
-            setError(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") onDone();
-          }}
-          disabled={pending}
-          className="w-24 rounded-md border border-line bg-surface px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-        />
+        <span className="relative">
+          <span aria-hidden className={MONEY_BOX_SIGN}>$</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={value}
+            placeholder="0.00"
+            autoFocus
+            aria-label="Amount to return"
+            onChange={(e) => {
+              setValue(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") onDone();
+            }}
+            disabled={pending}
+            className={MONEY_BOX}
+          />
+        </span>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -1721,6 +1765,30 @@ function ReturnRolloverForm({
       </div>
       {error && <span className="text-[11px] font-semibold text-negative">{error}</span>}
     </form>
+  );
+}
+
+// Headline stat tile: a softer cousin of CategoryProgressCard — a thin top bar
+// instead of a left edge, a faint vertical wash and no shadow — so the four
+// progress cards below stay the stronger element.
+function HeroStat({ accentVar, className = "", children }: { accentVar: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div
+      // @container/stat: pills inside drop their "rolled over" words when the
+      // tile is narrow (a 4-across laptop row), not only on a phone.
+      className={`@container/stat relative min-w-0 overflow-hidden rounded-xl border px-3 pb-2 pt-2.5 ${className}`}
+      style={{
+        borderColor: `color-mix(in srgb, ${accentVar} 18%, var(--border))`,
+        background: `linear-gradient(180deg, color-mix(in srgb, ${accentVar} 8%, var(--surface)) 0%, var(--surface) 85%)`,
+      }}
+    >
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-[3px]"
+        style={{ backgroundImage: `linear-gradient(90deg, ${accentVar}, color-mix(in srgb, ${accentVar} 35%, var(--surface)))` }}
+      />
+      {children}
+    </div>
   );
 }
 
@@ -1759,26 +1827,32 @@ function SummaryHeroCard({
   const toneClasses = TONE_CLASSES[tone];
   // The "Left to roll over" pill's amount box under Income Planned.
   const [editingRollover, setEditingRollover] = useState(false);
+  const leftAccent = displayLeft < 0 ? "var(--negative)" : displayLeft > 0 ? "var(--positive)" : "var(--viz-soft)";
 
   return (
     <div className="@container -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
-      <div className="px-6 pb-5 pt-5">
+      <div className="px-4 pb-5 pt-5 sm:px-6">
         {/* Wide: the four figures run across one row (each with its own action
             underneath), then the four progress cards across the row below.
             Narrow: the figures fall back to a 2x2 — Income/Actual on top,
             Total/Leftover below, via `order-*` — and the cards stack.
             The breakpoints are CONTAINER queries, not `md:`: the card only
             gets the left pane, which is far narrower than the window. */}
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:gap-x-8 @3xl:grid-cols-4">
-          <div className="min-w-0 @3xl:text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned</p>
+        <div className="grid grid-cols-2 gap-2.5 md:gap-3 @3xl:grid-cols-4">
+          <HeroStat accentVar="var(--positive)" className="@3xl:text-center">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-foreground">Income Planned</p>
             <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-positive">
               {formatMoney(incomePlanned, currency)}
             </p>
             {/* Rollover adds last month's leftover to this month's income, so
                 its pill (and the "Added · Undo" line once it's in) sit here. */}
             <div className="mt-1.5 flex flex-col items-start gap-1.5 @3xl:items-center">
-              <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
+              <RolloverControl
+                rollover={rollover}
+                monthFirstOfMonth={monthFirstOfMonth}
+                currency={currency}
+                shortfallCents={Math.max(0, -displayLeft)}
+              />
               {rolloverCents > 0 && (
                 <RolloverLeftLine
                   rolloverCents={rolloverCents}
@@ -1787,21 +1861,22 @@ function SummaryHeroCard({
                   currency={currency}
                   editing={editingRollover}
                   setEditing={setEditingRollover}
+                  shortfallCents={Math.max(0, -displayLeft)}
                 />
               )}
             </div>
-          </div>
-          <div className="order-3 min-w-0 @3xl:order-none @3xl:text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Planned</p>
+          </HeroStat>
+          <HeroStat accentVar="var(--viz-soft)" className="order-3 @3xl:order-none @3xl:text-center">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-foreground">Total Planned</p>
             <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-foreground">
               {formatMoney(outflowPlanned, currency)}
             </p>
             <div className="mt-1.5 @3xl:flex @3xl:justify-center">
               <RollInPlanControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
             </div>
-          </div>
-          <div className="order-2 min-w-0 @3xl:order-none @3xl:text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
+          </HeroStat>
+          <HeroStat accentVar="var(--negative)" className="order-2 @3xl:order-none @3xl:text-center">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-foreground">Actual Spent</p>
             <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-negative">
               {formatMoney(actualSpent, currency)}
             </p>
@@ -1820,9 +1895,9 @@ function SummaryHeroCard({
                   sits under Actual Spent. */}
               <MatchSpentButton candidates={matchCandidates} monthKey={monthFirstOfMonth} currency={currency} leftCents={displayLeft} />
             </div>
-          </div>
-          <div className="order-4 min-w-0 @3xl:order-none @3xl:text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned Remaining</p>
+          </HeroStat>
+          <HeroStat accentVar={leftAccent} className="order-4 @3xl:order-none @3xl:text-center">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-foreground">Income Planned Remaining</p>
             <p className={`mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>
@@ -1845,7 +1920,7 @@ function SummaryHeroCard({
                 <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-negative/25 bg-negative/10 px-2 py-1 text-[11px] text-negative sm:gap-1.5 sm:px-2.5">
                   <span className="font-bold tabular-nums">{formatMoney(rollover.deficitCents, currency)}</span>
                   <span className="font-semibold opacity-80">
-                    <span className="max-sm:hidden">rolled over </span>from {shortMonth(rollover.prevMonthLabel)}
+                    <span className="max-sm:hidden @max-[14rem]/stat:hidden">rolled over </span>from {shortMonth(rollover.prevMonthLabel)}
                   </span>
                 </span>
               </div>
@@ -1861,14 +1936,16 @@ function SummaryHeroCard({
                 />
               </div>
             )}
-          </div>
+          </HeroStat>
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-2.5 @xl:grid-cols-2 @3xl:grid-cols-4">
-          <CategoryProgressCard label="Income" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--positive)]" fillClass="bg-[color:var(--positive)]" currency={currency} />
-          <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--viz-savings)]" fillClass="bg-[color:var(--viz-savings)]" currency={currency} />
-          <CategoryProgressCard label="Bills & Expenses" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--viz-bills)]" fillClass="bg-[color:var(--viz-bills)]" currency={currency} />
-          <CategoryProgressCard label="Debt Repayment" actualLabel="Paid" actualColorClass="text-negative" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--viz-debt)]" fillClass="bg-[color:var(--viz-debt)]" currency={currency} />
+          <CategoryProgressCard label="Income" accentVar="var(--positive)" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--positive)]" fillClass="bg-[color:var(--positive)]" currency={currency} />
+          <CategoryProgressCard label="Savings" accentVar="var(--viz-savings)" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--viz-savings)]" fillClass="bg-[color:var(--viz-savings)]" currency={currency} />
+          {/* Red, not the teal bills colour: this is money going out, and teal
+              read as green ("good") next to Income. */}
+          <CategoryProgressCard label="Bills & Expenses" accentVar="var(--negative)" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--negative)]" fillClass="bg-[color:var(--negative)]" currency={currency} />
+          <CategoryProgressCard label="Debt Repayment" accentVar="var(--viz-debt)" actualLabel="Paid" actualColorClass="text-negative" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--viz-debt)]" fillClass="bg-[color:var(--viz-debt)]" currency={currency} />
         </div>
       </div>
     </div>
@@ -2044,10 +2121,12 @@ function RolloverControl({
   rollover,
   monthFirstOfMonth,
   currency,
+  shortfallCents,
 }: {
   rollover: Props["rollover"];
   monthFirstOfMonth: string;
   currency: string;
+  shortfallCents: number;
 }) {
   const [choosing, setChoosing] = useState(false);
   const { liveAvailableCents, enabled, prevMonthLabel } = rollover;
@@ -2061,12 +2140,13 @@ function RolloverControl({
   const prevMonthName = shortMonth(prevMonthLabel);
 
   // The pill no longer rolls the whole leftover in on one click: it opens an
-  // amount box prefilled with the full leftover, so part of it can stay out.
+  // amount box, so part of it can stay out.
   if (choosing) {
     return (
       <RolloverAmountForm
         monthFirstOfMonth={monthFirstOfMonth}
-        currentCents={liveAvailableCents}
+        alreadyCents={0}
+        shortfallCents={shortfallCents}
         liveAvailableCents={liveAvailableCents}
         currency={currency}
         submitLabel="Roll over"
@@ -2092,12 +2172,23 @@ function RolloverControl({
   );
 }
 
+// The $ amount box in the rollover forms: "$ 0.00" read together on the left,
+// like the transaction modal's amount, with a light 0.00 placeholder.
+const MONEY_BOX =
+  "w-28 rounded-md border border-line bg-surface py-0.5 pl-5 pr-1.5 text-left text-sm font-semibold tabular-nums text-foreground placeholder:font-normal placeholder:text-muted/60 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand";
+const MONEY_BOX_SIGN =
+  "pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-foreground";
+
 // Inline "how much to roll over" box, used both before rolling over (from the
-// pill) and after (clicking the Added amount). Saving the full leftover
-// stores no override, so the amount keeps tracking late transactions.
+// pill) and after (from Left to roll over). What he types is added on top of
+// what's already rolled over. It opens empty — unless Income Planned Remaining
+// is negative, then it opens on that shortfall (as much as is left), so Save
+// brings Remaining back to $0.00. Saving the full leftover stores
+// no override, so the amount keeps tracking late transactions.
 function RolloverAmountForm({
   monthFirstOfMonth,
-  currentCents,
+  alreadyCents,
+  shortfallCents,
   liveAvailableCents,
   currency,
   submitLabel,
@@ -2105,7 +2196,8 @@ function RolloverAmountForm({
   onSaved,
 }: {
   monthFirstOfMonth: string;
-  currentCents: number;
+  alreadyCents: number;
+  shortfallCents: number;
   liveAvailableCents: number;
   currency: string;
   submitLabel: string;
@@ -2113,13 +2205,15 @@ function RolloverAmountForm({
   onSaved?: () => void;
 }) {
   const [pending, start] = useTransition();
-  const [value, setValue] = useState((currentCents / 100).toFixed(2));
+  const maxCents = Math.max(0, liveAvailableCents - alreadyCents);
+  const startCents = Math.min(shortfallCents, maxCents);
+  const [value, setValue] = useState(startCents > 0 ? (startCents / 100).toFixed(2) : "");
   const [error, setError] = useState<string | null>(null);
   const parseCents = (v: string) => Math.round(parseFloat(v.replace(/[$,\s]/g, "")) * 100);
   // What stays behind (not rolled over) as he types — blank or bad input
   // counts as rolling over nothing.
   const typedCents = parseCents(value);
-  const leftCents = Math.max(0, liveAvailableCents - (isNaN(typedCents) ? 0 : typedCents));
+  const leftCents = Math.max(0, maxCents - (isNaN(typedCents) ? 0 : typedCents));
 
   const save = () => {
     const cents = parseCents(value);
@@ -2127,13 +2221,14 @@ function RolloverAmountForm({
       setError("Enter an amount above $0.");
       return;
     }
-    if (cents > liveAvailableCents) {
-      setError(`Max is ${formatMoney(liveAvailableCents, currency)}.`);
+    if (cents > maxCents) {
+      setError(`Max is ${formatMoney(maxCents, currency)}.`);
       return;
     }
+    const totalCents = alreadyCents + cents;
     const fd = new FormData();
     fd.set("month", monthFirstOfMonth);
-    fd.set("override", cents === liveAvailableCents ? "" : (cents / 100).toFixed(2));
+    fd.set("override", totalCents === liveAvailableCents ? "" : (totalCents / 100).toFixed(2));
     start(async () => {
       const res = await setRolloverOverride(fd);
       if (res.error) setError(res.error);
@@ -2159,23 +2254,26 @@ function RolloverAmountForm({
         </span>
       </span>
       <div className="flex flex-wrap items-center gap-1.5 @3xl:justify-center">
-        <input
-          type="text"
-          inputMode="decimal"
-          value={value}
-          autoFocus
-          aria-label="Amount to roll over"
-          onFocus={(e) => e.currentTarget.select()}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setError(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") onDone();
-          }}
-          disabled={pending}
-          className="w-24 rounded-md border border-line bg-surface px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-        />
+        <span className="relative">
+          <span aria-hidden className={MONEY_BOX_SIGN}>$</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={value}
+            placeholder="0.00"
+            autoFocus
+            aria-label="Amount to roll over"
+            onChange={(e) => {
+              setValue(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") onDone();
+            }}
+            disabled={pending}
+            className={MONEY_BOX}
+          />
+        </span>
         {/* Cancel then the save, kept together so a narrow column wraps them
             as one pair under the input instead of splitting them. */}
         <div className="flex items-center gap-1.5">
@@ -2319,20 +2417,20 @@ function StickyFooterBar({
     // covering the Add Transaction modal.
     <div className="pointer-events-none relative z-10 sticky top-4 grid grid-cols-3 rounded-2xl bg-surface px-2 py-2 shadow-sm ring-1 ring-black/5 sm:px-6 sm:py-3 dark:ring-white/10">
       <div className="min-w-0 px-1 text-center">
-        <p className="truncate text-sm font-medium tabular-nums text-foreground sm:text-lg">
+        <p className="truncate text-sm font-bold tabular-nums text-foreground sm:text-lg">
           {formatMoney(outflowPlanned, currency)}
         </p>
-        <p className="text-[10px] text-muted sm:text-xs">Planned</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-muted sm:text-xs">Planned</p>
       </div>
       <div className="min-w-0 border-l border-line px-1 text-center">
-        <p className={`truncate text-sm font-medium tabular-nums sm:text-lg ${displayLeft < 0 ? "text-negative" : "text-positive"}`}>
+        <p className={`truncate text-sm font-bold tabular-nums sm:text-lg ${displayLeft < 0 ? "text-negative" : "text-positive"}`}>
           {formatMoney(displayLeft, currency)}
         </p>
-        <p className="text-[10px] text-muted sm:text-xs">Income Left to Budget</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-muted sm:text-xs">Income Left to Budget</p>
       </div>
       <div className="min-w-0 border-l border-line px-1 text-center">
-        <p className="truncate text-sm font-medium tabular-nums text-negative sm:text-lg">{formatMoney(actualSpent, currency)}</p>
-        <p className="text-[10px] text-muted sm:text-xs">Actual Spent</p>
+        <p className="truncate text-sm font-bold tabular-nums text-negative sm:text-lg">{formatMoney(actualSpent, currency)}</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-muted sm:text-xs">Actual Spent</p>
       </div>
     </div>
   );

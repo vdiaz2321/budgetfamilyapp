@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import type { CategoryKind } from "@/lib/categories";
 
 // Tailwind's scanner needs literal class strings, not runtime
@@ -28,6 +28,34 @@ export const DOT: Record<CategoryKind, string> = {
   expenses: "bg-[color:var(--viz-expenses)]",
   debt: "bg-[color:var(--viz-debt)]",
 };
+
+// Budget group cards (and the Subscriptions / Irregular Bills cards) each
+// carry their kind colour as --acc: it drives the 3px left edge, the header
+// wash, the count chip, the + button and the tile hovers.
+export const ACC: Record<CategoryKind, string> = {
+  income: "var(--positive)",
+  savings: "var(--viz-savings)",
+  bills: "var(--viz-bills)",
+  expenses: "var(--viz-expenses)",
+  debt: "var(--viz-debt)",
+};
+// Header wash: a flat accent tint faded left→right (the rows are wide and
+// short), a little deeper while the card is open.
+export const headerWash = (open: boolean): CSSProperties => ({
+  backgroundColor: `color-mix(in srgb, var(--acc) ${open ? 16 : 10}%, var(--surface))`,
+  maskImage: "linear-gradient(90deg, #000 0%, transparent 60%)",
+  WebkitMaskImage: "linear-gradient(90deg, #000 0%, transparent 60%)",
+});
+export const DOT_HALO: CSSProperties = { boxShadow: "0 0 0 3px color-mix(in srgb, var(--acc) 22%, transparent)" };
+export const SECTION_CLS =
+  "@container relative isolate -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-[color-mix(in_srgb,var(--acc)_22%,var(--border))] sm:mx-0 sm:rounded-xl";
+export const ACC_CHIP =
+  "shrink-0 whitespace-nowrap rounded-full bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))] px-1.5 py-0.5 text-[10px] font-semibold text-foreground ring-1 ring-[color-mix(in_srgb,var(--acc)_30%,var(--border))]";
+export const ACC_HOVER = "hover:bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))]";
+// 3px left edge in the card's colour, running down the header and open rows.
+export function AccentEdge() {
+  return <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 z-[1] w-[3px] bg-[color:var(--acc)]" />;
+}
 
 const SVG_PROPS = {
   viewBox: "0 0 24 24",

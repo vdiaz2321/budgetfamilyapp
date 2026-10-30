@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { type CSSProperties, useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import {
@@ -12,7 +12,7 @@ import {
 } from "./actions";
 import { ModalShell } from "@/components/modal-shell";
 import { ACTUAL_LABEL, actualColorClass, BudgetRow, mismatchPillClass, PILL_BASE, remainingColorClass, remainingText } from "./budget-row";
-import { DOT } from "./category-icons";
+import { ACC, ACC_CHIP, AccentEdge, SECTION_CLS, headerWash } from "./category-icons";
 import type { GroupData, RowData } from "./types";
 import { isHiddenPaidOffDebt } from "./types";
 
@@ -33,13 +33,9 @@ type Props = {
 
 // Per-kind accent for the "+ Add" pill so users can tell at a glance which
 // group a button belongs to when it's the only thing visible.
-const ADD_ACCENT: Record<CategoryKind, string> = {
-  income: "bg-positive/10 text-positive hover:bg-positive/20",
-  savings: "bg-sky-500/10 text-sky-500 hover:bg-sky-500/20",
-  bills: "bg-brand/10 text-brand hover:bg-brand/20",
-  expenses: "bg-accent/10 text-accent hover:bg-accent/20",
-  debt: "bg-negative/10 text-negative hover:bg-negative/20",
-};
+// The "+" add button, tinted with the card's own --acc colour.
+const ADD_BTN =
+  "bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))] text-[color:var(--acc)] hover:bg-[color-mix(in_srgb,var(--acc)_26%,var(--surface))]";
 
 function progressLabel(kind: CategoryKind, spent: number, planned: number): string {
   if (planned <= 0) return spent > 0 && (kind === "bills" || kind === "expenses") ? "-100%" : "0%";
@@ -175,16 +171,17 @@ export function BudgetGroup({
     // the window. With the sidebar open on a narrow laptop the card is only
     // ~300px wide while the viewport is past `sm`, so the 12-column header
     // rendered anyway and its three money tiles collided at ~47px each.
-    <section className="@container relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
+    <section className={SECTION_CLS} style={{ "--acc": ACC[group.kind] } as CSSProperties}>
       {/* Consolidated header: chevron + dot + name + sources chip on the left;
           inline totals + kind-tinted "+ Add" pill (+ Snowball link for debt)
           on the right. Replaces both the old header AND the old footer. */}
       {/* Mobile header — flex layout */}
-      {rowsOnly ? null : (<>
+      {rowsOnly ? null : (<><AccentEdge />
       <div
-        className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5 bg-surface/90 px-4 py-2.5 dark:bg-brand-soft/20 @md:hidden"
+        className="relative flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5 px-4 py-2.5 @md:hidden"
         onClick={onToggle}
       >
+        <span aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={headerWash(open)} />
         <button
           type="button"
           onClick={(event) => { event.stopPropagation(); onToggle(); }}
@@ -194,14 +191,13 @@ export function BudgetGroup({
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            className={`shrink-0 text-[color:var(--acc)] transition-transform ${open ? "" : "-rotate-90"}`}
             aria-hidden
           >
             <path d="M6 9l6 6 6-6" />
           </svg>
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
           <span className="min-w-0 truncate font-semibold">{group.name}</span>
-          <span className="shrink-0 rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+          <span className={ACC_CHIP}>
             {countLabel}
             <span className="hidden @md:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
           </span>
@@ -212,18 +208,17 @@ export function BudgetGroup({
             type="button"
             onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
             aria-label="Add item"
-            className={`flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition ${ADD_ACCENT[group.kind]}`}
+            className={`flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition ${ADD_BTN}`}
           >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
             </svg>
           </button>
         </div>
-        {/* Second line, lined up under the name (chevron 15 + dot 10 + two
-            8px gaps). On one line the name, count, menu, "$11,644.42 /
+        {/* Second line, lined up under the name (chevron 15 + one 8px gap). On one line the name, count, menu, "$11,644.42 /
             $5,101.55" and "+" needed ~30px more than a 375px phone has. */}
-        <span className="w-full whitespace-nowrap pl-[41px] text-xs tabular-nums">
-          <span className="text-muted">{formatMoney(visiblePlannedTotal, currency)} / </span>
+        <span className="w-full whitespace-nowrap pl-[23px] text-xs tabular-nums">
+          <span className="font-medium text-foreground">{formatMoney(visiblePlannedTotal, currency)} / </span>
           <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
             {formatMoney(visibleSpentTotal, currency)}
           </span>
@@ -231,42 +226,49 @@ export function BudgetGroup({
               year total fits here beside the month's pair — without the verb,
               which the group name already gives and which pushed the income
               line off a 375px screen. */}
-          <span className="text-muted"> · Total Yr {formatMoney(groupYtdTotal, currency)}</span>
+          <span className="font-medium text-foreground"> · Total Yr {formatMoney(groupYtdTotal, currency)}</span>
         </span>
       </div>
 
       {/* Desktop header — 14-col grid aligned with rows below */}
       <div
-        className="group/header hidden cursor-pointer grid-cols-14 items-center gap-2 bg-surface/90 px-3 py-2.5 dark:bg-brand-soft/20 @md:grid"
+        className="group/header relative hidden cursor-pointer grid-cols-14 items-center gap-2 px-3 py-2.5 @md:grid"
         onClick={onToggle}
       >
-        <div className="col-span-4 flex min-w-0 items-center gap-2.5">
+        <span aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={headerWash(open)} />
+        <div className="relative col-span-4 flex min-w-0 items-center">
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); onToggle(); }}
-            className="flex items-center gap-2.5 text-left"
+            className="flex min-w-0 items-center gap-1.5 text-left"
             aria-expanded={open}
           >
             <svg
               width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+              className={`shrink-0 text-[color:var(--acc)] transition-transform ${open ? "" : "-rotate-90"}`}
               aria-hidden
             >
               <path d="M6 9l6 6 6-6" />
             </svg>
-            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
-            <span className="font-semibold">{group.name}</span>
-            <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+            {/* Narrow card (a ~1180px laptop beside the rail): the name steps
+                down to 14px and the chip drops the word "items", so the block
+                fits instead of wrapping into the PLANNED tile. */}
+            <span className="min-w-0 truncate font-semibold @max-3xl:text-[14px]">{group.name}</span>
+            <span className={ACC_CHIP}>
               {countLabel}
-              <span className="@md:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
+              <span className="hidden @3xl:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
             </span>
           </button>
+          {/* The hover "+" and menu sit over the right end of the name block
+              instead of in the row: invisible, they still took 59px and
+              pushed the count chip into the PLANNED tile on a laptop. */}
+          <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full pl-1 group-hover/header:bg-[color-mix(in_srgb,var(--acc)_10%,var(--surface))]">
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
             aria-label={`Add ${group.name} item`}
-            className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover/header:opacity-100 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${ADD_ACCENT[group.kind]}`}
+            className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover/header:opacity-100 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${ADD_BTN}`}
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
@@ -278,6 +280,7 @@ export function BudgetGroup({
             group={group}
             className="opacity-0 transition-opacity group-hover/header:opacity-100 focus:opacity-100 focus-visible:opacity-100"
           />
+          </div>
         </div>
         {/* Four tiles sitting in the same 12-col grid as the rows below, so
             Plan / actual / Remaining / % line up with their columns instead of
@@ -295,19 +298,19 @@ export function BudgetGroup({
           type="button"
           onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
           disabled={!onFilter}
-          className="col-span-2 min-w-0 rounded-md px-0 py-1 text-center leading-tight tabular-nums enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+          className="col-span-2 min-w-0 rounded-md px-0 py-1 text-center leading-tight tabular-nums enabled:hover:bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))] enabled:cursor-pointer disabled:cursor-default"
         >
-          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">Planned</span>
-          <span className="block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground">Planned</span>
+          <span className="block text-[12px] font-bold @xl:text-[13px] @2xl:text-sm text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
         </button>
         <button
           type="button"
           onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
           disabled={!onFilter}
-          className="col-span-2 min-w-0 rounded-md px-0 py-1 text-center leading-tight tabular-nums enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+          className="col-span-2 min-w-0 rounded-md px-0 py-1 text-center leading-tight tabular-nums enabled:hover:bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))] enabled:cursor-pointer disabled:cursor-default"
         >
-          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">{headerActualLabel}</span>
-          <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground">{headerActualLabel}</span>
+          <span className={`block text-[12px] font-bold @xl:text-[13px] @2xl:text-sm ${actualColorClass(group.kind, visibleSpentTotal)}`}>
             {formatMoney(visibleSpentTotal, currency)}
           </span>
         </button>
@@ -317,12 +320,12 @@ export function BudgetGroup({
           aria-pressed={leftOnly}
           className={`col-span-2 min-w-0 cursor-pointer rounded-md px-0 py-1 text-center leading-tight tabular-nums ring-1 transition ${
             leftOnly
-              ? "bg-sky-100 ring-sky-300 dark:bg-sky-900/50 dark:ring-sky-700"
-              : "ring-transparent hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              ? "bg-[color-mix(in_srgb,var(--acc)_18%,var(--surface))] ring-[color-mix(in_srgb,var(--acc)_45%,var(--border))]"
+              : "ring-transparent hover:bg-[color-mix(in_srgb,var(--acc)_10%,var(--surface))]"
           }`}
         >
-          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">Remaining</span>
-          <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground">Remaining</span>
+          <span className={`block text-[12px] font-bold @xl:text-[13px] @2xl:text-sm ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
             {totalPill ? (
               <span className={`${PILL_BASE} whitespace-nowrap px-1.5 ${totalPill}`}>{remainingText(group.kind, remainingTotal, currency, true)}</span>
             ) : (
@@ -331,14 +334,14 @@ export function BudgetGroup({
           </span>
         </button>
         <div className="col-span-2 min-w-0 px-0 py-1 text-center leading-tight tabular-nums">
-          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">{progressColumnLabel}</span>
-          <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground">{progressColumnLabel}</span>
+          <span className={`block text-[12px] font-bold @xl:text-[13px] @2xl:text-sm ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
             {progressLabel(group.kind, visibleSpentTotal, visiblePlannedTotal)}
           </span>
         </div>
         <div className="col-span-2 min-w-0 px-0 py-1 text-center leading-tight tabular-nums">
-          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">{ytdColumnLabel}</span>
-          <span className="block text-[12px] font-semibold text-foreground @xl:text-[13px] @2xl:text-sm">
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground">{ytdColumnLabel}</span>
+          <span className="block text-[12px] font-bold text-foreground @xl:text-[13px] @2xl:text-sm">
             {formatMoney(groupYtdTotal, currency)}
           </span>
         </div>
@@ -346,7 +349,7 @@ export function BudgetGroup({
       </>)}
 
       {open || rowsOnly ? (
-        <div className={rowsOnly ? "" : "border-t border-line"}>
+        <div className={rowsOnly ? "" : "border-t border-[color-mix(in_srgb,var(--acc)_22%,var(--border))]"}>
           {listedRows.length === 0 && !adding ? (
             <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">
               <svg
@@ -462,7 +465,7 @@ export function BudgetGroup({
                 </div>
                 <div className="ml-auto text-right tabular-nums">
                   <div className="text-xs">
-                    <span className="text-muted">{formatMoney(visiblePlannedTotal, currency)} / </span>
+                    <span className="font-medium text-foreground">{formatMoney(visiblePlannedTotal, currency)} / </span>
                     <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
                       {formatMoney(visibleSpentTotal, currency)}
                     </span>

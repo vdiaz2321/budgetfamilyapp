@@ -53,8 +53,9 @@ const kindPillStyle = (kind: CategoryKind): React.CSSProperties => ({
 // Category, Payee and Account into "Hannah's…" / "1175 Sapph…". The minimums
 // add up to the table's min-width below (tracks + gaps + px-4); narrower
 // scrolls sideways instead of squeezing. Wider screens hand the extra room
-// to the fr columns.
-const GRID ="gap-x-2 grid-cols-[5rem_3.25rem_6.5rem_5.75rem_minmax(8rem,1.3fr)_minmax(7rem,1.1fr)_minmax(6.5rem,1fr)_minmax(9rem,1.6fr)_1.5rem] lg:gap-x-1.5 lg:grid-cols-[5.25rem_3.25rem_7rem_5.75rem_minmax(8rem,1.3fr)_minmax(7rem,1.1fr)_minmax(6.5rem,1fr)_minmax(9rem,1.6fr)_1.5rem]";
+// to the fr columns — Category gets the biggest share, since split rows add
+// a "Split of $…" tag beside the name and a laptop cut it to "Seeds/Gen…".
+const GRID ="gap-x-2 grid-cols-[5rem_3.25rem_6.5rem_5.75rem_minmax(8rem,2.2fr)_minmax(7rem,1.1fr)_minmax(7.5rem,0.8fr)_minmax(8rem,1.2fr)_1.5rem] lg:gap-x-1.5 lg:grid-cols-[5.25rem_3.25rem_7rem_5.75rem_minmax(8rem,2.2fr)_minmax(7rem,1.1fr)_minmax(7.5rem,0.8fr)_minmax(8rem,1.2fr)_1.5rem]";
 const TABLE_MIN_W = "min-w-[58.5rem] lg:min-w-[58.25rem]";
 
 // The columns the header can filter on, Excel-style.

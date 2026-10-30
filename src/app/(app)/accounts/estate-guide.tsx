@@ -12,6 +12,7 @@ import {
   saveEstateGuideField,
   saveEstateItemField,
 } from "./estate-actions";
+import { AccentEdge } from "../budget/category-icons";
 
 // Estate guide (Accounts → "Estate guide"): one place, and one printout, for
 // Victor's family to see every open account, who it passes to, who to call,
@@ -111,8 +112,14 @@ const owes = (a: AccountData) => a.kind === "credit_card" || a.kind === "debt_lo
 const valueOf = (a: AccountData) =>
   a.kind === "credit_card" ? -(a.owedCents ?? 0) : a.kind === "debt_loan" ? -Math.abs(a.balanceCents) : a.balanceCents;
 
+// White boxes with an accent-tinted ring, so they read as fillable on the
+// tinted section cards (the old pale boxes on a pale page read as disabled).
+// The var(--viz-savings) fallback covers Add account, which sets no --acc.
 const inputCls =
-  "w-full min-w-0 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-brand";
+  "w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm font-semibold ring-1 ring-[color-mix(in_srgb,var(--foreground)_22%,var(--border))] placeholder:font-normal placeholder:italic placeholder:text-foreground dark:placeholder:text-[color-mix(in_srgb,var(--foreground)_70%,var(--surface))] hover:ring-[color-mix(in_srgb,var(--foreground)_40%,var(--border))] focus:outline-none focus:ring-2 focus:ring-brand";
+// Inside a NotesBox: the box draws the border, the field stays plain.
+const bareCls =
+  "w-full min-w-0 bg-transparent py-0.5 text-sm font-semibold placeholder:font-normal placeholder:italic placeholder:text-foreground dark:placeholder:text-[color-mix(in_srgb,var(--foreground)_70%,var(--surface))] focus:outline-none";
 
 // Saves on blur when the text changed. Uncontrolled, keyed by the saved value,
 // so a refresh after saving shows what the server holds.
@@ -122,12 +129,14 @@ function SaveField({
   onSave,
   multiline = false,
   label,
+  bare = false,
 }: {
   initial: string | null;
   placeholder?: string;
   onSave: (value: string) => void;
   multiline?: boolean;
   label: string;
+  bare?: boolean;
 }) {
   const start = initial ?? "";
   const common = {
@@ -140,9 +149,9 @@ function SaveField({
   };
   return multiline ? (
     // Starts two lines tall; drag the corner for more.
-    <textarea key={start} rows={2} {...common} className={`${inputCls} h-[61px] resize-y`} />
+    <textarea key={start} rows={2} {...common} className={`${bare ? bareCls : inputCls} min-h-[61px] resize-y`} />
   ) : (
-    <input key={start} type="text" autoComplete="off" {...common} className={inputCls} />
+    <input key={start} type="text" autoComplete="off" {...common} className={bare ? bareCls : inputCls} />
   );
 }
 
@@ -215,7 +224,68 @@ function NameSelect({
 function Labeled({ label, children, className = "", center = true }: { label: string; children: React.ReactNode; className?: string; center?: boolean }) {
   return (
     <label className={`block min-w-0 ${center ? "text-center [&_input]:text-center [&_select]:text-center [&_select]:[text-align-last:center]" : ""} ${className}`}>
-      <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="mb-0.5 block text-[11px] font-bold uppercase tracking-wide text-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// Each step card and account group carries a calm accent as --acc.
+const acc = (c: string) => ({ "--acc": c }) as React.CSSProperties;
+const GROUP_ACC: Record<string, string> = {
+  Bank: "var(--viz-income)",
+  Savings: "var(--viz-savings)",
+  "Investments & retirement": "var(--positive)",
+  Property: "var(--viz-bills)",
+  Kids: "var(--viz-expenses)",
+  "Credit cards": "var(--viz-debt)",
+  Loans: "var(--negative)",
+};
+// Plain white step cards: a tinted wash here read as washed-out blue-on-blue
+// (and navy at 6% came out lavender). The accent lives in the number badge.
+// Dark mode: the cards step down to the darker page colour so the input and
+// notes boxes (bg-surface) stand out as lighter boxes instead of blending in.
+const STEP_CLS = "relative space-y-3 rounded-xl bg-surface p-3 shadow-sm ring-1 ring-line sm:p-4 dark:bg-background";
+// Dashed "+ add" buttons: the usual look for "this adds something".
+const ADD_CHIP =
+  "inline-flex items-center gap-1 rounded-full border border-dashed border-[color-mix(in_srgb,var(--foreground)_35%,var(--border))] bg-surface px-3 py-1.5 text-xs font-bold text-foreground transition hover:border-solid hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40";
+
+// Numbered step heading: the guide reads as a 1-2-3-4 checklist.
+function StepHead({ n, title, children }: { n: number; title: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-foreground text-sm font-bold text-[color:var(--surface)]">
+        {n}
+      </span>
+      <h3 className="text-base font-bold">{title}</h3>
+      {children ? <div className="ml-auto">{children}</div> : null}
+    </div>
+  );
+}
+
+// "N of M set" with a small bar; turns green once every one is set.
+function Progress({ done, total }: { done: number; total: number }) {
+  const full = total > 0 && done === total;
+  return (
+    <span className="flex items-center gap-2">
+      <span className="h-1.5 w-14 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--acc)_18%,var(--surface))] sm:w-24 dark:bg-[color-mix(in_srgb,var(--acc)_35%,var(--background))]">
+        <span
+          className="block h-full rounded-full"
+          style={{ width: `${total ? (done / total) * 100 : 0}%`, background: full ? "var(--positive)" : "var(--acc)" }}
+        />
+      </span>
+      <span className={`whitespace-nowrap text-xs font-bold tabular-nums ${full ? "text-positive" : "text-foreground"}`}>
+        {done} of {total} set
+      </span>
+    </span>
+  );
+}
+
+// Plain bordered notes box with its bold caps label inline (Victor's notes style).
+function NotesBox({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="flex min-w-0 items-start gap-2 rounded-md bg-surface px-2.5 py-1.5 ring-1 ring-line focus-within:ring-2 focus-within:ring-brand">
+      <span className="shrink-0 pt-1 text-[11px] font-bold uppercase tracking-wide">{label}</span>
       {children}
     </label>
   );
@@ -298,7 +368,7 @@ export function EstateGuideModal({
         className="sm:max-w-5xl"
         mobileAlign="top"
         headerExtra={
-          <span className="text-xs font-semibold text-muted" aria-live="polite">
+          <span className={`text-xs font-bold ${saved && !pending ? "text-positive" : "text-foreground"}`} aria-live="polite">
             {pending ? "Saving…" : saved ? "Saved" : ""}
           </span>
         }
@@ -313,9 +383,9 @@ export function EstateGuideModal({
         }
       >
         <div className="space-y-5 px-3 py-4 sm:px-5">
-          {/* Who handles things */}
-          <section className="space-y-3">
-            <h3 className="text-sm font-bold">Who handles things</h3>
+          {/* 1 · Who handles things */}
+          <section style={acc("var(--viz-income)")} className={STEP_CLS}>
+            <StepHead n={1} title="Who handles things" />
             {/* All four on one line on a desktop, Power of attorney first; two by two on a tablet. */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Labeled label="Power of attorney">
@@ -331,55 +401,48 @@ export function EstateGuideModal({
                 <SaveField label="Attorney" initial={g.attorney} placeholder="Name and phone" onSave={(v) => save(() => saveEstateGuideField("attorney", v))} />
               </Labeled>
             </div>
-            <Labeled label="Steps for the family" center={false}>
-              <SaveField
-                label="Steps for the family"
-                multiline
-                initial={g.instructions}
-                placeholder={"1. Call …\n2. …"}
-                onSave={(v) => save(() => saveEstateGuideField("instructions", v))}
-              />
-            </Labeled>
           </section>
 
-          {/* Accounts */}
-          <section className="space-y-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h3 className="text-sm font-bold">Accounts</h3>
-              <span className={`text-xs font-semibold ${setCount === open.length ? "text-positive" : "text-muted"}`}>
-                {setCount} of {open.length} set
-              </span>
-            </div>
+          {/* 2 · Accounts */}
+          <section style={acc("var(--viz-income)")} className={STEP_CLS}>
+            <StepHead n={2} title="Accounts">
+              <Progress done={setCount} total={open.length} />
+            </StepHead>
             {SECTIONS.map((section) => {
               const rows = open.filter(section.match);
               if (rows.length === 0) return null;
               const done = rows.filter((a) => fieldsOf(a.id).transfer).length;
               const isOpen = openSections.has(section.label);
               return (
-                <div key={section.label} className="overflow-hidden rounded-xl ring-1 ring-line">
-                  {/* Starts collapsed; the count says which groups still need work. */}
+                <div
+                  key={section.label}
+                  style={acc(GROUP_ACC[section.label])}
+                  className="relative overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-line dark:bg-background"
+                >
+                  <AccentEdge />
+                  {/* Starts collapsed; the bar says which groups still need work. */}
                   <button
                     type="button"
                     onClick={() => toggleSection(section.label)}
                     aria-expanded={isOpen}
-                    className="flex w-full items-center gap-2 border-b border-line bg-surface px-3 py-2 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                    className="flex w-full flex-wrap items-center gap-x-2 gap-y-1.5 py-2.5 pl-4 pr-3 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                   >
-                    <svg aria-hidden viewBox="0 0 20 20" className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${isOpen ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg aria-hidden viewBox="0 0 20 20" className={`h-4 w-4 shrink-0 text-foreground transition-transform ${isOpen ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M5 7.5 10 12.5 15 7.5" />
                     </svg>
                     <span className="text-xs font-bold uppercase tracking-wide">{section.label}</span>
-                    <span className="text-xs text-muted">{rows.length}</span>
-                    <span className={`ml-auto text-xs font-semibold ${done === rows.length ? "text-positive" : "text-muted"}`}>
-                      {done} of {rows.length} set
+                    <span className="rounded-full px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-line">{rows.length}</span>
+                    <span className="ml-auto">
+                      <Progress done={done} total={rows.length} />
                     </span>
                   </button>
                   {isOpen ? (
-                  <ul className="divide-y divide-line">
+                  <ul className="divide-y divide-line border-t border-line">
                     {rows.map((a) => {
                       const f = fieldsOf(a.id);
                       const value = valueOf(a);
                       return (
-                        <li key={a.id} className="space-y-2 px-3 py-2.5">
+                        <li key={a.id} className="space-y-2 py-3 pl-4 pr-3">
                           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                             <div className="flex min-w-0 flex-wrap items-center gap-x-2">
                               <span className="font-semibold">{a.name}</span>
@@ -397,13 +460,13 @@ export function EstateGuideModal({
                                 type="button"
                                 disabled={pending}
                                 onClick={() => save(() => saveAccountEstateField(a.id, "hidden", "1"))}
-                                className="rounded-md px-2 py-0.5 text-xs font-semibold text-muted ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-sky-950/40"
+                                className="rounded-md px-2 py-0.5 text-xs font-semibold text-foreground ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-sky-950/40"
                               >
                                 Hide
                               </button>
                             </div>
                           </div>
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.3fr)]">
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,1fr)_minmax(0,1.1fr)]">
                             <Labeled label="Bank / company">
                               <SaveField label={`${a.name} bank`} initial={a.institution} placeholder="e.g. USAA" onSave={(v) => save(() => saveAccountEstateField(a.id, "institution", v))} />
                             </Labeled>
@@ -443,10 +506,12 @@ export function EstateGuideModal({
                             <Labeled label="Contact">
                               <SaveField label={`${a.name} contact`} initial={f.contact} placeholder="Phone or website" onSave={(v) => save(() => saveAccountEstateField(a.id, "contact", v))} />
                             </Labeled>
-                            <Labeled label="Notes" className="col-span-2 sm:col-span-1">
-                              <SaveField label={`${a.name} notes`} initial={f.notes} placeholder="Where the paperwork is" onSave={(v) => save(() => saveAccountEstateField(a.id, "notes", v))} />
-                            </Labeled>
                           </div>
+                          {/* Notes on their own line under the fields, in the
+                              plain bordered notes style. */}
+                          <NotesBox label="Notes:">
+                            <SaveField bare label={`${a.name} notes`} initial={f.notes} placeholder="Where the paperwork is kept" onSave={(v) => save(() => saveAccountEstateField(a.id, "notes", v))} />
+                          </NotesBox>
                         </li>
                       );
                     })}
@@ -465,17 +530,17 @@ export function EstateGuideModal({
                   aria-expanded={openSections.has(HIDDEN)}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-sky-100 dark:hover:bg-sky-950/40"
                 >
-                  <svg aria-hidden viewBox="0 0 20 20" className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${openSections.has(HIDDEN) ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg aria-hidden viewBox="0 0 20 20" className={`h-3.5 w-3.5 shrink-0 text-foreground transition-transform ${openSections.has(HIDDEN) ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M5 7.5 10 12.5 15 7.5" />
                   </svg>
-                  <span className="text-xs font-bold uppercase tracking-wide text-muted">Hidden</span>
-                  <span className="text-xs text-muted">{hiddenAccounts.length}</span>
+                  <span className="text-xs font-bold uppercase tracking-wide text-foreground">Hidden</span>
+                  <span className="text-xs font-semibold text-foreground">{hiddenAccounts.length}</span>
                 </button>
                 {openSections.has(HIDDEN) ? (
                   <ul className="divide-y divide-line border-t border-line">
                     {hiddenAccounts.map((a) => (
                       <li key={a.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                        <span className="min-w-0 truncate text-muted">{a.name}</span>
+                        <span className="min-w-0 truncate font-semibold text-foreground">{a.name}</span>
                         <button
                           type="button"
                           disabled={pending}
@@ -496,7 +561,7 @@ export function EstateGuideModal({
           {owing.length > 0 ? (
             <section className="space-y-2">
               <h3 className="text-sm font-bold">Debts</h3>
-              <p className="text-xs text-muted">Debts: paid from the estate first</p>
+              <p className="text-xs font-semibold text-foreground">Debts: paid from the estate first</p>
               <ul className="divide-y divide-line overflow-hidden rounded-xl ring-1 ring-line">
                 {owing.map((d) => (
                   <li key={d.subcategoryId} className="flex items-baseline justify-between gap-3 px-3 py-2 text-sm">
@@ -508,9 +573,9 @@ export function EstateGuideModal({
             </section>
           ) : null}
 
-          {/* Insurance & benefits */}
-          <section className="space-y-3">
-            <h3 className="text-sm font-bold">Insurance &amp; benefits</h3>
+          {/* 3 · Insurance & benefits */}
+          <section style={acc("var(--viz-bills)")} className={STEP_CLS}>
+            <StepHead n={3} title="Insurance &amp; benefits" />
             <div className="flex flex-wrap gap-1.5">
               {PRESETS.filter((p) => !usedPresets.has(p.name)).map((p) => (
                 <button
@@ -518,9 +583,10 @@ export function EstateGuideModal({
                   type="button"
                   disabled={pending}
                   onClick={() => save(() => addEstateItem(p.kind, p.name))}
-                  className="rounded-full bg-surface px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-sky-950/40"
+                  className={ADD_CHIP}
                 >
-                  + {p.name}
+                  <span aria-hidden className="text-sm leading-none">+</span>
+                  {p.name}
                 </button>
               ))}
               <AddOther disabled={pending} onAdd={(name) => save(() => addEstateItem("other", name))} />
@@ -529,7 +595,7 @@ export function EstateGuideModal({
               <ul className="divide-y divide-line overflow-hidden rounded-xl ring-1 ring-line">
                 {estate.items.map((item) => (
                   <li key={item.id} className="space-y-2 px-3 py-2.5">
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.3fr)_auto] sm:items-end">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem_minmax(0,1.2fr)_minmax(0,1.3fr)_auto] sm:items-end">
                       <Labeled label="Name" className="col-span-2 sm:col-span-1">
                         <SaveField label="Name" initial={item.name} onSave={(v) => save(() => saveEstateItemField(item.id, "name", v))} />
                       </Labeled>
@@ -552,12 +618,14 @@ export function EstateGuideModal({
                       {/* Read by the Net Worth survivor view: a benefit is
                           monthly, insurance pays out once. */}
                       <Labeled label={item.kind === "benefit" ? "Per month" : item.kind === "insurance" ? "Payout" : "Value"}>
-                        <SaveField
-                          label={`${item.name} amount`}
-                          initial={item.amountCents != null ? centsToDisplay(item.amountCents) : null}
-                          placeholder="0.00"
-                          onSave={(v) => save(() => saveEstateItemField(item.id, "amount", v))}
-                        />
+                        <div className="mx-auto w-28">
+                          <SaveField
+                            label={`${item.name} amount`}
+                            initial={item.amountCents != null ? centsToDisplay(item.amountCents) : null}
+                            placeholder="0.00"
+                            onSave={(v) => save(() => saveEstateItemField(item.id, "amount", v))}
+                          />
+                        </div>
                       </Labeled>
                       <Labeled label="Beneficiary">
                         <NameSelect
@@ -570,15 +638,35 @@ export function EstateGuideModal({
                       <Labeled label="Contact">
                         <SaveField label={`${item.name} contact`} initial={item.contact} placeholder="Phone or website" onSave={(v) => save(() => saveEstateItemField(item.id, "contact", v))} />
                       </Labeled>
-                      <Labeled label="Notes">
-                        <SaveField label={`${item.name} notes`} initial={item.notes} placeholder="Policy #, where papers are" onSave={(v) => save(() => saveEstateItemField(item.id, "notes", v))} />
-                      </Labeled>
                       <RemoveButton disabled={pending} onRemove={() => save(() => deleteEstateItem(item.id))} />
                     </div>
+                    <NotesBox label="Notes:">
+                      <SaveField bare label={`${item.name} notes`} initial={item.notes} placeholder="Policy number, where the papers are" onSave={(v) => save(() => saveEstateItemField(item.id, "notes", v))} />
+                    </NotesBox>
                   </li>
                 ))}
               </ul>
-            ) : null}
+            ) : (
+              <p className="rounded-xl border border-dashed border-[color-mix(in_srgb,var(--foreground)_25%,var(--border))] px-3 py-3 text-center text-sm font-semibold">
+                Tap a button above to add each policy or benefit.
+              </p>
+            )}
+          </section>
+
+          {/* 4 · Steps for the family — last, since it's written once the
+              people and accounts above are in. */}
+          <section style={acc("var(--viz-income)")} className={STEP_CLS}>
+            <StepHead n={4} title="Steps for the family" />
+            <NotesBox label="Steps:">
+              <SaveField
+                bare
+                label="Steps for the family"
+                multiline
+                initial={g.instructions}
+                placeholder={"1. Who to call first\n2. Where the papers are"}
+                onSave={(v) => save(() => saveEstateGuideField("instructions", v))}
+              />
+            </NotesBox>
           </section>
         </div>
       </ModalShell>
@@ -609,7 +697,7 @@ export function EstateAddFields({ names }: { names: string[] }) {
   const [open, setOpen] = useState(false);
   const [beneficiary, setBeneficiary] = useState("");
   const [typing, setTyping] = useState(false);
-  const labelCls = "mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted";
+  const labelCls = "mb-0.5 block text-[10px] font-bold uppercase tracking-wide text-foreground";
   if (!open) {
     return (
       <button
@@ -711,9 +799,10 @@ function AddOther({ disabled, onAdd }: { disabled: boolean; onAdd: (name: string
       <button
         type="button"
         onClick={() => setAdding(true)}
-        className="rounded-full bg-surface px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+        className={ADD_CHIP}
       >
-        + Other
+        <span aria-hidden className="text-sm leading-none">+</span>
+        Other
       </button>
     );
   }
@@ -727,11 +816,11 @@ function AddOther({ disabled, onAdd }: { disabled: boolean; onAdd: (name: string
       }}
       className="flex items-center gap-1.5"
     >
-      <input name="name" autoFocus placeholder="e.g. Car, Google account" className={`${inputCls} w-48`} />
+      <input name="name" autoFocus placeholder="e.g. Car, Google account" className={`${inputCls} w-44 sm:w-56`} />
       <button type="submit" disabled={disabled} className="rounded-md bg-brand px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
         Add
       </button>
-      <button type="button" onClick={() => setAdding(false)} className="px-1.5 text-xs font-semibold text-muted hover:text-foreground">
+      <button type="button" onClick={() => setAdding(false)} className="px-1.5 text-xs font-semibold text-foreground hover:text-negative">
         Cancel
       </button>
     </form>

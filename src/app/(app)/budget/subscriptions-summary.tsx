@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { type CSSProperties, useEffect, useRef, useState, useTransition } from "react";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoney, centsToDisplay, currencySymbol } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { DOT } from "./category-icons";
+import { ACC_HOVER, AccentEdge, SECTION_CLS, headerWash } from "./category-icons";
 import { reorderIrregularBills, reorderSubscriptions, setIrregularBillMonthPlan, updateSubscriptionAmount, updateSubscriptionDueDate } from "../subscriptions/actions";
 import { SubscriptionForm, type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
 import { actualColorClass, remainingColorClass } from "./budget-row";
@@ -157,68 +157,44 @@ export function SubscriptionsSummaryCard({
   const editorTxs = transactions.filter((t) => editorTxIds.has(t.id));
 
   return (
-    <section className="relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
-      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-4 py-2.5">
+    <section className={SECTION_CLS} style={{ "--acc": "var(--viz-bills)" } as CSSProperties}>
+      <CardHeader
+        name="Subscriptions"
+        open={open}
+        onToggle={onToggle}
+        overCount={overspentOnly ? visibleRows.length : null}
+        plannedCents={monthPlannedCents}
+        spentCents={monthSpentCents}
+        currency={currency}
+        onOpenSpent={onOpenSpent}
+      >
+        {overspentOnly ? null : (
+          <div className="flex shrink-0 overflow-hidden rounded-lg text-[11px] ring-1 ring-[color-mix(in_srgb,var(--acc)_30%,var(--border))]">
+            {([true, false] as const).map((mode) => (
+              <button
+                key={String(mode)}
+                type="button"
+                onClick={() => setSortState((current) => ({ ...current, byDue: mode }))}
+                aria-pressed={byDue === mode}
+                className={`px-2 py-1 font-medium transition ${
+                  byDue === mode
+                    ? "bg-[color-mix(in_srgb,var(--acc)_18%,var(--surface))] text-foreground"
+                    : "text-foreground hover:bg-[color-mix(in_srgb,var(--acc)_10%,var(--surface))]"
+                }`}
+              >
+                {mode ? "By due" : "Manual"}
+              </button>
+            ))}
+          </div>
+        )}
         <button
           type="button"
-          onClick={onToggle}
-          className="flex items-center gap-2.5 text-left"
-          aria-expanded={open}
-        >
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT.bills}`} />
-          <span className="font-semibold">Subscriptions</span>
-          {overspentOnly ? (
-            <span className="shrink-0 whitespace-nowrap rounded-full bg-negative/15 px-2 py-0.5 text-[10px] font-semibold text-negative">
-              {visibleRows.length} over plan
-            </span>
-          ) : null}
-          <Chevron open={open} />
-        </button>
-
-        <div className="flex flex-wrap items-center justify-end gap-2 text-xs tabular-nums">
-          {overspentOnly ? null : onOpenSpent ? (
-            <button
-              type="button"
-              onClick={onOpenSpent}
-              className="cursor-pointer grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
-            >
-              <span>Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span></span>
-              <span>Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span></span>
-            </button>
-          ) : (
-            <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center px-2 py-0.5 text-right text-muted">
-              <span>Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span></span>
-              <span>Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span></span>
-            </div>
-          )}
-          {overspentOnly ? null : (
-            <div className="flex shrink-0 overflow-hidden rounded-lg text-[11px] ring-1 ring-line">
-              {([true, false] as const).map((mode) => (
-                <button
-                  key={String(mode)}
-                  type="button"
-                  onClick={() => setSortState((current) => ({ ...current, byDue: mode }))}
-                  aria-pressed={byDue === mode}
-                  className={`px-2 py-1 font-medium transition ${
-                    byDue === mode
-                      ? "bg-brand-soft text-brand"
-                      : "text-muted hover:bg-brand-soft/40 hover:text-foreground"
-                  }`}
-                >
-                  {mode ? "By due" : "Manual"}
-                </button>
-              ))}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => setEditorTarget("new")}
-            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-brand/30 px-2.5 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft"
+          onClick={() => setEditorTarget("new")}
+          className="inline-flex shrink-0 items-center justify-center rounded-lg border border-brand/30 px-2.5 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft"
           >
             + Add
           </button>
-        </div>
-      </div>
+      </CardHeader>
 
       {open ? (
         <div className="border-t border-line">
@@ -597,51 +573,17 @@ export function IrregularBillsSummaryCard({
   const paymentsTxs = transactions.filter((t) => paymentsTxIds.has(t.id));
 
   return (
-    <section className="relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
-      <div className="flex items-center justify-between gap-2 px-4 py-2.5">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex items-center gap-2.5 text-left"
-          aria-expanded={open}
-        >
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT.bills}`} />
-          <span className="font-semibold">Irregular Bills</span>
-          {overspentOnly ? (
-            <span className="shrink-0 whitespace-nowrap rounded-full bg-negative/15 px-2 py-0.5 text-[10px] font-semibold text-negative">
-              {visibleRows.length} over plan
-            </span>
-          ) : null}
-          <Chevron open={open} />
-        </button>
-
-        <div className="flex items-center gap-2 text-xs tabular-nums">
-          {onOpenSpent ? (
-            <button
-              type="button"
-              onClick={onOpenSpent}
-              className="cursor-pointer grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
-            >
-              <span>Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span></span>
-              <span>Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span></span>
-            </button>
-          ) : (
-            <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center px-2 py-0.5 text-right text-muted">
-              <span>Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span></span>
-              <span>Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span></span>
-            </div>
-          )}
-          {/* Invisible copy of the Subscriptions card's sort toggle + Add
-              button, so Plan / Spent sit in the same columns on both cards. */}
-          <div className="invisible hidden items-center gap-2 sm:flex" aria-hidden>
-            <div className="flex shrink-0 overflow-hidden rounded-lg text-[11px] ring-1 ring-line">
-              <span className="px-2 py-1 font-medium">By due</span>
-              <span className="px-2 py-1 font-medium">Manual</span>
-            </div>
-            <span className="inline-flex shrink-0 rounded-lg border px-2.5 py-1 text-xs font-semibold">+ Add</span>
-          </div>
-        </div>
-      </div>
+    <section className={SECTION_CLS} style={{ "--acc": "var(--viz-bills)" } as CSSProperties}>
+      <CardHeader
+        name="Irregular Bills"
+        open={open}
+        onToggle={onToggle}
+        overCount={overspentOnly ? visibleRows.length : null}
+        plannedCents={totalPlanned}
+        spentCents={totalSpent}
+        currency={currency}
+        onOpenSpent={onOpenSpent}
+      />
 
       {open ? (
         <div className="border-t border-line">
@@ -1040,12 +982,110 @@ function IrregularPlannedInput({
   );
 }
 
+// Header for the Subscriptions and Irregular Bills cards, built like a budget
+// group's header so the three sit as one list: on a wide card the same
+// 14-column grid, so Planned / Spent / Remaining land under the group rows'
+// Planned / actual / Remaining tiles; on a narrow one the name, then the
+// totals on a second line. `children` (the sort toggle and + Add) sit at the
+// right end. The overspent view drops the totals — they'd be whole-card
+// figures over a filtered list.
+function CardHeader({
+  name,
+  open,
+  onToggle,
+  overCount,
+  plannedCents,
+  spentCents,
+  currency,
+  onOpenSpent,
+  children,
+}: {
+  name: string;
+  open: boolean;
+  onToggle: () => void;
+  overCount: number | null;
+  plannedCents: number;
+  spentCents: number;
+  currency: string;
+  onOpenSpent?: () => void;
+  children?: React.ReactNode;
+}) {
+  const remainingCents = plannedCents - spentCents;
+  const showTotals = overCount === null;
+  // `narrow` is the wide-card header's step-down: like the budget groups, the
+  // name drops to 14px while the card is under @3xl. The phone header keeps
+  // its size.
+  const nameButton = (narrow: boolean) => (
+    <button type="button" onClick={onToggle} className={`flex min-w-0 items-center ${narrow ? "gap-1.5" : "gap-2"} text-left`} aria-expanded={open}>
+      <Chevron open={open} />
+      <span className={`truncate font-semibold ${narrow ? "@max-3xl:text-[14px]" : ""}`}>{name}</span>
+      {overCount !== null ? (
+        <span className="shrink-0 whitespace-nowrap rounded-full bg-negative/15 px-2 py-0.5 text-[10px] font-semibold text-negative">
+          {overCount} over plan
+        </span>
+      ) : null}
+    </button>
+  );
+  const tiles: { label: string; value: string; color: string; onClick?: () => void }[] = [
+    { label: "Planned", value: formatMoney(plannedCents, currency), color: "text-foreground", onClick: onOpenSpent },
+    { label: "Spent", value: formatMoney(spentCents, currency), color: actualColorClass("bills", spentCents), onClick: onOpenSpent },
+    { label: "Remaining", value: formatMoney(remainingCents, currency), color: remainingColorClass("bills", remainingCents, plannedCents) },
+  ];
+
+  return (
+    <>
+      <AccentEdge />
+      {/* Narrow card */}
+      <div className="relative flex flex-wrap items-center gap-x-2 gap-y-0.5 px-4 py-2.5 @md:hidden">
+        <span aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={headerWash(open)} />
+        {nameButton(false)}
+        <div className="ml-auto flex shrink-0 items-center gap-2">{children}</div>
+        {showTotals ? (
+          <span className="w-full whitespace-nowrap pl-[23px] text-xs tabular-nums">
+            <span className="font-medium text-foreground">{formatMoney(plannedCents, currency)} / </span>
+            <span className={`font-semibold ${actualColorClass("bills", spentCents)}`}>{formatMoney(spentCents, currency)}</span>
+            <span className="font-medium text-foreground"> · Left </span>
+            <span className={`font-semibold ${remainingColorClass("bills", remainingCents, plannedCents)}`}>
+              {formatMoney(remainingCents, currency)}
+            </span>
+          </span>
+        ) : null}
+      </div>
+
+      {/* Wide card — same columns as the budget group header */}
+      <div className="relative hidden grid-cols-14 items-center gap-2 px-3 py-2.5 @md:grid">
+        <span aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={headerWash(open)} />
+        <div className="col-span-4 flex min-w-0 items-center">{nameButton(true)}</div>
+        {showTotals
+          ? tiles.map((t) => {
+              const body = (
+                <>
+                  <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground">{t.label}</span>
+                  <span className={`block text-[12px] font-bold @xl:text-[13px] @2xl:text-sm ${t.color}`}>{t.value}</span>
+                </>
+              );
+              const cls = "col-span-2 min-w-0 rounded-md px-0 py-1 text-center leading-tight tabular-nums";
+              return t.onClick ? (
+                <button key={t.label} type="button" onClick={t.onClick} className={`${cls} cursor-pointer ${ACC_HOVER}`}>
+                  {body}
+                </button>
+              ) : (
+                <div key={t.label} className={cls}>{body}</div>
+              );
+            })
+          : <div className="col-span-6" />}
+        <div className="col-span-4 flex min-w-0 items-center justify-end gap-2">{children}</div>
+      </div>
+    </>
+  );
+}
+
 function Chevron({ open }: { open: boolean }) {
   return (
     <svg
       width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-      className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+      className={`shrink-0 text-[color:var(--acc)] transition-transform ${open ? "" : "-rotate-90"}`}
       aria-hidden
     >
       <path d="M6 9l6 6 6-6" />
@@ -1091,9 +1131,9 @@ export function MonthPayments({
   // whatever charges landed.
   const status =
     txs.length === 0
-      ? { label: "Not paid yet", className: "text-warning" }
+      ? { label: "Not paid yet", className: "text-negative" }
       : plannedCents > 0 && spent < plannedCents
-        ? { label: "Partly paid", className: "text-warning" }
+        ? { label: "Partly paid", className: "text-negative" }
         : { label: "Paid", className: "text-positive" };
   const dateLabel = (iso: string) => {
     const [, m, d] = iso.split("-").map(Number);
@@ -1150,9 +1190,9 @@ export function MonthPayments({
         <button
           type="button"
           onClick={onAdd}
-          className="mt-2 w-full rounded-lg border border-line px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/30"
+          className="mt-2 w-full rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
         >
-          + Log payment
+          + Add transaction
         </button>
       ) : null}
     </div>

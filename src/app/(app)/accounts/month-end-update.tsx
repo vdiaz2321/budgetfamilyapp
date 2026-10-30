@@ -127,6 +127,27 @@ export function MonthEndUpdateModal({
 
   const allItems = sections.flatMap((s) => s.groups.flatMap((g) => g.items));
   const doneCount = allItems.filter((i) => isDone(i.key)).length;
+  // Folded bucketed accounts, per month. Seeded once per month (folded when
+  // every bucket is already ticked); after that only clicking the name changes
+  // it, so ticking the last bucket never folds rows out from under the cursor.
+  const [collapsed, setCollapsed] = useState<Record<string, Set<string>>>({});
+  if (!collapsed[month]) {
+    const seed = new Set(
+      sections
+        .flatMap((s) => s.groups)
+        .filter((g) => g.account.buckets.length > 0 && g.items.every((i) => isDone(i.key)))
+        .map((g) => g.account.id),
+    );
+    setCollapsed((c) => ({ ...c, [month]: seed }));
+  }
+  const isCollapsed = (id: string) => collapsed[month]?.has(id) ?? false;
+  const toggleGroup = (id: string) =>
+    setCollapsed((c) => {
+      const n = new Set(c[month]);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return { ...c, [month]: n };
+    });
 
   // The month's recorded value: the live balance for this month, the snapshot
   // for last month.
@@ -204,8 +225,8 @@ export function MonthEndUpdateModal({
   const chip = (active: boolean) =>
     `shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold shadow-sm ring-1 ring-inset transition ${
       active
-        ? "bg-surface font-bold text-foreground ring-foreground/25"
-        : "bg-surface text-foreground ring-line hover:ring-foreground/25"
+        ? "bg-sky-100 font-bold text-foreground ring-sky-300/70 dark:bg-sky-900/50 dark:ring-sky-700/60"
+        : "bg-surface text-foreground ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
     }`;
 
   return (
@@ -233,7 +254,7 @@ export function MonthEndUpdateModal({
             <span className="font-semibold">
               {doneCount} of {allItems.length} done
             </span>
-            <span className="text-xs text-muted">
+            <span className="text-xs font-medium">
               {monthName(compareMonth)} → {monthName(month)}
             </span>
           </div>
@@ -246,7 +267,7 @@ export function MonthEndUpdateModal({
               }}
             />
           </div>
-          <p className="mt-2 text-xs text-muted">
+          <p className="mt-2 text-xs">
             Saves and ticks when you leave a box.
             {month === lastMonth
               ? ` ${monthName(month, "long")} values also fill ${monthName(currentMonth, "long")} unless it's ticked there.`
@@ -256,7 +277,7 @@ export function MonthEndUpdateModal({
         </div>
 
         {/* Column headers */}
-        <div className={`${GRID} sticky top-0 z-10 -mx-2 border-b border-line bg-surface px-2 py-1.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted`}>
+        <div className={`${GRID} sticky top-0 z-10 border-b border-line bg-surface px-2 py-1.5 text-center text-[11px] font-bold uppercase tracking-wide`}>
           <span className="hidden text-left sm:block">Account</span>
           <span>{monthName(compareMonth)}</span>
           <span>{monthName(month)}</span>
@@ -270,82 +291,109 @@ export function MonthEndUpdateModal({
             .filter((g) => g.visible.length > 0);
           if (groups.length === 0) return null;
           return (
-            <div key={sec.label} className="mt-4">
-              <h3 className="mb-1 text-xs font-bold uppercase tracking-wide text-muted">{sec.label}</h3>
-              <ul className="divide-y divide-line/60">
+            <div key={sec.label} className="mt-5">
+              <h3 className="mb-1.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wider">
+                {sec.label}
+                <span aria-hidden className="h-px flex-1 bg-line" />
+              </h3>
+              {/* Each section is a card on the page colour, so the white input
+                  boxes stand out in light and dark mode alike. */}
+              <ul className="divide-y divide-line overflow-hidden rounded-xl bg-background ring-1 ring-line">
                 {groups.map((g) => {
                   const bucketed = g.account.buckets.length > 0;
                   const prevTotal = g.items.reduce((s, i) => s + (i.balancesByMonth[compareMonth] ?? 0), 0);
                   const newTotal = g.items.reduce((s, i) => s + (shownCents(i) ?? 0), 0);
-                  const allDone = g.items.every((i) => isDone(i.key));
+                  const doneN = g.items.filter((i) => isDone(i.key)).length;
+                  const allDone = doneN === g.items.length;
+                  const shut = bucketed && isCollapsed(g.account.id);
                   return (
-                    <li key={g.account.id} className="py-1">
+                    <li key={g.account.id} className="px-2 py-1">
                       {bucketed ? (
-                        // The account's grand total — shaded and tagged so it reads as the sum
-                        // of the buckets under it, not one more row to fill in. -mx/px keep its
-                        // figures lined up with the bucket rows.
-                        <div className={`${GRID} -mx-2 gap-y-1 rounded-lg bg-surface px-2 py-2 ring-1 ring-line`}>
-                          <span className="col-span-4 flex min-w-0 items-center gap-2 sm:col-span-1">
-                            <span className="truncate text-sm font-semibold">{g.account.name}</span>
-                            <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-foreground ring-1 ring-line">
+                        // The account's grand total, as the group's header. A click anywhere
+                        // on the row folds its buckets; folded, it still says how many are
+                        // done. The name stays a real button for the keyboard.
+                        <div
+                          onClick={() => toggleGroup(g.account.id)}
+                          className={`${GRID} cursor-pointer gap-y-1 rounded-md py-1 shadow-[inset_3px_0_0_var(--viz-savings)] transition hover:bg-sky-50 dark:hover:bg-sky-950/40`}
+                        >
+                          <button
+                            type="button"
+                            aria-expanded={!shut}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleGroup(g.account.id);
+                            }}
+                            className="col-span-4 flex min-h-8 min-w-0 items-center gap-1.5 rounded-md pl-2.5 text-left sm:col-span-1"
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 transition-transform ${shut ? "-rotate-90" : ""}`}>
+                              <path d="M6 9l6 6 6-6" />
+                            </svg>
+                            <span className="truncate text-sm font-bold">{g.account.name}</span>
+                            <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-line">
                               Total
                             </span>
-                          </span>
-                          <span className="text-center text-sm font-semibold tabular-nums text-muted">${money(prevTotal)}</span>
-                          <span className="text-center text-sm font-semibold tabular-nums">${money(newTotal)}</span>
+                            {shut && !allDone ? (
+                              <span className="shrink-0 text-xs font-semibold">
+                                {doneN} of {g.items.length} done
+                              </span>
+                            ) : null}
+                          </button>
+                          <span className="text-center text-sm font-semibold tabular-nums">${money(prevTotal)}</span>
+                          <span className="text-center text-sm font-bold tabular-nums">${money(newTotal)}</span>
                           <Change cents={newTotal - prevTotal} bold />
-                          <span className="flex justify-center">
-                            {allDone ? <CheckDot done static /> : null}
-                          </span>
+                          <span className="flex justify-center">{allDone ? <CheckDot done static /> : null}</span>
                         </div>
                       ) : null}
-                      {g.visible.map((i) => {
-                        const rowKey = `${month}|${i.key}`;
-                        const prev = i.balancesByMonth[compareMonth] ?? null;
-                        const shown = shownCents(i);
-                        const done = isDone(i.key);
-                        const base = baseCents(i);
-                        return (
-                          <div key={i.key} className={`${GRID} gap-y-1 py-1.5 ${bucketed ? "sm:pl-4" : ""}`}>
-                            <span className={`col-span-4 truncate text-sm sm:col-span-1 ${bucketed ? "pl-3 text-muted sm:pl-0" : "font-semibold"}`}>
-                              {i.name}
-                            </span>
-                            <span className="text-center text-sm tabular-nums text-muted">
-                              {prev == null ? "—" : `$${money(prev)}`}
-                            </span>
-                            <input
-                              inputMode="decimal"
-                              aria-label={`${i.name} ${monthName(month, "long")} balance`}
-                              value={typed[rowKey] ?? (base == null ? "" : inputValue(base))}
-                              placeholder={prev == null ? "" : inputValue(prev)}
-                              onChange={(e) => setTyped((t) => ({ ...t, [rowKey]: e.target.value }))}
-                              onFocus={(e) => e.target.select()}
-                              onBlur={() => onBlur(i)}
-                              data-month-end-input
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                                if (e.key === "Tab") tabDown(e);
-                              }}
-                              className={`w-full min-w-0 rounded-md bg-surface px-2 py-1 text-center text-sm tabular-nums ring-1 ring-inset transition focus:outline-none focus:ring-2 focus:ring-brand ${
-                                done ? "ring-[color:var(--positive)]/50" : "ring-line"
-                              }`}
-                            />
-                            <Change cents={shown == null || prev == null ? null : shown - prev} />
-                            <span className="flex justify-center">
-                              <button
-                                type="button"
-                                aria-label={done ? `Mark ${i.name} not done` : `Mark ${i.name} done`}
-                                aria-pressed={done}
-                                disabled={saving.has(rowKey)}
-                                onClick={() => toggle(i)}
-                                className="rounded-full disabled:opacity-50"
-                              >
-                                <CheckDot done={done} />
-                              </button>
-                            </span>
-                          </div>
-                        );
-                      })}
+                      {shut ? null : (
+                        <div className="relative">
+                          {bucketed ? <span aria-hidden className="absolute bottom-2 left-4 top-0 hidden w-px bg-line sm:block" /> : null}
+                          {g.visible.map((i) => {
+                            const rowKey = `${month}|${i.key}`;
+                            const prev = i.balancesByMonth[compareMonth] ?? null;
+                            const shown = shownCents(i);
+                            const done = isDone(i.key);
+                            const base = baseCents(i);
+                            return (
+                              <div key={i.key} className={`${GRID} gap-y-1 py-1.5`}>
+                                <span className={`col-span-4 truncate text-sm font-semibold sm:col-span-1 ${bucketed ? "pl-7" : "pl-2.5"}`}>
+                                  {i.name}
+                                </span>
+                                <span className="text-center text-sm tabular-nums">{prev == null ? "—" : `$${money(prev)}`}</span>
+                                <input
+                                  inputMode="decimal"
+                                  aria-label={`${i.name} ${monthName(month, "long")} balance`}
+                                  value={typed[rowKey] ?? (base == null ? "" : inputValue(base))}
+                                  placeholder={prev == null ? "" : inputValue(prev)}
+                                  onChange={(e) => setTyped((t) => ({ ...t, [rowKey]: e.target.value }))}
+                                  onFocus={(e) => e.target.select()}
+                                  onBlur={() => onBlur(i)}
+                                  data-month-end-input
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                    if (e.key === "Tab") tabDown(e);
+                                  }}
+                                  className={`w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-center text-sm font-bold tabular-nums ring-1 ring-inset transition placeholder:italic placeholder:font-normal placeholder:text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
+                                    done ? "ring-[color:var(--positive)]/50" : "ring-[color-mix(in_srgb,var(--foreground)_22%,var(--border))]"
+                                  }`}
+                                />
+                                <Change cents={shown == null || prev == null ? null : shown - prev} />
+                                <span className="flex justify-center">
+                                  <button
+                                    type="button"
+                                    aria-label={done ? `Mark ${i.name} not done` : `Mark ${i.name} done`}
+                                    aria-pressed={done}
+                                    disabled={saving.has(rowKey)}
+                                    onClick={() => toggle(i)}
+                                    className="flex h-8 w-8 items-center justify-center rounded-full disabled:opacity-50"
+                                  >
+                                    <CheckDot done={done} />
+                                  </button>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </li>
                   );
                 })}
@@ -390,7 +438,7 @@ function tabDown(e: React.KeyboardEvent<HTMLInputElement>) {
 
 function Change({ cents, bold = false }: { cents: number | null; bold?: boolean }) {
   if (cents == null || cents === 0) {
-    return <span className="text-center text-sm text-muted">—</span>;
+    return <span className="text-center text-sm">—</span>;
   }
   return (
     <span className={`text-center text-sm tabular-nums ${bold ? "font-semibold" : ""} ${cents > 0 ? "text-positive" : "text-negative"}`}>
@@ -404,7 +452,7 @@ function CheckDot({ done, static: isStatic = false }: { done: boolean; static?: 
     <span
       aria-hidden={isStatic || undefined}
       className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition ${
-        done ? "text-white ring-transparent" : "text-transparent ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
+        done ? "text-white ring-transparent" : "text-transparent ring-[color-mix(in_srgb,var(--foreground)_30%,var(--border))] hover:bg-sky-50 dark:hover:bg-sky-950/40"
       } ${isStatic ? "h-5 w-5" : ""}`}
       style={done ? { background: "var(--positive)" } : undefined}
     >

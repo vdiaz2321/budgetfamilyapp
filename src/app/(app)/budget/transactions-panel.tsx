@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type CSSProperties } from "react";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import type { CategoryKind } from "@/lib/categories";
@@ -18,6 +18,17 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   expenses: "Expenses",
   debt: "Debt",
 };
+
+// Each row's badge and hover take its kind's colour.
+const KIND_COLOR: Record<CategoryKind, string> = {
+  income: "var(--positive)",
+  savings: "var(--viz-savings)",
+  bills: "var(--viz-bills)",
+  expenses: "var(--viz-expenses)",
+  debt: "var(--viz-debt)",
+};
+// Panel accent (sky): distinct from the Summary panel's navy/red/teal views.
+const ACC = "var(--viz-expenses)";
 
 // Groups the transaction list into Today / Yesterday / weekday / dated buckets.
 // dateStr is "YYYY-MM-DD"; parse to a local date so the day math isn't skewed
@@ -143,8 +154,31 @@ export function TransactionsPanel({
   }
 
   return (
-    <div className={`relative flex ${collapsed ? "" : "max-h-[calc(100vh-6rem)] min-h-[320px]"} flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10`}>
-      <div className={`flex items-center justify-between gap-2 ${collapsed ? "" : "border-b border-line"} px-4 py-3`}>
+    <div
+      className={`relative isolate flex ${collapsed ? "" : "max-h-[calc(100vh-6rem)] min-h-[320px]"} flex-col overflow-hidden rounded-2xl border shadow-sm`}
+      style={{ "--acc": ACC, borderColor: "color-mix(in srgb, var(--acc) 22%, var(--border))", backgroundColor: "var(--surface)" } as CSSProperties}
+    >
+      {/* Same card as the Summary panel: a faded tint wash under the content
+          and a 3px accent bar along the top. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          backgroundColor: "color-mix(in srgb, var(--acc) 12%, var(--surface))",
+          maskImage: "linear-gradient(180deg, #000 0%, transparent 40%)",
+          WebkitMaskImage: "linear-gradient(180deg, #000 0%, transparent 40%)",
+        }}
+      />
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-[3px]"
+        style={{
+          backgroundColor: "var(--acc)",
+          maskImage: "linear-gradient(90deg, #000, rgb(0 0 0 / .3))",
+          WebkitMaskImage: "linear-gradient(90deg, #000, rgb(0 0 0 / .3))",
+        }}
+      />
+      <div className={`flex items-center justify-between gap-2 ${collapsed ? "" : "border-b border-[color-mix(in_srgb,var(--acc)_18%,var(--border))]"} px-4 pb-3 pt-3.5`}>
         <button
           type="button"
           onClick={() => setCollapseState((state) => ({ ...state, collapsed: !collapsed }))}
@@ -154,7 +188,7 @@ export function TransactionsPanel({
           <svg
             width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
+            className={`shrink-0 text-[color:var(--acc)] transition-transform ${collapsed ? "-rotate-90" : ""}`}
             aria-hidden
           >
             <path d="m6 9 6 6 6-6" />
@@ -162,7 +196,7 @@ export function TransactionsPanel({
           <div className="min-w-0">
             <h2 className="truncate text-sm font-bold">{title}</h2>
             {collapsed ? null : (
-              <p className="truncate text-xs text-muted">
+              <p className="truncate text-xs font-medium text-foreground">
                 {/* The count follows whatever is filtering the list. The chip
                     filters had their own "N transactions" line below, but the
                     search box had nothing — type "kaufland", see four rows,
@@ -188,12 +222,12 @@ export function TransactionsPanel({
       </div>
 
       {collapsed ? null : (<>
-      <div className="border-b border-line px-3 py-2.5">
+      <div className="border-b border-[color-mix(in_srgb,var(--acc)_18%,var(--border))] px-3 py-2.5">
         <div className="relative">
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--acc)]"
             aria-hidden
           >
             <circle cx="11" cy="11" r="7" />
@@ -210,14 +244,17 @@ export function TransactionsPanel({
         {hasKindFilter || hasSubFilter ? (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {filterKinds.map((k) => (
-              <span key={`k:${k}`} className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-semibold text-brand">
-                <span className={`h-2 w-2 rounded-full ${DOT[k]}`} />
+              <span key={`k:${k}`} className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--acc)_35%,var(--border))] bg-[color-mix(in_srgb,var(--acc)_10%,var(--surface))] px-2.5 py-1 text-[11px] font-semibold text-foreground">
+                <span
+                  className={`h-2 w-2 rounded-full ${DOT[k]}`}
+                  style={{ boxShadow: `0 0 0 3px color-mix(in srgb, ${KIND_COLOR[k]} 18%, transparent)` }}
+                />
                 {KIND_LABEL[k]}
                 <button
                   type="button"
                   onClick={() => onRemoveKind?.(k)}
                   aria-label={`Remove ${KIND_LABEL[k]} filter`}
-                  className="ml-0.5 text-brand/70 hover:text-brand"
+                  className="ml-0.5 text-[color:var(--acc)] hover:text-foreground"
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
                     <path d="M18 6 6 18M6 6l12 12" />
@@ -226,13 +263,13 @@ export function TransactionsPanel({
               </span>
             ))}
             {filterSubs.map((s) => (
-              <span key={`s:${s.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-semibold text-brand">
+              <span key={`s:${s.id}`} className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--acc)_35%,var(--border))] bg-[color-mix(in_srgb,var(--acc)_10%,var(--surface))] px-2.5 py-1 text-[11px] font-semibold text-foreground">
                 {s.label}
                 <button
                   type="button"
                   onClick={() => onRemoveSub?.(s.id)}
                   aria-label={`Remove ${s.label} filter`}
-                  className="ml-0.5 text-brand/70 hover:text-brand"
+                  className="ml-0.5 text-[color:var(--acc)] hover:text-foreground"
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
                     <path d="M18 6 6 18M6 6l12 12" />
@@ -240,14 +277,14 @@ export function TransactionsPanel({
                 </button>
               </span>
             ))}
-            <span className="text-[11px] text-muted">
+            <span className="text-[11px] font-semibold text-foreground">
               {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
             </span>
             {(filterKinds.length + filterSubs.length) > 1 && onClearFilter ? (
               <button
                 type="button"
                 onClick={onClearFilter}
-                className="text-[11px] font-semibold text-muted hover:text-brand"
+                className="text-[11px] font-bold text-[color:var(--acc)] hover:text-foreground"
               >
                 Clear all
               </button>
@@ -258,12 +295,12 @@ export function TransactionsPanel({
 
       {filtered.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
-          <p className="text-sm text-muted">
+          <p className="text-sm font-medium text-foreground">
             {transactions.length === 0 ? (
               <>
                 No transactions yet this month.
                 <br />
-                Tap <span className="font-semibold text-brand">Add</span> to log one.
+                Tap <span className="font-bold">Add</span> to log one.
               </>
             ) : (
               "No transactions match your search."
@@ -276,10 +313,10 @@ export function TransactionsPanel({
             <div key={g.label}>
               {/* Date header: label + a rule filling the rest of the row */}
               <div className="mb-1.5 flex items-center gap-2 px-1">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[color:var(--acc)]">
                   {g.label}
                 </span>
-                <span className="h-px flex-1 bg-line" />
+                <span className="h-px flex-1 bg-[color-mix(in_srgb,var(--acc)_25%,var(--border))]" />
               </div>
               <ul>
                 {g.txs.map((t) => (
@@ -318,15 +355,16 @@ function TxRow({
   // Income green, debt red, everything else neutral.
   const amountColor = isIncome ? "text-positive" : kind === "debt" ? "text-negative" : "text-foreground";
 
-  const dot = kind ? DOT[kind] : "bg-muted";
+  const kc = kind ? KIND_COLOR[kind] : "var(--acc)";
 
   const title = tx.payee ?? tx.subName;
-  // "Fidelity (Taxable) · Savings" — the payee's category, or (without a payee)
-  // the memo, followed by the category name.
+  // "Groceries · split of $36.87" — the payee's category, or (without a payee)
+  // the memo, then the split total when it's one part of a split purchase.
   const splitTotal = splitTotalCents(tx);
+  // No kind word ("Expenses", "Bills"): the dot beside the name already says
+  // it, and the repeat pushed a third of the sublines past the rail's width.
   const desc = [
     tx.payee ? tx.subName : tx.memo || null,
-    kind ? KIND_LABEL[kind] : null,
     // A split purchase lists one row per item; this ties them together.
     splitTotal ? `split of ${formatMoney(splitTotal, currency)}` : null,
   ]
@@ -334,7 +372,10 @@ function TxRow({
     .join(" · ");
 
   return (
-    <li className="group flex items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-brand-soft/25">
+    <li
+      className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-[color-mix(in_srgb,var(--kc)_9%,transparent)]"
+      style={{ "--kc": kc } as CSSProperties}
+    >
       <button
         type="button"
         disabled={!canEdit}
@@ -343,10 +384,10 @@ function TxRow({
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-medium">{title}</span>
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} aria-hidden />
+            <span className="truncate text-sm font-semibold">{title}</span>
           </div>
-          {desc ? <p className="truncate text-xs text-muted">{desc}</p> : null}
+          {/* Wraps (two lines at most) rather than cutting off a long split line. */}
+          {desc ? <p className="line-clamp-2 break-words text-xs font-medium text-foreground">{desc}</p> : null}
         </div>
       </button>
 
@@ -358,7 +399,7 @@ function TxRow({
             disabled={!canEdit}
             onClick={onEdit}
             aria-label="Edit transaction"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-brand-soft hover:text-foreground disabled:cursor-default disabled:opacity-40"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-foreground transition hover:bg-[color-mix(in_srgb,var(--kc)_16%,transparent)] disabled:cursor-default disabled:opacity-40"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 20h9" />
@@ -373,14 +414,14 @@ function TxRow({
               fd.set("id", tx.id);
               start(async () => { await deleteTransaction(fd); });
             }}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-negative/10 hover:text-negative disabled:opacity-40"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-foreground transition hover:bg-negative/10 hover:text-negative disabled:opacity-40"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
           </ConfirmDeleteButton>
         </div>
-        <span className={`text-sm font-semibold tabular-nums ${amountColor}`}>
+        <span className={`text-sm font-bold tabular-nums ${amountColor}`}>
           {isIncome ? "+" : "−"}
           {formatMoney(tx.amountCents, currency)}
         </span>

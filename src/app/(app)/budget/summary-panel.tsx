@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import type { GroupData, ViewMode } from "./types";
@@ -17,6 +17,16 @@ const KIND_COLOR: Partial<Record<CategoryKind, string>> = {
   debt: "var(--viz-debt)",
 };
 const EXTRA = ["var(--viz-soft)", "var(--chart-5)", "var(--viz-income)", "var(--cat-lime)"];
+
+// One accent per view, so the whole panel shifts colour when the view
+// changes: Planned navy, Spent red (money going out), Total Yr teal.
+const MODE_ACCENT: Record<ViewMode, string> = {
+  remaining: "var(--viz-income)",
+  spent: "var(--negative)",
+  ytd: "var(--viz-bills)",
+};
+// A tint of the panel's current accent (--acc, set on the card).
+const mix = (pct: number, base = "var(--surface)") => `color-mix(in srgb, var(--acc) ${pct}%, ${base})`;
 
 type Props = {
   groups: GroupData[];
@@ -146,9 +156,35 @@ export function SummaryPanel({ groups, currency }: Props) {
   };
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
-        <h2 className="text-sm font-bold">Summary</h2>
+    <div
+      className="relative isolate flex flex-col overflow-hidden rounded-2xl border shadow-sm transition-colors duration-300"
+      style={{ "--acc": MODE_ACCENT[mode], borderColor: mix(22, "var(--border)"), backgroundColor: "var(--surface)" } as CSSProperties}
+    >
+      {/* Mode wash: a flat tint faded out by a mask, because background-color
+          animates between views and a gradient wouldn't. -z-10 inside the
+          isolated card keeps it under all the content. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 transition-colors duration-300"
+        style={{
+          backgroundColor: mix(12),
+          maskImage: "linear-gradient(180deg, #000 0%, transparent 55%)",
+          WebkitMaskImage: "linear-gradient(180deg, #000 0%, transparent 55%)",
+        }}
+      />
+      {/* Same 3px accent bar as the hero card's HeroStat tiles, so the rail
+          reads as part of the same design. */}
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-[3px] transition-colors duration-300"
+        style={{
+          backgroundColor: "var(--acc)",
+          maskImage: "linear-gradient(90deg, #000, rgb(0 0 0 / .3))",
+          WebkitMaskImage: "linear-gradient(90deg, #000, rgb(0 0 0 / .3))",
+        }}
+      />
+      <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-3.5">
+        <h2 className="text-sm font-bold text-foreground">Summary</h2>
         {/* Three views now, so this is a real select rather than a two-way
             toggle: the year one answers "how much has this category taken all
             year" without a trip to the Annual Overview. */}
@@ -160,7 +196,7 @@ export function SummaryPanel({ groups, currency }: Props) {
             // Fixed width, sized to the longest option: an auto-width select
             // re-measures itself on every choice, which slid the whole control
             // left and right as the label changed length.
-            className="w-40 cursor-pointer appearance-none truncate rounded-md bg-transparent py-0.5 pl-1.5 pr-5 text-xs text-muted transition hover:bg-sky-50 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 dark:hover:bg-sky-950/40"
+            className="w-[11.5rem] cursor-pointer appearance-none truncate rounded-full border border-[color-mix(in_srgb,var(--acc)_35%,var(--border))] bg-[color-mix(in_srgb,var(--acc)_10%,var(--surface))] py-1 pl-3 pr-6 text-xs font-semibold text-foreground transition-colors duration-300 hover:border-[color-mix(in_srgb,var(--acc)_60%,var(--border))] hover:bg-[color-mix(in_srgb,var(--acc)_18%,var(--surface))] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50"
           >
             <option value="remaining">Planned by category</option>
             <option value="spent">Spent by category</option>
@@ -169,7 +205,7 @@ export function SummaryPanel({ groups, currency }: Props) {
           <svg
             width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-            className="pointer-events-none absolute right-1 text-muted"
+            className="pointer-events-none absolute right-2 text-foreground"
             aria-hidden
           >
             <path d="M6 9l6 6 6-6" />
@@ -179,7 +215,7 @@ export function SummaryPanel({ groups, currency }: Props) {
 
       {total <= 0 ? (
         <div className="px-6 py-10 text-center">
-          <p className="text-sm text-muted">
+          <p className="text-sm font-semibold text-foreground">
             Nothing to chart yet.
             <br />
             {mode === "spent"
@@ -192,9 +228,20 @@ export function SummaryPanel({ groups, currency }: Props) {
       ) : (
         <>
           {/* Donut */}
-          <div className="flex justify-center px-4 pt-5">
+          <div className="flex justify-center px-4 pt-3">
             <div className="relative mx-auto aspect-square w-full max-w-[190px]">
-              <svg viewBox="0 0 128 128" className="h-full w-full -rotate-90">
+              {/* Soft wash behind the ring */}
+              <div
+                aria-hidden
+                className="absolute -inset-3 rounded-full transition-colors duration-300"
+                style={{
+                  backgroundColor: mix(22, "transparent"),
+                  maskImage: "radial-gradient(circle, #000 0%, transparent 70%)",
+                  WebkitMaskImage: "radial-gradient(circle, #000 0%, transparent 70%)",
+                }}
+              />
+              <svg viewBox="0 0 128 128" className="relative h-full w-full -rotate-90">
+                <circle cx="64" cy="64" r={R - STROKE / 2 - 3} fill="var(--surface)" />
                 <circle cx="64" cy="64" r={R} fill="none" stroke="var(--viz-grid)" strokeWidth={STROKE} />
                 {segments.map((s) => {
                   if (s.arcValue <= 0) return null;
@@ -226,12 +273,20 @@ export function SummaryPanel({ groups, currency }: Props) {
               </svg>
               {/* Center label */}
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                <span className="max-w-[110px] truncate text-[10px] font-medium uppercase tracking-wide text-muted">
+                <span
+                  className="max-w-[110px] truncate text-[10px] font-bold uppercase tracking-wide"
+                  style={{ color: activeSeg ? activeSeg.color : "var(--foreground)" }}
+                >
                   {activeSeg ? activeSeg.name : centerTotalLabel}
                 </span>
                 <span className="mt-0.5 text-lg font-bold tabular-nums text-foreground">
                   {formatMoney(activeSeg ? activeSeg.value : total, currency)}
                 </span>
+                <span
+                  aria-hidden
+                  className="mt-1 h-[3px] w-6 rounded-full transition-colors duration-300"
+                  style={{ backgroundColor: activeSeg ? activeSeg.color : "var(--acc)" }}
+                />
               </div>
             </div>
           </div>
@@ -239,7 +294,7 @@ export function SummaryPanel({ groups, currency }: Props) {
           {/* Legend — sorted by share (highest % → lowest) for whichever mode
               is active (Planned or Spent). The donut order above is left alone;
               only this list reorders. */}
-          <ul className="divide-y divide-line px-2 py-3">
+          <ul className="space-y-0.5 px-2 pb-2 pt-3">
             {[...segments].sort((a, b) => b.arcValue - a.arcValue).map((s) => {
               const pct = total > 0 ? Math.round((s.arcValue / total) * 100) : 0;
               const isOpen = expanded === s.categoryId;
@@ -254,39 +309,55 @@ export function SummaryPanel({ groups, currency }: Props) {
                     onMouseEnter={() => setActive(s.categoryId)}
                     onMouseLeave={() => setActive(null)}
                     aria-expanded={isOpen}
-                    className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition ${
-                      active === s.categoryId ? "bg-brand-soft/40" : "hover:bg-brand-soft/25"
-                    }`}
+                    className="w-full rounded-lg px-2 py-1 text-left transition hover:bg-sky-50 focus-visible:bg-sky-50 focus-visible:outline-none dark:hover:bg-sky-950/40 dark:focus-visible:bg-sky-950/40"
+                    style={
+                      active === s.categoryId || isOpen
+                        ? { background: `color-mix(in srgb, ${s.color} 9%, var(--surface))` }
+                        : undefined
+                    }
                   >
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: s.color }}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</span>
-                    <span className="w-24 shrink-0 text-right text-sm font-semibold tabular-nums">
-                      {formatMoney(s.value, currency)}
+                    <span className="flex items-center gap-2.5">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: s.color, boxShadow: `0 0 0 3px color-mix(in srgb, ${s.color} 18%, transparent)` }}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{s.name}</span>
+                      <span className="w-24 shrink-0 text-right text-sm font-bold tabular-nums text-foreground">
+                        {formatMoney(s.value, currency)}
+                      </span>
+                      <span className="w-9 shrink-0 text-right text-sm font-bold tabular-nums" style={{ color: s.color }}>
+                        {pct}%
+                      </span>
+                      <svg
+                        width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                        className={`shrink-0 text-foreground transition-transform ${isOpen ? "" : "-rotate-90"}`}
+                        aria-hidden
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
                     </span>
+                    {/* Share bar: the same % as the label, drawn like the hero
+                        card's bars, so the list reads as part of the chart. */}
                     <span
-                      className="w-9 shrink-0 text-right text-sm font-semibold tabular-nums"
-                      style={{ color: s.color }}
+                      className="ml-5 mr-[3.25rem] mt-1 block h-1 overflow-hidden rounded-full"
+                      style={{ background: `color-mix(in srgb, ${s.color} 14%, var(--surface))` }}
                     >
-                      {pct}%
+                      <span
+                        className="block h-full rounded-full transition-[width] duration-500 ease-out"
+                        style={{
+                          width: `${total > 0 ? (s.arcValue / total) * 100 : 0}%`,
+                          backgroundImage: `linear-gradient(90deg, color-mix(in srgb, ${s.color} 65%, var(--surface)), ${s.color})`,
+                        }}
+                      />
                     </span>
-                    <svg
-                      width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                      strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-                      className={`shrink-0 text-muted transition-transform ${isOpen ? "" : "-rotate-90"}`}
-                      aria-hidden
-                    >
-                      <path d="M6 9l6 6 6-6" />
-                    </svg>
                   </button>
 
                   {isOpen ? (() => {
                     const sections = sectionedFor(s.categoryId);
                     if (sections) {
                       return (
-                        <div className="mb-1 ml-5 border-l border-line pl-3 pr-2">
+                        <div className="mb-1 ml-5 border-l-2 pl-3 pr-2" style={{ borderLeftColor: `color-mix(in srgb, ${s.color} 40%, var(--border))` }}>
                           {sections.map((sec) => (
                             <div key={sec.label} className="mb-1">
                               {/* Section header for the Kids / Mine split, in
@@ -315,8 +386,8 @@ export function SummaryPanel({ groups, currency }: Props) {
                               <ul className="divide-y divide-line">
                                 {sec.rows.map((r) => (
                                   <li key={r.subId} className="flex items-center gap-2.5 py-1">
-                                    <span className="min-w-0 flex-1 truncate text-xs text-foreground">{r.name}</span>
-                                    <span className="w-24 shrink-0 text-right text-xs font-medium tabular-nums text-foreground">{formatMoney(r.value, currency)}</span>
+                                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{r.name}</span>
+                                    <span className="w-24 shrink-0 text-right text-xs font-bold tabular-nums text-foreground">{formatMoney(r.value, currency)}</span>
                                     <span
                                       className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums"
                                       style={{ color: s.color }}
@@ -335,9 +406,9 @@ export function SummaryPanel({ groups, currency }: Props) {
                       );
                     }
                     return (
-                      <ul className="mb-1 ml-5 divide-y divide-line border-l border-line pl-3 pr-2">
+                      <ul className="mb-1 ml-5 divide-y divide-line border-l-2 pl-3 pr-2" style={{ borderLeftColor: `color-mix(in srgb, ${s.color} 40%, var(--border))` }}>
                         {subRows.length === 0 ? (
-                          <li className="py-1 text-xs text-muted">
+                          <li className="py-1 text-xs font-semibold text-foreground">
                             {mode === "spent"
                               ? "Nothing spent here yet."
                               : mode === "ytd"
@@ -347,8 +418,8 @@ export function SummaryPanel({ groups, currency }: Props) {
                         ) : (
                           subRows.map((r) => (
                             <li key={r.subId} className="flex items-center gap-2.5 py-1">
-                              <span className="min-w-0 flex-1 truncate text-xs text-foreground">{r.name}</span>
-                              <span className="w-24 shrink-0 text-right text-xs font-medium tabular-nums text-foreground">{formatMoney(r.value, currency)}</span>
+                              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{r.name}</span>
+                              <span className="w-24 shrink-0 text-right text-xs font-bold tabular-nums text-foreground">{formatMoney(r.value, currency)}</span>
                               <span
                                 className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums"
                                 style={{ color: s.color }}
