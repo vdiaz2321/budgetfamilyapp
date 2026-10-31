@@ -125,7 +125,10 @@ export function estimateFers(inp: FersInputs, birthYear: number | null): FersEst
   let begin = sep;
   let early = false;
   let supplement = false;
-  if (service >= 5 * Y && age >= 62 * Y) path = "62+5";
+  // OPM: any FERS annuity needs 5 years of civilian service — waived
+  // military years can't make up the first five.
+  if (gsService < 5 * Y) path = null;
+  else if (service >= 5 * Y && age >= 62 * Y) path = "62+5";
   else if (service >= 20 * Y && age >= 60 * Y) path = "60+20";
   else if (service >= 30 * Y && age >= mra) path = "MRA+30";
   else if (service >= 10 * Y && age >= mra) {

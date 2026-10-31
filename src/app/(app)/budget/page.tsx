@@ -528,7 +528,12 @@ export default async function BudgetPage({
                       hasPeriodTx: (goalPeriodTxCountBySub.get(s.id) ?? 0) > 0,
                       now,
                     });
-                    return { requiredMonthlyCents: p.requiredMonthlyCents, pace: p.pace };
+                    return {
+                      requiredMonthlyCents: p.requiredMonthlyCents,
+                      pace: p.pace,
+                      savedCents: p.savedCents,
+                      leftToSaveCents: p.leftToSaveCents,
+                    };
                   })(),
                   linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
                   linkedAccountId: linkedAccountBySub.get(s.id) ?? null,

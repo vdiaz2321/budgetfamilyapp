@@ -14,6 +14,8 @@ import { clearMonthEndCheck, saveMonthEndValue } from "./month-end-actions";
 // transactions drive those.
 
 export type MonthEndCheck = { month: string; accountId: string | null; bucketId: string | null };
+/** A logged transaction or Move Money transfer that moved a row's balance. */
+export type MonthEndMove = { date: string; accountId: string | null; bucketId: string | null; cents: number; source: "Transaction" | "Transfer" };
 
 type Item = {
   key: string;
@@ -86,11 +88,13 @@ export function MonthEndUpdateModal({
   accounts,
   currentMonth,
   checks,
+  moves = [],
   onClose,
 }: {
   accounts: AccountData[];
   currentMonth: string;
   checks: MonthEndCheck[];
+  moves?: MonthEndMove[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -127,20 +131,27 @@ export function MonthEndUpdateModal({
 
   const allItems = sections.flatMap((s) => s.groups.flatMap((g) => g.items));
   const doneCount = allItems.filter((i) => isDone(i.key)).length;
-  // Folded bucketed accounts, per month. Seeded once per month (folded when
-  // every bucket is already ticked); after that only clicking the name changes
-  // it, so ticking the last bucket never folds rows out from under the cursor.
+  // Folded bucketed accounts, per month. Every one starts folded (Victor,
+  // 2026-10-31); after that only clicking the name changes it, so ticking the
+  // last bucket never folds rows out from under the cursor.
   const [collapsed, setCollapsed] = useState<Record<string, Set<string>>>({});
   if (!collapsed[month]) {
     const seed = new Set(
       sections
         .flatMap((s) => s.groups)
-        .filter((g) => g.account.buckets.length > 0 && g.items.every((i) => isDone(i.key)))
+        .filter((g) => g.account.buckets.length > 0)
         .map((g) => g.account.id),
     );
     setCollapsed((c) => ({ ...c, [month]: seed }));
   }
   const isCollapsed = (id: string) => collapsed[month]?.has(id) ?? false;
+  // This month's moves per row, so a change nobody typed shows its cause.
+  const movesOf = (i: Item) =>
+    moves.filter(
+      (m) =>
+        m.date.slice(0, 7) === month.slice(0, 7) &&
+        (i.bucketId ? m.bucketId === i.bucketId : m.bucketId == null && m.accountId === i.accountId),
+    );
   const toggleGroup = (id: string) =>
     setCollapsed((c) => {
       const n = new Set(c[month]);
@@ -314,7 +325,7 @@ export function MonthEndUpdateModal({
                         // done. The name stays a real button for the keyboard.
                         <div
                           onClick={() => toggleGroup(g.account.id)}
-                          className={`${GRID} cursor-pointer gap-y-1 rounded-md py-1 shadow-[inset_3px_0_0_var(--viz-savings)] transition hover:bg-sky-50 dark:hover:bg-sky-950/40`}
+                          className={`${GRID} cursor-pointer gap-y-1 rounded-md bg-[#e8efe6] py-1.5 shadow-[inset_4px_0_0_var(--viz-savings)] transition hover:bg-sky-50 dark:bg-[#243029] dark:hover:bg-sky-950/40`}
                         >
                           <button
                             type="button"
@@ -329,9 +340,6 @@ export function MonthEndUpdateModal({
                               <path d="M6 9l6 6 6-6" />
                             </svg>
                             <span className="truncate text-sm font-bold">{g.account.name}</span>
-                            <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-line">
-                              Total
-                            </span>
                             {shut && !allDone ? (
                               <span className="shrink-0 text-xs font-semibold">
                                 {doneN} of {g.items.length} done
@@ -347,17 +355,26 @@ export function MonthEndUpdateModal({
                       {shut ? null : (
                         <div className="relative">
                           {bucketed ? <span aria-hidden className="absolute bottom-2 left-4 top-0 hidden w-px bg-line sm:block" /> : null}
-                          {g.visible.map((i) => {
+                          {g.visible.map((i, idx) => {
                             const rowKey = `${month}|${i.key}`;
                             const prev = i.balancesByMonth[compareMonth] ?? null;
                             const shown = shownCents(i);
                             const done = isDone(i.key);
                             const base = baseCents(i);
                             return (
-                              <div key={i.key} className={`${GRID} gap-y-1 py-1.5`}>
-                                <span className={`col-span-4 truncate text-sm font-semibold sm:col-span-1 ${bucketed ? "pl-7" : "pl-2.5"}`}>
-                                  {i.name}
-                                </span>
+                              <div key={i.key} className={`${GRID} gap-y-1 py-2 ${bucketed || idx > 0 ? "border-t border-line/70" : ""}`}>
+                                <div className={`col-span-4 min-w-0 sm:col-span-1 ${bucketed ? "pl-7" : "pl-2.5"}`}>
+                                  <span className="block truncate text-sm font-semibold">{i.name}</span>
+                                  {movesOf(i).map((m, n) => (
+                                    <span key={n} className="block truncate text-xs">
+                                      {m.source}:{" "}
+                                      <span className={`font-semibold tabular-nums ${m.cents < 0 ? "text-negative" : "text-positive"}`}>
+                                        {m.cents < 0 ? "−" : "+"}${centsToGroupedDisplay(Math.abs(m.cents))}
+                                      </span>{" "}
+                                      · {monthName(m.date.slice(0, 7) + "-01")} {Number(m.date.slice(8, 10))}
+                                    </span>
+                                  ))}
+                                </div>
                                 <span className="text-center text-sm tabular-nums">{prev == null ? "—" : `$${money(prev)}`}</span>
                                 <input
                                   inputMode="decimal"

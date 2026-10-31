@@ -5,6 +5,7 @@ import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, typ
 import type { CardPayment } from "@/components/card-payments-ledger";
 import { getSessionContext } from "@/lib/auth-context";
 import type { EstateData } from "./estate-guide";
+import type { MonthEndMove } from "./month-end-update";
 import { investItemsFrom } from "@/lib/invest-items";
 import { loadDebtMonthPlans } from "@/lib/debt-month-plan";
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
@@ -34,6 +35,17 @@ export default async function AccountsPage() {
     .select("month, account_id, bucket_id")
     .eq("household_id", household.id)
     .in("month", [currentMonth, prevMonth])
+    .then((r) => r);
+
+  // What moved a month-end balance on its own, for the same two months: a
+  // Budget contribution to a linked bucket/account, or a Move Money transfer.
+  // The popup lists them under the row so a change it didn't type is explained.
+  const monthEndMovesPromise = supabase
+    .from("transactions")
+    .select("occurred_on, amount_cents, is_withdrawal, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, subcategories(linked_bucket_id, linked_account_id)")
+    .eq("household_id", household.id)
+    .gte("occurred_on", prevMonth)
+    .order("occurred_on")
     .then((r) => r);
 
   // Estate guide: each account's estate fields, the household's own page, and
@@ -606,6 +618,30 @@ export default async function AccountsPage() {
     bucketId: (c.bucket_id as string | null) ?? null,
   }));
 
+  type MoveRow = {
+    occurred_on: string; amount_cents: number; is_withdrawal: boolean | null;
+    account_id: string | null; bucket_id: string | null; paid_to_account_id: string | null; paid_to_bucket_id: string | null;
+    subcategories: { linked_bucket_id: string | null; linked_account_id: string | null } | null;
+  };
+  const monthEndMoves: MonthEndMove[] = [];
+  for (const t of (unwrap(await monthEndMovesPromise, "transactions") ?? []) as unknown as MoveRow[]) {
+    const add = (accountId: string | null, bucketId: string | null, cents: number, source: MonthEndMove["source"]) => {
+      if (accountId || bucketId) monthEndMoves.push({ date: t.occurred_on, accountId, bucketId, cents, source });
+    };
+    if (t.paid_to_account_id) {
+      add(t.bucket_id ? null : t.account_id, t.bucket_id, -t.amount_cents, "Transfer");
+      add(t.paid_to_bucket_id ? null : t.paid_to_account_id, t.paid_to_bucket_id, t.amount_cents, "Transfer");
+      continue;
+    }
+    // Refunds never move a bucket (budget/actions), so they're skipped here too.
+    const sub = t.subcategories;
+    if (!sub || t.amount_cents < 0) continue;
+    const cents = t.is_withdrawal ? -t.amount_cents : t.amount_cents;
+    if (sub.linked_bucket_id) add(null, sub.linked_bucket_id, cents, "Transaction");
+    if (t.bucket_id && t.bucket_id !== sub.linked_bucket_id) add(null, t.bucket_id, cents, "Transaction");
+    if (!sub.linked_bucket_id && sub.linked_account_id) add(sub.linked_account_id, null, cents, "Transaction");
+  }
+
   const [estateAccountsRes, estateGuideRes, estateItemsRes] = await estatePromise;
   const freeNightStays = (
     unwrap(await freeNightStaysPromise, "travel_stays") as { id: string; account_id: string; property_name: string; reserved_on: string | null; check_in: string }[]
@@ -646,6 +682,7 @@ export default async function AccountsPage() {
     <AccountsBoard
       estate={estate}
       monthEndChecks={monthEndChecks}
+      monthEndMoves={monthEndMoves}
       accounts={accounts}
       budgetDebts={budgetDebts}
       investItems={investItems}

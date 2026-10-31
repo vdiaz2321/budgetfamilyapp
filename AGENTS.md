@@ -20,7 +20,11 @@ Victor has repeatedly rejected purple/indigo and amber-orange in the app's visua
 - `--viz-savings` (steel blue), `--viz-bills` (teal-600), `--viz-expenses` (sky-400), `--viz-debt` (rose-600) — flow colors
 - `--viz-grid` (chart gridlines), `--viz-sel` (selected-period wash)
 
-For non-flow accents (subtitle text, filter chips, hover backgrounds, ranked bars), use a light-blue tint — `bg-sky-100 dark:bg-sky-900/50` for chips/pills, `bg-sky-50 dark:bg-sky-950/40` for hover or expanded rows — with full `text-foreground`, or a `--viz-*` color that matches the metric. Never grey: no `text-muted`, `bg-black/N`, `bg-white/N`, or `gray-*`/`slate-*`/`zinc-*`/`neutral-*` — Victor reads grey as disabled and has rejected it repeatedly.
+For non-flow accents (subtitle text, filter chips, hover backgrounds, ranked bars), use a light-blue tint — `bg-sky-100 dark:bg-sky-900/50` for chips/pills, `bg-sky-50 dark:bg-sky-950/40` for hover or expanded rows — with full `text-foreground`, or a `--viz-*` color that matches the metric.
+
+**Don't default to blue.** The sky tint is only for filter chips, toggles and hover/expanded rows that already use it. A new label, tag or pill that should stand out (e.g. the bank name on a card tile) gets a non-blue colour tied to its meaning — teal (`--viz-bills` family), the pale sage of heading rows, or `--positive`/`--negative` — never another sky-blue element. Victor, 2026-10-31: "why do you keep using blue". Solid black/`bg-foreground` pills are also rejected ("black is terrible"). **No pink anywhere, ever** — no `pink-*`, `rose-*`, `fuchsia-*` (Victor, 2026-10-31: "never again"). A pill must also never share the hue family of the strip it sits on (no green pill on a sage strip).
+
+Never grey: no `text-muted`, `bg-black/N`, `bg-white/N`, or `gray-*`/`slate-*`/`zinc-*`/`neutral-*` — Victor reads grey as disabled and has rejected it repeatedly.
 
 **The `--brand` color stays confined to app chrome** — the sidebar, the primary CTA buttons, focus rings on inputs. Since 2026-09-25 `--brand` is a muted blue (`#3b64b0` light / `#8aa9d8` dark), not indigo: Victor rejected purple app-wide, and Tailwind `blue-600` read too bright. Never hard-code `indigo-*`, `violet-*`, `purple-*`, or `blue-600` for a button — use `bg-brand` so every page follows the token. Everything a user reads as *data* (money values, category dots, chart marks, deltas, "% of income" text, hero-card colored numbers) uses the `--viz-*` palette.
 

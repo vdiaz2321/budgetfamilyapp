@@ -1015,22 +1015,6 @@ export function BudgetBoard({
   );
 }
 
-type BudgetTone = "good" | "warn" | "bad";
-
-const TONE_CLASSES: Record<BudgetTone, { text: string; badge: string; icon: string }> = {
-  good: { text: "text-positive", badge: "bg-positive/15 text-positive", icon: "M5 12l4 4L19 6" },
-  warn: {
-    text: "text-warning",
-    badge: "bg-warning/15 text-warning",
-    icon: "M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z",
-  },
-  bad: {
-    text: "text-negative",
-    badge: "bg-negative/15 text-negative",
-    icon: "M12 9v4m0 4h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
-  },
-};
-
 // Reconcile planned outflow with income, in whichever direction the month is
 // out of balance. "assign" gives unassigned income a job (one-sided increase);
 // "trim" un-budgets money when planned outflow exceeds income (one-sided
@@ -1424,18 +1408,6 @@ function MatchSpentButton({
   );
 }
 
-// Overspent means the month's spending has passed the income PLANNED for it,
-// not the income received so far. Measured against what has landed, the badge
-// fired on the 1st of every month — before a single paycheque was in, any
-// spending at all read as overspending.
-function getBudgetStatus(
-  actualSpent: number,
-  incomePlanned: number,
-): { tone: BudgetTone; badgeText: string } {
-  if (actualSpent > incomePlanned) return { tone: "bad", badgeText: "Overspent" };
-  return { tone: "good", badgeText: "On track" };
-}
-
 function CategoryProgressCard({
   label,
   actualLabel,
@@ -1554,15 +1526,7 @@ let rolloverAddedAt = 0;
 const UNDO_WINDOW_MS = 30_000;
 
 const ROLLOVER_PILL =
-  "inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-full border border-positive/25 bg-positive/10 px-2 py-1 sm:gap-1.5 sm:px-2.5 text-[11px] text-positive transition hover:border-positive/40 hover:bg-positive/15";
-
-function PencilIcon() {
-  return (
-    <svg viewBox="0 0 16 16" className="size-3 opacity-80" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-      <path d="M11.5 2.5l2 2L6 12H4v-2l7.5-7.5z" strokeLinejoin="round" />
-    </svg>
-  );
-}
+  "inline-flex max-w-full cursor-pointer flex-wrap items-center gap-x-1 whitespace-nowrap rounded-xl @3xl/hero:rounded-full border border-positive/25 bg-positive/10 px-2 py-1 sm:gap-1.5 sm:px-2.5 text-[11px] text-positive transition hover:border-positive/40 hover:bg-positive/15";
 
 // Under Income Planned once a rollover is in: what's still left of last
 // month's leftover, or the amount box while editing. Hidden when all of it
@@ -1570,6 +1534,7 @@ function PencilIcon() {
 function RolloverLeftLine({
   rolloverCents,
   liveAvailableCents,
+  prevMonthLabel,
   monthFirstOfMonth,
   currency,
   editing,
@@ -1578,6 +1543,7 @@ function RolloverLeftLine({
 }: {
   rolloverCents: number;
   liveAvailableCents: number;
+  prevMonthLabel: string;
   monthFirstOfMonth: string;
   currency: string;
   editing: boolean;
@@ -1586,6 +1552,7 @@ function RolloverLeftLine({
 }) {
   if (editing) {
     return (
+      <div className="flex basis-full flex-col items-start @3xl/hero:items-center">
       <RolloverAmountForm
         monthFirstOfMonth={monthFirstOfMonth}
         alreadyCents={Math.min(rolloverCents, liveAvailableCents)}
@@ -1595,18 +1562,15 @@ function RolloverLeftLine({
         submitLabel="Save"
         onDone={() => setEditing(false)}
       />
+      </div>
     );
   }
   const leftCents = Math.max(0, liveAvailableCents - rolloverCents);
   if (leftCents === 0) return null;
   return (
     <button type="button" onClick={() => setEditing(true)} className={ROLLOVER_PILL}>
-      {/* Phone columns are too narrow for the full label. */}
-      <span className="font-semibold opacity-80">
-        Left<span className="max-sm:hidden @max-[14rem]/stat:hidden"> to roll over</span>:
-      </span>
       <span className="font-bold tabular-nums">{formatMoney(leftCents, currency)}</span>
-      <PencilIcon />
+      <span className="font-semibold opacity-80">Left to Rollover</span>
     </button>
   );
 }
@@ -1637,7 +1601,7 @@ function RolloverAddedLine({
   }, [showUndo]);
 
   return (
-    <div className="flex flex-col items-start gap-1.5 @3xl:items-center">
+    <>
       <button
         type="button"
         onClick={() => setReturning(true)}
@@ -1646,10 +1610,11 @@ function RolloverAddedLine({
       >
         <span className="font-bold tabular-nums">+{formatMoney(rolloverCents, currency)}</span>
         <span className="font-semibold opacity-80">
-          <span className="max-sm:hidden @max-[14rem]/stat:hidden">rolled over </span>from {shortMonth(prevMonthLabel)}
+          used from {shortMonth(prevMonthLabel)}
         </span>
-        <PencilIcon />
-      </button>
+        </button>
+      {(returning || showUndo) && (
+      <div className="flex basis-full flex-col items-start gap-1.5 @3xl/hero:items-center">
       {returning && (
         <ReturnRolloverForm
           rolloverCents={rolloverCents}
@@ -1660,7 +1625,9 @@ function RolloverAddedLine({
         />
       )}
       {showUndo && !returning && <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />}
-    </div>
+      </div>
+      )}
+    </>
   );
 }
 
@@ -1716,7 +1683,7 @@ function ReturnRolloverForm({
         e.preventDefault();
         save();
       }}
-      className="flex flex-col items-start gap-1.5 @3xl:items-center"
+      className="flex flex-col items-start gap-1.5 @3xl/hero:items-center"
     >
       <span className="text-[11px] font-semibold text-foreground">
         Amount to return{" "}
@@ -1823,30 +1790,38 @@ function SummaryHeroCard({
   heroSubOptions: SubOption[];
   currency: string;
 }) {
-  const { tone, badgeText } = getBudgetStatus(actualSpent, incomePlanned);
-  const toneClasses = TONE_CLASSES[tone];
-  // The "Left to roll over" pill's amount box under Income Planned.
+  // The top row: Income, Planned, Spent, Left. Left is income plus last
+  // month's rollover minus Spent; a carried-over deficit (<= 0) comes off it,
+  // the same way it comes off displayLeft. "used from Sep" sits under Left,
+  // "Left to Rollover" under Income.
+  const leftCents = actualIncome + rolloverCents + rollover.deficitCents - actualSpent;
+  const leftClass = leftCents < 0 ? "text-negative" : "text-positive";
+  const leftAccent = leftCents < 0 ? "var(--negative)" : "var(--positive)";
+  const prevMonth = shortMonth(rollover.prevMonthLabel);
+  // The "Left to Rollover" pill's amount box under Income.
   const [editingRollover, setEditingRollover] = useState(false);
-  const leftAccent = displayLeft < 0 ? "var(--negative)" : displayLeft > 0 ? "var(--positive)" : "var(--viz-soft)";
+  const TITLE = "text-[11px] font-bold uppercase tracking-wide text-foreground";
+  const FIGURE = "mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums";
+  // Bigger on desktop only; the phone keeps its 12px (Victor, 2026-10-31).
+  const SUBLINE = "mt-0.5 max-sm:text-[12px] sm:text-sm font-semibold text-foreground";
+  const leftSub =
+    rolloverCents > 0 ? `Received + ${prevMonth} − Spent` : rollover.deficitCents < 0 ? `Received − ${prevMonth} − Spent` : "Received − Spent";
 
   return (
-    <div className="@container -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
+    <div className="@container/hero -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
       <div className="px-4 pb-5 pt-5 sm:px-6">
-        {/* Wide: the four figures run across one row (each with its own action
-            underneath), then the four progress cards across the row below.
-            Narrow: the figures fall back to a 2x2 — Income/Actual on top,
-            Total/Leftover below, via `order-*` — and the cards stack.
-            The breakpoints are CONTAINER queries, not `md:`: the card only
-            gets the left pane, which is far narrower than the window. */}
+        {/* Wide: the four figures run across one row, then the four progress
+            cards below. Narrow: a 2x2 (Income, Planned / Spent, Left). The
+            breakpoints are CONTAINER queries, not `md:`: the card only gets
+            the left pane, far narrower than the window. */}
         <div className="grid grid-cols-2 gap-2.5 md:gap-3 @3xl:grid-cols-4">
           <HeroStat accentVar="var(--positive)" className="@3xl:text-center">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-foreground">Income Planned</p>
-            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-positive">
-              {formatMoney(incomePlanned, currency)}
-            </p>
-            {/* Rollover adds last month's leftover to this month's income, so
-                its pill (and the "Added · Undo" line once it's in) sit here. */}
-            <div className="mt-1.5 flex flex-col items-start gap-1.5 @3xl:items-center">
+            {/* Received, not planned: Left is worked out from this figure. */}
+            <p className={TITLE}>Income Received</p>
+            <p className={`${FIGURE} text-positive`}>{formatMoney(actualIncome, currency)}</p>
+            {/* Last month's money not used yet: the roll-in pill before any is
+                in, then "Left to Rollover" once some is. */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1 empty:hidden @3xl/hero:justify-center">
               <RolloverControl
                 rollover={rollover}
                 monthFirstOfMonth={monthFirstOfMonth}
@@ -1857,6 +1832,7 @@ function SummaryHeroCard({
                 <RolloverLeftLine
                   rolloverCents={rolloverCents}
                   liveAvailableCents={rollover.liveAvailableCents}
+                  prevMonthLabel={rollover.prevMonthLabel}
                   monthFirstOfMonth={monthFirstOfMonth}
                   currency={currency}
                   editing={editingRollover}
@@ -1866,46 +1842,24 @@ function SummaryHeroCard({
               )}
             </div>
           </HeroStat>
-          <HeroStat accentVar="var(--viz-soft)" className="order-3 @3xl:order-none @3xl:text-center">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-foreground">Total Planned</p>
-            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-foreground">
-              {formatMoney(outflowPlanned, currency)}
-            </p>
-            <div className="mt-1.5 @3xl:flex @3xl:justify-center">
-              <RollInPlanControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
-            </div>
-          </HeroStat>
-          <HeroStat accentVar="var(--negative)" className="order-2 @3xl:order-none @3xl:text-center">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-foreground">Actual Spent</p>
-            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-negative">
-              {formatMoney(actualSpent, currency)}
-            </p>
-            <div className="mt-1.5 flex flex-col items-start gap-1.5 empty:hidden @3xl:items-center">
-              {tone !== "good" && (
-                <span
-                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ${toneClasses.badge}`}
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d={toneClasses.icon} />
-                  </svg>
-                  {badgeText}
+          <HeroStat accentVar="var(--viz-soft)" className="@3xl:text-center">
+            <p className={TITLE}>Planned</p>
+            <p className={`${FIGURE} text-foreground`}>{formatMoney(outflowPlanned, currency)}</p>
+            {/* Planned vs. the money: over plans more than there is, unplanned
+                is money with no job yet. Hidden when they match. */}
+            {displayLeft !== 0 && (
+              <p className={SUBLINE}>
+                {displayLeft < 0 ? "Over by" : "Unplanned"}:{" "}
+                <span className={`font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-positive"}`}>
+                  {formatMoney(Math.abs(displayLeft), currency)}
                 </span>
-              )}
-              {/* Planned-vs-spent matcher: it's about what was spent, so it
-                  sits under Actual Spent. */}
-              <MatchSpentButton candidates={matchCandidates} monthKey={monthFirstOfMonth} currency={currency} leftCents={displayLeft} />
-            </div>
-          </HeroStat>
-          <HeroStat accentVar={leftAccent} className="order-4 @3xl:order-none @3xl:text-center">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-foreground">Income Planned Remaining</p>
-            <p className={`mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
-              {formatMoney(displayLeft, currency)}
-            </p>
-            {/* Zero-based budgeting says every dollar gets a job — this is the
-                entry point for giving the leftover one, or for taking a job
-                away when the month is over-budgeted. */}
-            {displayLeft !== 0 ? (
-              <div className="mt-1.5 @3xl:flex @3xl:justify-center">
+              </p>
+            )}
+            <div className="mt-1.5 flex flex-col items-start gap-1.5 @3xl/hero:items-center">
+              <RollInPlanControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
+              {/* Zero-based budgeting: give the unplanned money a job, or take
+                  one away when the month plans more than it has. */}
+              {displayLeft !== 0 && (
                 <AssignLeftover
                   mode={displayLeft < 0 ? "trim" : "assign"}
                   leftoverCents={displayLeft}
@@ -1913,20 +1867,29 @@ function SummaryHeroCard({
                   currency={currency}
                   options={heroSubOptions}
                 />
-              </div>
-            ) : null}
-            {rollover.deficitCents < 0 && (
-              <div className="mt-1.5 @3xl:flex @3xl:justify-center">
-                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-negative/25 bg-negative/10 px-2 py-1 text-[11px] text-negative sm:gap-1.5 sm:px-2.5">
-                  <span className="font-bold tabular-nums">{formatMoney(rollover.deficitCents, currency)}</span>
-                  <span className="font-semibold opacity-80">
-                    <span className="max-sm:hidden @max-[14rem]/stat:hidden">rolled over </span>from {shortMonth(rollover.prevMonthLabel)}
-                  </span>
-                </span>
-              </div>
+              )}
+            </div>
+          </HeroStat>
+          <HeroStat accentVar="var(--negative)" className="@3xl:text-center">
+            <p className={TITLE}>Spent</p>
+            <p className={`${FIGURE} text-negative`}>{formatMoney(actualSpent, currency)}</p>
+            {/* Savings counts in Spent; say so, so it isn't read as spending. */}
+            {savings.spent > 0 && (
+              <p className={SUBLINE}>
+                incl. <span className="font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>{formatMoney(savings.spent, currency)}</span> saved
+              </p>
             )}
-            {rolloverCents > 0 && (
-              <div className="mt-1.5">
+            <div className="mt-1.5 flex flex-col items-start gap-1.5 empty:hidden @3xl/hero:items-center">
+              <MatchSpentButton candidates={matchCandidates} monthKey={monthFirstOfMonth} currency={currency} leftCents={displayLeft} />
+            </div>
+          </HeroStat>
+          <HeroStat accentVar={leftAccent} className="@3xl:text-center">
+            <p className={TITLE}>{leftCents < 0 ? "Overspent" : "Income Remaining"}</p>
+            <p className={`${FIGURE} ${leftClass}`}>{formatMoney(leftCents, currency)}</p>
+            <p className={SUBLINE}>{leftSub}</p>
+            {/* Last month's money used this month (or a deficit carried in). */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1 empty:hidden @3xl/hero:justify-center">
+              {rolloverCents > 0 && (
                 <RolloverAddedLine
                   rolloverCents={rolloverCents}
                   liveAvailableCents={rollover.liveAvailableCents}
@@ -1934,8 +1897,14 @@ function SummaryHeroCard({
                   monthFirstOfMonth={monthFirstOfMonth}
                   currency={currency}
                 />
-              </div>
-            )}
+              )}
+              {rollover.deficitCents < 0 && (
+                <span className="inline-flex items-center gap-x-1 max-w-full flex-wrap whitespace-nowrap rounded-xl @3xl/hero:rounded-full border border-negative/25 bg-negative/10 px-2 py-1 text-[11px] text-negative">
+                  <span className="font-bold tabular-nums">{formatMoney(rollover.deficitCents, currency)}</span>
+                  <span className="font-semibold opacity-80">from {prevMonth}</span>
+                </span>
+              )}
+            </div>
           </HeroStat>
         </div>
 
@@ -2143,7 +2112,8 @@ function RolloverControl({
   // amount box, so part of it can stay out.
   if (choosing) {
     return (
-      <RolloverAmountForm
+      <div className="flex basis-full flex-col items-start @3xl/hero:items-center">
+        <RolloverAmountForm
         monthFirstOfMonth={monthFirstOfMonth}
         alreadyCents={0}
         shortfallCents={shortfallCents}
@@ -2154,7 +2124,8 @@ function RolloverControl({
         onSaved={() => {
           rolloverAddedAt = Date.now();
         }}
-      />
+        />
+      </div>
     );
   }
 
@@ -2162,12 +2133,12 @@ function RolloverControl({
     <button
       type="button"
       onClick={() => setChoosing(true)}
-      className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-positive/25 bg-positive/10 px-2 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive sm:gap-1.5 sm:px-2.5"
-      aria-label={`Rollover ${prevMonthName}: ${amount}`}
+      className="inline-flex max-w-full cursor-pointer flex-wrap items-center gap-x-1 rounded-xl @3xl/hero:rounded-full border border-positive/25 bg-positive/10 px-2 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive sm:gap-1.5 sm:px-2.5"
+      aria-label={`${amount} Left to Rollover from ${prevMonthName}`}
     >
       <span className="size-1.5 rounded-full bg-positive" aria-hidden />
-      <span className="whitespace-nowrap text-[10px] font-semibold opacity-80 sm:text-[11px]">Rollover {prevMonthName}:</span>
-      <span className="whitespace-nowrap text-[10px] font-bold tabular-nums sm:text-[11px]">{amount}</span>
+      <span className="whitespace-nowrap text-[11px] font-bold tabular-nums">{amount}</span>
+      <span className="whitespace-nowrap text-[11px] font-semibold opacity-80">Left to Rollover</span>
     </button>
   );
 }
@@ -2245,7 +2216,7 @@ function RolloverAmountForm({
         e.preventDefault();
         save();
       }}
-      className="flex flex-col items-start gap-1.5 @3xl:items-center"
+      className="flex flex-col items-start gap-1.5 @3xl/hero:items-center"
     >
       <span className="text-[11px] font-semibold text-foreground">
         Amount to roll over{" "}

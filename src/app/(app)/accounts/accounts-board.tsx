@@ -46,7 +46,7 @@ import { AddTransactionButton } from "../travel/add-transaction-button";
 import { MoveMoneyModal } from "./move-money";
 import { TransferActivityModal } from "./transfer-activity";
 import type { EditableTransfer } from "../transactions/transfer-editor-modal";
-import { MonthEndUpdateModal, type MonthEndCheck } from "./month-end-update";
+import { MonthEndUpdateModal, type MonthEndCheck, type MonthEndMove } from "./month-end-update";
 import { EstateAddFields, EstateGuideModal, estateNames, estateToFillCount, type EstateData } from "./estate-guide";
 import { CardFace, DUE_SOON_DAYS, cardShortName, formatDueDate, nextDueDate, useLocalToday } from "./card-face";
 import { EditCardModal, type FreeNightStayLite } from "../travel/credit-card-rewards";
@@ -192,6 +192,7 @@ type Props = {
   eoyHistoryNetCents?: number | null;
   // Month-end update checkmarks for this month and last.
   monthEndChecks?: MonthEndCheck[];
+  monthEndMoves?: MonthEndMove[];
   estate?: EstateData;
   /** Stays using a card's free night — the card Edit form locks their dates. */
   freeNightStays?: FreeNightStayLite[];
@@ -459,6 +460,7 @@ export function AccountsBoard({
   owingDebtIds = [],
   eoyHistoryNetCents = null,
   monthEndChecks = [],
+  monthEndMoves = [],
   estate = { accounts: {}, guide: { executor: null, willLocation: null, attorney: null, powerOfAttorney: null, instructions: null }, items: [] },
   freeNightStays = [],
 }: Props) {
@@ -1082,6 +1084,7 @@ export function AccountsBoard({
           accounts={accounts}
           currentMonth={historyMonths[0]}
           checks={monthEndChecks}
+          moves={monthEndMoves}
           onClose={() => setMonthEndOpen(false)}
         />
       ) : null}
@@ -1159,6 +1162,17 @@ function PropertyLinkSelect({ value, className }: { value: string | null; classN
 //
 // The points, free nights and rewards ledger moved to /travel — this is the
 // money half. A card's balance belongs beside the accounts that pay it.
+
+// The card's bank: one badge style for every bank (the strips under it are
+// green, blue and red, and those colours carry meaning), with the name alone
+// telling banks apart — no initials (Victor, 2026-10-31).
+function BankBadge({ bank }: { bank: string }) {
+  return (
+    <span className="max-w-[45%] shrink-0 truncate rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground shadow-sm ring-1 ring-yellow-400 dark:ring-yellow-500/70">
+      {bank}
+    </span>
+  );
+}
 
 // One card on the desktop Credit Cards grid, laid out like the Amex
 // dashboard: the card's face, "Card owed: $7.79" with the name under it, and
@@ -1245,8 +1259,9 @@ function CardTile({
           {top}
         </button>
       )}
-      <div className={`flex min-h-[2.4rem] items-center justify-between gap-2 border-t border-line px-3 py-1.5 text-sm font-semibold ${ready && strip ? strip.className : ""}`}>
-        <span className="min-w-0 truncate">{ready && strip ? strip.text : null}</span>
+      {/* Edit first, so it sits in the same spot on every tile; the card's
+          bank on the right (Victor, 2026-10-31). */}
+      <div className={`flex min-h-[2.4rem] items-center gap-2 border-t border-line px-3 py-1.5 text-sm font-semibold ${ready && strip ? strip.className : ""}`}>
         <button
           type="button"
           onClick={onEdit}
@@ -1258,6 +1273,8 @@ function CardTile({
           </svg>
           Edit
         </button>
+        <span className="min-w-0 flex-1 truncate">{ready && strip ? strip.text : null}</span>
+        {bank ? <BankBadge bank={bank} /> : null}
       </div>
     </div>
   );
@@ -1347,8 +1364,8 @@ function CreditCardListSection({
 
   return (
     <section id={isMain ? "credit-cards" : undefined} className="@container overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      {/* One line, left to right: title, Make Card Payment, the total,
-          + Transaction. The chevron keeps the far edge. On a phone the
+      {/* One line, left to right: title, Make Card Payment, Balance Transfer,
+          + Transaction, then the total. The chevron keeps the far edge. On a phone the
           buttons + total wrap under the title. (The Travel Log link was
           dropped — the sidebar already goes there.) The whole header toggles, blank space included — the
           title and chevron buttons' clicks bubble up to this one. */}
@@ -1390,22 +1407,6 @@ function CreditCardListSection({
             Balance Transfer
           </button>
         ) : null}
-        {/* Wraps "Not in Net Worth" under the total on a phone. */}
-        <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 whitespace-nowrap">
-          <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Total credit card owed:</span>
-          <span className="text-sm font-bold tabular-nums text-negative sm:text-base">
-            {formatMoney(totalOwed, currency)}
-          </span>
-          {/* A light-blue pill so it reads as a note on the total. */}
-          <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-foreground dark:bg-sky-900/50">Not in Net Worth</span>
-        </span>
-        {/* Cards owing money whose due date is a week away or less — said
-            once here so it isn't missed among the tiles. Desktop only. */}
-        {dueSoon > 0 ? (
-          <span className="hidden whitespace-nowrap rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-negative ring-1 ring-rose-200 sm:inline-block dark:bg-rose-950/40 dark:ring-rose-900">
-            {dueSoon} card{dueSoon === 1 ? "" : "s"} due this week
-          </span>
-        ) : null}
         {/* Log a charge seen in the card's own app without leaving this page —
             the same form as Budget and Transactions, so it lands everywhere
             and moves the card's owed amount. Its clicks (form included) must
@@ -1416,6 +1417,23 @@ function CreditCardListSection({
             className="h-7 shrink-0 cursor-pointer rounded-full bg-brand px-3 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong disabled:opacity-60"
           />
         </span>
+        {/* The total and its "not in net worth" note share one teal-ringed
+            box so the note visibly belongs to the total. Sits after the
+            buttons; on a phone the note drops to a second line inside it. */}
+        <span className="inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg bg-surface px-3 py-1 ring-1 ring-inset ring-teal-300 dark:ring-teal-700">
+          <span className="whitespace-nowrap text-xs font-bold uppercase tracking-wide text-foreground">Total credit card owed:</span>
+          <span className="text-sm font-bold tabular-nums text-negative sm:text-base">
+            {formatMoney(totalOwed, currency)}
+          </span>
+          <span className="whitespace-nowrap border-teal-300 text-xs font-semibold uppercase tracking-wide text-teal-800 sm:border-l sm:pl-2 dark:border-teal-700 dark:text-teal-300">Not in net worth</span>
+        </span>
+        {/* Cards owing money whose due date is a week away or less — said
+            once here so it isn't missed among the tiles. Desktop only. */}
+        {dueSoon > 0 ? (
+          <span className="hidden whitespace-nowrap rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-negative ring-1 ring-rose-200 sm:inline-block dark:bg-rose-950/40 dark:ring-rose-900">
+            {dueSoon} card{dueSoon === 1 ? "" : "s"} due this week
+          </span>
+        ) : null}
         </div>
         <button
           type="button"
@@ -1542,6 +1560,7 @@ function CreditCardListSection({
       {pickingCard ? (
         <PickCardModal
           cards={localCards.filter((a) => !a.dateClosed)}
+          todayIso={todayIso}
           currency={currency}
           onPick={(card) => {
             setPickingCard(false);
@@ -1576,23 +1595,35 @@ function CreditCardListSection({
 // with what they owe; picking one opens its Pay form.
 function PickCardModal({
   cards,
+  todayIso,
   currency,
   onPick,
   onClose,
 }: {
   cards: AccountData[];
+  todayIso: string | null;
   currency: string;
   onPick: (card: AccountData) => void;
   onClose: () => void;
 }) {
   useScrollLock();
-  // What each card needs paying: its owed figure, or — for a card carried as
-  // a payoff debt, which owes $0 on the register — that debt, plus any
-  // balance transfer on it. Only owed figures showed before, so the cards
-  // with the most to pay read as owing nothing.
-  const debtOf = (a: AccountData) => (a.cardDetails?.isRevolvingDebt ? Math.max(0, a.cardDetails.payoffBalanceCents) : 0);
-  const due = (a: AccountData) => (a.owedCents ?? 0) > 0 || debtOf(a) > 0 || (a.transferCents ?? 0) > 0;
-  const ordered = [...cards.filter(due), ...cards.filter((a) => !due(a))];
+  // Only cards with something due this month (Victor, 2026-10-31): an owed
+  // balance, a balance transfer, or — for a card carried as a payoff debt,
+  // which owes $0 on the register — what's left of this month's Budget plan
+  // for that debt (the minimum when there's no plan). A debt whose month is
+  // already paid drops off, so it no longer reads as still owed.
+  const debtDueOf = (a: AccountData) => {
+    const d = a.cardDetails;
+    if (!d?.isRevolvingDebt) return 0;
+    const balance = Math.max(0, d.payoffBalanceCents);
+    if (balance === 0) return 0;
+    const plan = d.debtMonthPlannedCents ?? 0;
+    const paid = d.debtMonthPaidCents ?? 0;
+    const left = plan > 0 ? plan - paid : (d.payoffMinimumCents || balance) - paid;
+    return Math.min(balance, Math.max(0, left));
+  };
+  const due = (a: AccountData) => (a.owedCents ?? 0) > 0 || debtDueOf(a) > 0 || (a.transferCents ?? 0) > 0;
+  const ordered = cards.filter(due);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
@@ -1613,6 +1644,7 @@ function PickCardModal({
         {/* Room on all four sides for the rows' rings: the scroll box clips
             anything outside it, and the first and last rows lost their top
             and bottom lines. */}
+        {ordered.length === 0 ? <p className="py-4 text-center text-sm font-semibold">Nothing due this month.</p> : null}
         <ul className="-m-1 space-y-1 overflow-y-auto p-1">
           {ordered.map((a) => (
             <li key={a.id}>
@@ -1621,7 +1653,22 @@ function PickCardModal({
                 onClick={() => onPick(a)}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left ring-1 ring-line transition hover:bg-sky-50 hover:ring-sky-400 dark:hover:bg-sky-950/40"
               >
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{a.name}</span>
+                  {/* The next due date when the card has a due day; red with
+                      the days left inside a week, as on the card tile. */}
+                  {(() => {
+                    const d = todayIso && a.paymentDueDay ? nextDueDate(a.paymentDueDay, todayIso) : null;
+                    if (!d) return null;
+                    const soon = d.daysLeft <= DUE_SOON_DAYS;
+                    const when = d.daysLeft === 0 ? "today" : d.daysLeft === 1 ? "tomorrow" : `in ${d.daysLeft} days`;
+                    return (
+                      <span className={`block text-xs font-semibold ${soon ? "text-negative" : "text-foreground"}`}>
+                        Due {formatDueDate(d.iso)}{soon ? ` · ${when}` : ""}
+                      </span>
+                    );
+                  })()}
+                </span>
                 <span className="flex shrink-0 flex-col items-end text-sm font-semibold">
                   {(a.owedCents ?? 0) > 0 ? (
                     <span className="tabular-nums text-negative">{formatMoney(a.owedCents ?? 0, currency)}</span>
@@ -1630,9 +1677,9 @@ function PickCardModal({
                       Credit: <span className="tabular-nums text-positive">{formatMoney(a.owedCents ?? 0, currency)}</span>
                     </span>
                   ) : null}
-                  {debtOf(a) > 0 ? (
+                  {debtDueOf(a) > 0 ? (
                     <span>
-                      Debt: <span className="tabular-nums text-negative">{formatMoney(debtOf(a), currency)}</span>
+                      Due: <span className="tabular-nums text-negative">{formatMoney(debtDueOf(a), currency)}</span>
                     </span>
                   ) : null}
                   {(a.transferCents ?? 0) > 0 ? (

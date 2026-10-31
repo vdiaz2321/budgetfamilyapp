@@ -1,7 +1,7 @@
 "use client";
 
 import { formatMoney } from "@/lib/money";
-import { HEADER_ACCENT, MonthTransactions } from "./item-panel";
+import { KIND_STRIPE, MonthTransactions, PanelHeader } from "./item-panel";
 import { remainingPrefill } from "./subscriptions-summary";
 import type { SubscriptionRow } from "../subscriptions/types";
 import type { TxData, TxPrefill } from "./types";
@@ -40,34 +40,17 @@ export function SubscriptionPanel({
 
   return (
     <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className={`relative ${HEADER_ACCENT.bills} px-4 pb-3 pt-3 pr-11`}>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/20 text-white hover:bg-black/30"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-base font-semibold text-white">{sub.name}</p>
-            <p className="mt-0.5 text-[11px] text-white/90 tabular-nums">
-              {formatMoney(spent, currency)} spent of {formatMoney(planned, currency)}
-            </p>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-[10px] uppercase tracking-wide text-white/80">
-              {remaining < 0 ? "Overspent" : "Remaining"}
-            </p>
-            <p className="text-xl font-bold leading-tight text-white tabular-nums">
-              {formatMoney(remaining, currency)}
-            </p>
-          </div>
-        </div>
-      </div>
+      <PanelHeader
+        stripe={KIND_STRIPE.bills}
+        onClose={onClose}
+        title={<p className="truncate text-lg font-bold text-foreground">{sub.name}</p>}
+      >
+        <span className="font-bold">{formatMoney(spent, currency)}</span> spent of{" "}
+        <span className="font-bold">{formatMoney(planned, currency)}</span>
+        {remaining < 0 ? (
+          <span className="font-bold text-negative"> · {formatMoney(-remaining, currency)} over</span>
+        ) : null}
+      </PanelHeader>
 
       <div className="flex items-center gap-2 border-b border-line/70 bg-surface px-5 py-2">
         <button

@@ -642,7 +642,7 @@ export function FiSection({
   const renderCards = (inEditor: boolean) => (
     <div className="@container">
           <div className={`mt-3 grid gap-3 ${inEditor ? "" : "@2xl:grid-cols-2"}`}>
-            <div className={inEditor ? "grid items-start gap-3 @2xl:grid-cols-2" : "flex flex-col gap-3"}>
+            <div className={inEditor ? "grid items-start gap-3 @3xl:grid-cols-2" : "flex flex-col gap-3"}>
             {retireIncome ? (
               <div className="rounded-lg bg-surface px-3 py-2.5 ring-1 ring-line sm:px-5 sm:py-4">
                 {/* A year picker in the title, like the survivor card's. */}
@@ -2685,13 +2685,14 @@ function PlanModal({
           Below xl the list folds open in place, like before. The fields and
           the results share whatever width there is, so a 27in or a 34in
           screen both fill (Victor, 2026-10-29); the results cards sit side
-          by side once their own column is wide enough. Collapsed, the freed
-          room goes to the fields first, up to the form's own 60rem. */}
+          by side once their own column is wide enough. Extra width splits
+          a bit more to the fields than the results at every screen size,
+          so neither column hogs the slack (Victor, 2026-10-31). */}
       <div
         className={`min-h-0 flex-1 xl:grid ${
           navCollapsed
-            ? "xl:grid-cols-[4.5rem_minmax(40rem,60rem)_minmax(35rem,1fr)]"
-            : "xl:grid-cols-[15rem_minmax(40rem,1fr)_minmax(30rem,1.5fr)]"
+            ? "xl:grid-cols-[4.5rem_minmax(40rem,1.2fr)_minmax(35rem,1fr)]"
+            : "xl:grid-cols-[15rem_minmax(40rem,1.2fr)_minmax(30rem,1fr)]"
         }`}
       >
       <nav aria-label="Sections" className="hidden h-full overflow-y-auto border-r border-line px-3 py-4 xl:block">
@@ -2719,7 +2720,7 @@ function PlanModal({
         ref={formRef}
         onSubmit={submit}
         onChange={() => setTyped((n) => n + 1)}
-        className="mx-auto flex max-w-[60rem] flex-col gap-2 px-4 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:px-6"
+        className="mx-auto flex flex-col gap-2 px-4 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:px-6"
       >
         {openSection == null ? (
           <p className="hidden py-10 text-center text-base font-semibold xl:block">Pick a section on the left.</p>
@@ -4318,8 +4319,7 @@ function FersLineFields({
     if (start == null || end == null) return "Enter when the GS job starts and ends.";
     if (!high3) return "Enter the best 3-year average salary.";
     if (!est) return "The end can't be before the start.";
-    const service = `${est.serviceYears} yrs${est.serviceMonths ? ` ${est.serviceMonths} mo` : ""}`;
-    if (!est.path) return `${service} of GS — under 5 years earns no pension.`;
+    if (!est.path) return `${est.gsYears} yrs of GS — under 5 GS years earns no pension.`;
     return null;
   })();
   return (
@@ -4369,7 +4369,7 @@ function FersLineFields({
         </LineField>
       </div>
       {est?.canStartEarly ? (
-        <label className="flex flex-wrap items-center justify-center gap-2">
+        <label className="flex flex-wrap items-center justify-start gap-2">
           <span className="max-sm:text-[12px] sm:text-sm font-semibold text-foreground">Pension starts</span>
           <select
             value={line.startEarly ? "early" : "62"}
@@ -4381,7 +4381,7 @@ function FersLineFields({
           </select>
         </label>
       ) : null}
-      <div className="text-center text-xs text-foreground sm:text-sm">
+      <div className="text-left text-xs text-foreground sm:text-sm">
         {result ? (
           <p>{result}</p>
         ) : est && est.path ? (
@@ -4408,7 +4408,7 @@ function FersLineFields({
               <p>Plus the FERS supplement until 62{ssKnown ? "." : " — not in the plan: it needs your Social Security."}</p>
             ) : null}
             {est.supplement && line.owner === "spouse" ? (
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              <div className="flex flex-wrap items-center justify-start gap-2 pt-1">
                 <span className="font-semibold">Spouse&rsquo;s Social Security at 62 /mo:</span>
                 <input
                   inputMode="decimal"
@@ -4423,7 +4423,7 @@ function FersLineFields({
                     <>
                       → supplement{" "}
                       <span className="font-semibold" style={{ color: "var(--positive)" }}>
-                        {$(Math.round((displayToCents(line.pia) * Math.min(est.serviceYears, 40)) / 40))}/mo
+                        {$(Math.round((displayToCents(line.pia) * Math.min(est.gsYears, 40)) / 40))}/mo
                       </span>{" "}
                       until 62
                     </>
@@ -4440,7 +4440,7 @@ function FersLineFields({
           OPM: the waiver starts the day the GS pension does, and the
           military deposit is paid before leaving GS. */}
       {canWaive ? (
-        <div className="space-y-1 rounded-lg px-3 py-2 text-center text-xs ring-1 ring-line sm:text-sm">
+        <div className="space-y-1 rounded-lg px-3 py-2 text-left text-xs ring-1 ring-line sm:text-sm">
           <label className="inline-flex cursor-pointer items-center gap-2 font-semibold">
             <input
               type="checkbox"
@@ -4484,6 +4484,11 @@ function FersLineFields({
           ) : null}
         </div>
       ) : null}
+      {/* Abroad the allowances are easy to add in by mistake; OPM leaves
+          them out of the high-3. */}
+      <p className="text-left text-xs text-foreground sm:text-sm">
+        <span className="font-semibold">Salary:</span> basic pay only — no LQA, post allowance or COLA.
+      </p>
     </div>
   );
 }
@@ -4517,6 +4522,7 @@ const OPM = {
   buyback: "https://www.opm.gov/retirement-center/fers-information/service-credit/",
   health: "https://www.opm.gov/healthcare-insurance/life-events/retirement/im-thinking-about-retiring/tabs/health/",
   survivor: "https://www.opm.gov/retirement-center/survivor-benefits/",
+  cola: "https://www.opm.gov/retirement-center/my-annuity-and-benefits/annuity-payments/",
   quickGuide: "https://www.opm.gov/retirement-center/apply/quick-guide/",
 };
 
@@ -4547,7 +4553,7 @@ function FersGuide({
 
   const facts: { big: string; small: string; href: string }[] = [
     { big: "1% per GS year", small: "of your best 3-year average salary — 1.1% if you leave at 62+ with 20+ years", href: OPM.computation },
-    { big: "Raises from 62", small: "a COLA each January, a little under Social Security's when inflation tops 2%", href: OPM.computation },
+    { big: "Raises from 62", small: "a COLA each January, a little under Social Security's when inflation tops 2%", href: OPM.cola },
     { big: "Survivor costs 5–10%", small: "leaving a spouse 50% costs 10% of the pension; 25% costs 5%", href: OPM.survivor },
   ];
 
@@ -4594,6 +4600,7 @@ function FersGuide({
           </FersPoint>
           <FersPoint label="Keep FEHB 5 years" href={OPM.health}>
             Be on FEHB the 5 years before retiring. TRICARE years count, but be in an FEHB plan on the retirement date.
+            <span className="mt-1 block"><span className="font-semibold">Leave before MRA:</span> no FEHB.</span>
           </FersPoint>
         </ul>
       ) : (

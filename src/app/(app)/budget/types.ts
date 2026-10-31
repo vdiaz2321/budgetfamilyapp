@@ -18,6 +18,9 @@ export type SavingsDetail = {
   // same figures the Invest page shows. Null when there's no goal/date.
   requiredMonthlyCents: number | null;
   pace: SavingsGoalPace;
+  // Saved toward the goal so far, and what's still to go (same source).
+  savedCents: number;
+  leftToSaveCents: number;
 };
 
 // A target a Savings item can link to. Usually a bucket (with parent account

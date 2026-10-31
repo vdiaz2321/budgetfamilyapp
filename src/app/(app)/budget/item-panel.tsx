@@ -23,16 +23,57 @@ import { DEBT_KINDS } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 
-export const HEADER_ACCENT: Record<CategoryKind, string> = {
-  income: "bg-positive",
-  savings: "bg-sky-500",
-  bills: "bg-brand",
-  expenses: "bg-accent",
-  // A softer, desaturated coral-red rather than the hot negative token
-  // (red-600) used for figures — the solid header fill was reading too bright,
-  // while still keeping the white title/figure legible.
-  debt: "bg-[#e0625e]",
+// Thin left stripe on the panel header, in the item's flow colour. Debt uses
+// --negative rather than --viz-debt (rose) — no pink anywhere.
+export const KIND_STRIPE: Record<CategoryKind, string> = {
+  income: "var(--positive)",
+  savings: "var(--viz-savings)",
+  bills: "var(--viz-bills)",
+  expenses: "var(--viz-expenses)",
+  debt: "var(--negative)",
 };
+
+// One look for every editable field in the panel: plain surface box, a clear
+// 1px border that firms up on hover and turns --brand on focus, bold value.
+// No coloured fill — Victor found the sky-50 boxes "ugly blue highlights".
+const FIELD_BASE =
+  "rounded-lg bg-surface dark:bg-background text-sm font-semibold text-foreground ring-1 ring-foreground/25 transition hover:ring-foreground/45 focus:outline-none focus:ring-2 focus:ring-brand";
+export const FIELD_SELECT = `${FIELD_BASE} h-9 px-2.5 text-left`;
+const FIELD_TEXTAREA = `${FIELD_BASE} px-2.5 py-2 font-medium`;
+const ROW_LABEL = "text-xs font-semibold text-foreground sm:text-[15px]";
+
+// Calm header shared with the subscription panel: surface card, coloured left
+// stripe, bold name, one figures line. No separate "Remaining" block — the
+// "$X spent of $Y" line already says it (Victor, 2026-10-31).
+export function PanelHeader({
+  stripe,
+  onClose,
+  title,
+  children,
+}: {
+  stripe: string;
+  onClose: () => void;
+  title: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative border-b border-line px-5 pb-3 pt-3.5 pr-12">
+      <span aria-hidden className="absolute inset-y-0 left-0 w-1.5" style={{ background: stripe }} />
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full text-foreground ring-1 ring-foreground/20 transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/50"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      </button>
+      <div className="min-w-0">{title}</div>
+      <p className="mt-0.5 text-xs font-medium text-foreground tabular-nums sm:text-sm">{children}</p>
+    </div>
+  );
+}
 
 type Props = {
   row: RowData;
@@ -107,11 +148,11 @@ function CoverOverspend({
 
   return (
     <div className="border-b border-line bg-negative/5 px-4 py-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-foreground">
         Move money into {row.name}
       </p>
       {donors.length === 0 ? (
-        <p className="mt-1.5 text-xs text-muted">
+        <p className="mt-1.5 text-xs text-foreground">
           No category has planned money left this month to move.
         </p>
       ) : (
@@ -121,7 +162,7 @@ function CoverOverspend({
               value={fromId}
               onChange={(e) => setFromId(e.target.value)}
               aria-label="Move from"
-              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm text-left ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className={`w-full ${FIELD_SELECT}`}
             >
               <option value="">Take from…</option>
               {donors.map((d) => (
@@ -135,7 +176,7 @@ function CoverOverspend({
               onChange={(e) => setAmount(e.target.value)}
               inputMode="decimal"
               aria-label="Amount to move"
-              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className={`h-9 w-full px-2 text-center tabular-nums ${FIELD_BASE}`}
             />
             <div className="flex gap-2">
               <button
@@ -164,7 +205,7 @@ function CoverOverspend({
               <button
                 type="button"
                 onClick={() => { setOpen(false); setError(null); }}
-                className="rounded-lg px-2 py-1.5 text-xs font-semibold text-muted hover:text-foreground"
+                className="rounded-lg px-2 py-1.5 text-xs font-semibold text-foreground hover:text-foreground"
               >
                 Cancel
               </button>
@@ -271,54 +312,32 @@ export function ItemPanel({
       : kind === "savings"
         ? "saved"
         : "spent";
-  const headerLabel = isIncome
-    ? "Received"
-    : over
-      ? overIsGood
-        ? kind === "debt"
-          ? "Extra paid"
-          : "Extra saved"
-        : "Overspent"
-      : "Remaining";
-  const headerValue = isIncome ? row.spentCents : over && overIsGood ? -remaining : remaining;
+  // The old right-hand "Remaining" block repeated the line below. Only the
+  // over-plan figure isn't already on that line, so it rides along on it.
+  const overNote = !isIncome && over
+    ? overIsGood
+      ? { text: `${formatMoney(-remaining, currency)} extra`, cls: "text-positive" }
+      : { text: `${formatMoney(-remaining, currency)} over`, cls: "text-negative" }
+    : null;
 
   return (
     <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      {/* Colored header */}
-      <div className={`relative ${HEADER_ACCENT[kind]} px-4 pb-3 pt-3 pr-11`}>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/20 text-white hover:bg-black/30"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            {/* Keyed by the item so opening a different row remounts the
-                editor. Without it the editor stayed open across the switch,
-                still holding the previous item's text in an uncontrolled
-                input — and its blur-to-save would then rename the item that
-                had just been opened. */}
-            <InlineNameEdit key={row.subId} subId={row.subId} name={row.name} />
-            <p className="mt-0.5 text-[11px] text-white/90 tabular-nums">
-              {formatMoney(row.spentCents, currency)} {verb} of{" "}
-              {formatMoney(row.plannedCents, currency)}
-            </p>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-[10px] uppercase tracking-wide text-white/80">
-              {headerLabel}
-            </p>
-            <p className="text-xl font-bold leading-tight text-white tabular-nums">
-              {formatMoney(headerValue, currency)}
-            </p>
-          </div>
-        </div>
-      </div>
+      <PanelHeader
+        stripe={KIND_STRIPE[kind]}
+        onClose={onClose}
+        title={
+          // Keyed by the item so opening a different row remounts the
+          // editor. Without it the editor stayed open across the switch,
+          // still holding the previous item's text in an uncontrolled
+          // input — and its blur-to-save would then rename the item that
+          // had just been opened.
+          <InlineNameEdit key={row.subId} subId={row.subId} name={row.name} />
+        }
+      >
+        <span className="font-bold">{formatMoney(row.spentCents, currency)}</span> {verb} of{" "}
+        <span className="font-bold">{formatMoney(row.plannedCents, currency)}</span>
+        {overNote ? <span className={`font-bold ${overNote.cls}`}> · {overNote.text}</span> : null}
+      </PanelHeader>
 
       {over && !overIsGood ? (
         <CoverOverspend
@@ -428,18 +447,18 @@ function ItemGroupSelect({
           if (result.error) setError(result.error);
         })
       }
-      className="border-b border-line bg-background/50 px-5 py-3"
+      className="border-b border-line px-5 py-3"
     >
       <input type="hidden" name="subcategoryId" value={row.subId} />
       <label className="flex items-center gap-3 text-xs">
-        <span className="font-semibold text-muted sm:text-[15px]">Category group</span>
+        <span className={ROW_LABEL}>Category group</span>
         <select
           key={row.categoryId}
           name="categoryId"
           defaultValue={row.categoryId}
           disabled={pending}
           onChange={(event) => event.currentTarget.form?.requestSubmit()}
-          className="ml-auto max-w-[12rem] rounded-lg bg-surface px-2.5 py-1.5 text-left font-semibold text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
+          className={`ml-auto max-w-[13rem] disabled:opacity-60 ${FIELD_SELECT}`}
         >
           {compatible.map((group) => (
             <option key={group.id} value={group.id}>{group.name}</option>
@@ -465,7 +484,7 @@ function InlineNameEdit({ subId, name }: { subId: string; name: string }) {
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className="min-w-0 flex-1 truncate rounded px-1 -mx-1 text-left text-lg font-bold text-white hover:bg-white/10"
+        className="-mx-1 block max-w-full truncate rounded px-1 text-left text-lg font-bold text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
       >
         {name}
       </button>
@@ -494,7 +513,7 @@ function InlineNameEdit({ subId, name }: { subId: string; name: string }) {
           if (e.key === "Escape") setEditing(false);
         }}
         disabled={pending}
-        className="w-full min-w-0 rounded bg-white px-2 py-1 text-lg font-bold text-foreground shadow-sm outline-none ring-2 ring-white/70"
+        className="w-full min-w-0 rounded-lg bg-surface px-2 py-1 text-lg font-bold text-foreground outline-none ring-2 ring-brand dark:bg-background"
       />
     </form>
   );
@@ -519,7 +538,7 @@ function SaveButton({ saveFormId, saving, onSaving }: { saveFormId: string; savi
         const form = document.getElementById(saveFormId) as HTMLFormElement | null;
         if (!form || form.checkValidity()) onSaving();
       }}
-      className="flex shrink-0 items-center gap-1.5 rounded bg-brand px-5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-70"
+      className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-5 py-1.5 text-xs font-bold text-white transition hover:bg-brand-strong disabled:opacity-70"
     >
       {saving ? "Saving…" : "Save"}
     </button>
@@ -554,16 +573,16 @@ function RecurringStrip({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-line/70 px-5 py-2">
+    <div className="flex flex-wrap items-center gap-2 border-b border-line px-5 py-2.5">
       <button
         type="button"
         onClick={toggle}
         disabled={pending}
         aria-pressed={row.isRecurring}
-        className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition disabled:opacity-60 ${
+        className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ring-1 transition disabled:opacity-60 ${
           row.isRecurring
             ? "bg-positive/15 text-positive ring-positive/40 hover:bg-positive/25"
-            : "bg-transparent text-muted ring-line hover:text-foreground"
+            : "bg-surface text-foreground ring-foreground/25 hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/50"
         }`}
       >
         {row.isRecurring ? "✓ Recurring" : "Recurring"}
@@ -581,13 +600,13 @@ function RecurringStrip({
               payee: row.prevPayee,
             })
           }
-          className="min-w-0 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-bold text-brand ring-1 ring-brand/20 transition hover:bg-brand/20"
+          className="min-w-0 rounded-full bg-teal-50 px-3 py-1 text-xs font-bold text-teal-800 ring-1 ring-teal-600/35 transition hover:bg-teal-100 dark:bg-teal-900/40 dark:text-teal-100 dark:ring-teal-400/40 dark:hover:bg-teal-900/60"
         >
           <span aria-hidden="true">↺</span> Prev Mo Spent {formatMoney(row.prevSpentCents, currency)}
         </button>
       ) : null}
       {row.isRecurring && row.prevSpentCents === 0 ? (
-        <span className="min-w-0 text-[11px] text-muted">No spend last month to copy</span>
+        <span className="min-w-0 text-[11px] text-foreground">No spend last month to copy</span>
       ) : null}
     </div>
   );
@@ -614,12 +633,12 @@ function DeleteFooter({
 }) {
   const [pending, start] = useTransition();
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line/70 bg-surface px-5 py-2">
+    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface px-5 py-2.5">
       {onDetails ? (
         <button
           type="button"
           onClick={onDetails}
-          className="shrink-0 rounded bg-brand-soft/60 px-3 py-1.5 text-xs font-semibold text-brand transition hover:bg-brand/20"
+          className="shrink-0 rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-foreground/25 transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/50"
         >
           Details
         </button>
@@ -629,7 +648,7 @@ function DeleteFooter({
         // Wrapped, not passed directly: the callback takes an optional prefill
         // amount, and a bare handler would hand it the click event instead.
         onClick={() => onAddTransaction()}
-        className="flex-1 rounded bg-positive/15 py-1.5 text-xs font-semibold text-positive transition hover:bg-positive/25"
+        className="flex-1 rounded-lg bg-positive/15 py-1.5 text-xs font-bold text-positive transition hover:bg-positive/25"
       >
         +Transaction
       </button>
@@ -643,7 +662,7 @@ function DeleteFooter({
         <button
           type="submit"
           disabled={pending}
-          className="rounded bg-negative/[0.06] px-3 py-1.5 text-xs font-medium text-negative transition hover:bg-negative/10 disabled:opacity-50"
+          className="rounded-lg bg-negative/[0.06] px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/10 disabled:opacity-50"
         >
           {pending ? "Deleting…" : "Delete"}
         </button>
@@ -656,7 +675,7 @@ function DeleteFooter({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{title}</h3>
+      <h3 className="mb-2.5 text-xs font-bold uppercase tracking-wide text-foreground">{title}</h3>
       {children}
     </div>
   );
@@ -675,7 +694,7 @@ export function MonthTransactions({
 }) {
   if (txs.length === 0) {
     return (
-      <div className="border-t border-line/70 px-5 py-3 text-center text-xs text-muted">
+      <div className="border-t border-line/70 px-5 py-3 text-center text-xs text-foreground">
         No transactions this month
       </div>
     );
@@ -690,7 +709,7 @@ export function MonthTransactions({
   };
   return (
     <div className="border-t border-line/70 px-5 py-3">
-      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-foreground">
         This month · {txs.length} transaction{txs.length === 1 ? "" : "s"}
       </h3>
       <ul className="max-h-56 space-y-1 overflow-y-auto">
@@ -728,10 +747,10 @@ function TxRow({
         className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1.5 text-left text-xs disabled:cursor-default"
         aria-label={t.isCardPayment ? "Card payment" : "Edit transaction"}
       >
-        <span className="w-12 shrink-0 whitespace-nowrap tabular-nums text-muted">{dateLabel(t.date)}</span>
+        <span className="w-12 shrink-0 whitespace-nowrap tabular-nums text-foreground">{dateLabel(t.date)}</span>
         <span className="min-w-0 flex-1 truncate">
           <span className="font-medium">{t.payee ?? "—"}</span>
-          {acct ? <span className="ml-1 text-muted">· {acct}</span> : null}
+          {acct ? <span className="ml-1 text-foreground">· {acct}</span> : null}
         </span>
         <span className="shrink-0 tabular-nums">
           {formatMoney(t.amountCents, currency)}
@@ -801,7 +820,7 @@ function PlannedForm({
   // full-width box around "79.02" reads as dead space.
   const plannedInput = (
     <label className="flex items-center gap-3">
-      <span className="text-xs font-semibold text-muted sm:text-[15px]">Planned</span>
+      <span className={ROW_LABEL}>Planned</span>
       <ValueBox
         prefix="$"
         key={plannedCents}
@@ -821,7 +840,7 @@ function PlannedForm({
   // figure yet. Once Planned is typed here it stands on its own — nothing
   // adds the trip on top and nothing writes back to the trip.
   const tripNote = tripPlannedCents > 0 ? (
-    <p className="text-[11px] leading-snug text-muted">
+    <p className="text-[11px] leading-snug text-foreground">
       {tripNames.join(", ")} (Travel Log) plans{" "}
       <span className="font-semibold text-foreground tabular-nums">{formatMoney(tripPlannedCents, currency)}</span> here.
       Planned above is your own figure — change the trip&apos;s amounts in the Travel Log.
@@ -851,7 +870,7 @@ function PlannedForm({
           {plannedInput}
           {hasDue ? (
             <label className="flex items-center gap-3">
-              <span className="text-xs font-semibold text-muted sm:text-[15px]">Due day</span>
+              <span className={ROW_LABEL}>Due day</span>
               <input
                   key={dueDay ?? ""}
                   name="dueDay"
@@ -861,7 +880,7 @@ function PlannedForm({
                   placeholder="—"
                   defaultValue={dueDay ?? ""}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="ml-auto w-28 rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className={`ml-auto h-9 w-32 shrink-0 px-2 text-center tabular-nums ${FIELD_BASE}`}
                 />
             </label>
           ) : null}
@@ -869,12 +888,12 @@ function PlannedForm({
           {hasDue && paymentAccountOptions.length > 0 ? (
             <div>
               <label className="flex items-center gap-3">
-                <span className="shrink-0 text-xs font-semibold text-muted sm:text-[15px]">Charged to</span>
+                <span className={`shrink-0 ${ROW_LABEL}`}>Charged to</span>
                 <select
                   key={paymentAccountId ?? "none"}
                   name="paymentAccountId"
                   defaultValue={paymentAccountId ?? ""}
-                  className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className={`ml-auto min-w-0 max-w-[13rem] flex-1 truncate ${FIELD_SELECT}`}
                 >
                   <option value="">No linked account</option>
                   {paymentAccountOptions.map((account) => (
@@ -882,7 +901,7 @@ function PlannedForm({
                   ))}
                 </select>
               </label>
-              <p className="mt-1 text-[11px] text-muted">Prefills the account when you mark it Paid.</p>
+              <p className="mt-1 text-[11px] text-foreground">Prefills the account when you mark it Paid.</p>
             </div>
           ) : null}
         </div>
@@ -952,14 +971,14 @@ function ItemDetailsPopover({
       >
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{itemName}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-foreground">{itemName}</p>
             <p className="text-sm font-bold text-foreground">Details · {monthLabel}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-brand-soft hover:text-foreground"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-foreground hover:bg-brand-soft hover:text-foreground"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
               <path d="M18 6 6 18M6 6l12 12" />
@@ -969,15 +988,15 @@ function ItemDetailsPopover({
 
         <dl className="grid grid-cols-3 gap-2 px-4 py-3 text-center">
           <div>
-            <dt className="text-[10px] uppercase tracking-wide text-muted">Assigned</dt>
+            <dt className="text-[10px] uppercase tracking-wide text-foreground">Assigned</dt>
             <dd className="mt-0.5 text-sm font-bold text-foreground tabular-nums">{formatMoney(plannedCents, currency)}</dd>
           </div>
           <div>
-            <dt className="text-[10px] uppercase tracking-wide text-muted">Spent</dt>
+            <dt className="text-[10px] uppercase tracking-wide text-foreground">Spent</dt>
             <dd className="mt-0.5 text-sm font-bold text-negative tabular-nums">{formatMoney(spentCents, currency)}</dd>
           </div>
           <div>
-            <dt className="text-[10px] uppercase tracking-wide text-muted">Available</dt>
+            <dt className="text-[10px] uppercase tracking-wide text-foreground">Available</dt>
             <dd className={`mt-0.5 text-sm font-bold tabular-nums ${available < 0 ? "text-negative" : "text-positive"}`}>
               {formatMoney(available, currency)}
             </dd>
@@ -995,7 +1014,7 @@ function ItemDetailsPopover({
               Reassign available funds
             </button>
             {available <= 0 ? (
-              <p className="mt-1.5 text-center text-[11px] text-muted">Nothing available to reassign.</p>
+              <p className="mt-1.5 text-center text-[11px] text-foreground">Nothing available to reassign.</p>
             ) : null}
           </div>
         ) : (
@@ -1013,13 +1032,13 @@ function ItemDetailsPopover({
             <input type="hidden" name="fromSubId" value={subId} />
             <input type="hidden" name="month" value={monthKey} />
             <label className="block">
-              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">Reassign to</span>
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Reassign to</span>
               <select
                 name="toSubId"
                 value={toSubId}
                 onChange={(e) => setToSubId(e.target.value)}
                 required
-                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm text-left ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className={`w-full ${FIELD_SELECT}`}
               >
                 <option value="">Pick a budget item…</option>
                 {subOptions.filter((s) => s.id !== subId).map((s) => (
@@ -1028,7 +1047,7 @@ function ItemDetailsPopover({
               </select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-foreground">
                 Amount (max {formatMoney(available, currency)})
               </span>
               <input
@@ -1038,7 +1057,7 @@ function ItemDetailsPopover({
                 autoComplete="off"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className={`h-9 w-full px-3 text-center tabular-nums ${FIELD_BASE}`}
               />
             </label>
             {error ? <p className="text-xs font-medium text-negative">{error}</p> : null}
@@ -1046,7 +1065,7 @@ function ItemDetailsPopover({
               <button
                 type="button"
                 onClick={() => setReassignOpen(false)}
-                className="flex-1 rounded-lg bg-background py-2 text-sm font-medium text-muted ring-1 ring-line transition hover:text-foreground"
+                className="flex-1 rounded-lg bg-background py-2 text-sm font-medium text-foreground ring-1 ring-line transition hover:text-foreground"
               >
                 Cancel
               </button>
@@ -1093,7 +1112,7 @@ function DebtForm({
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <label className="flex items-center gap-3">
-          <span className="text-xs font-semibold text-muted sm:text-[15px]">Planned this month</span>
+          <span className={ROW_LABEL}>Planned this month</span>
           <ValueBox
             prefix="$"
             ref={plannedRef}
@@ -1112,12 +1131,12 @@ function DebtForm({
           <Labeled label="Due day" name="dueDay" type="number" min={1} max={31} defaultValue={d.dueDay ?? ""} />
         </Grid>
         <label className="flex items-center gap-3">
-          <span className="shrink-0 text-xs font-semibold text-muted sm:text-[15px]">Debt type</span>
+          <span className={`shrink-0 ${ROW_LABEL}`}>Debt type</span>
           <select
             key={d.debtKind ?? "none"}
             name="debtKind"
             defaultValue={d.debtKind ?? ""}
-            className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className={`ml-auto min-w-0 max-w-[13rem] flex-1 truncate ${FIELD_SELECT}`}
           >
             <option value="">Not set</option>
             {DEBT_KINDS.map((k) => (
@@ -1134,12 +1153,12 @@ function DebtForm({
         {accountOptions.length > 0 ? (
           <div>
           <label className="flex items-center gap-3">
-            <span className="shrink-0 text-xs font-semibold text-muted sm:text-[15px]">Linked account</span>
+            <span className={`shrink-0 ${ROW_LABEL}`}>Linked account</span>
             <select
               key={d.accountId ?? "none"}
               name="accountId"
               defaultValue={d.accountId ?? ""}
-              className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className={`ml-auto min-w-0 max-w-[13rem] flex-1 truncate ${FIELD_SELECT}`}
             >
               <option value="">Not linked</option>
               {accountOptions.map((a) => (
@@ -1147,18 +1166,18 @@ function DebtForm({
               ))}
             </select>
           </label>
-          <p className="mt-1 text-[11px] text-muted">Net worth counts this debt once, using this balance.</p>
+          <p className="mt-1 text-[11px] text-foreground">Net worth counts this debt once, using this balance.</p>
           </div>
         ) : null}
         <label className="block">
-          <span className="mb-1 block text-xs font-semibold text-muted sm:text-[15px]">Notes</span>
+          <span className={`mb-1 block ${ROW_LABEL}`}>Notes</span>
           <textarea
             key={d.notes ?? ""}
             name="notes"
             defaultValue={d.notes ?? ""}
             rows={2}
             placeholder="Anything worth remembering about this debt…"
-            className="w-full resize-none rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className={`w-full resize-none ${FIELD_TEXTAREA}`}
           />
         </label>
       </form>
@@ -1210,17 +1229,38 @@ function SavingsForm({ row, currency, bucketOptions, monthKey, formId, runSave }
           <Labeled key={`d${s.targetDate}`} label="Goal Target Dt" name="targetDate" type="date" defaultValue={s.targetDate ?? ""} />
           <Labeled key={`s${s.startCents}`} label="Starting Amount" prefix="$" name="start" type="number" step="0.01" defaultValue={centsToDisplay(s.startCents)} />
         </Grid>
-        <div className="space-y-2">
-          {/* Calculated, not typed — no input, so Save never writes it. */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold text-muted sm:text-[15px]">Monthly Needed</span>
-            <span className="ml-auto w-28 py-1.5 text-center text-sm font-semibold tabular-nums">
+        {/* Calculated, not typed — no input, so Save never writes them.
+            Saved / left come from the same savingsGoalProgress as the
+            Invest page (Victor, 2026-10-31). Set apart by a divider and
+            shown as bare bold figures so they don't read as editable. */}
+        <div className="mt-1 space-y-1.5 border-t border-line pt-3">
+          {s.goalCents > 0 ? (
+            <>
+              <div className="flex min-h-7 items-center gap-3">
+                <span className={ROW_LABEL}>Saved so far</span>
+                <span className="ml-auto w-32 text-center text-sm font-bold tabular-nums sm:text-[15px]" style={{ color: "var(--viz-savings)" }}>
+                  {formatMoney(s.savedCents, currency)}
+                </span>
+              </div>
+              <div className="flex min-h-7 items-center gap-3">
+                <span className={ROW_LABEL}>Left to goal</span>
+                <span className="ml-auto w-32 text-center text-sm font-bold text-foreground tabular-nums sm:text-[15px]">
+                  {formatMoney(Math.max(0, s.leftToSaveCents), currency)}
+                </span>
+              </div>
+            </>
+          ) : null}
+          <div className="flex min-h-7 items-center gap-3">
+            <span className={ROW_LABEL}>Monthly Needed</span>
+            <span className="ml-auto w-32 text-center text-sm font-bold text-foreground tabular-nums sm:text-[15px]">
               {s.requiredMonthlyCents != null ? formatMoney(s.requiredMonthlyCents, currency) : "—"}
             </span>
           </div>
+        </div>
+        <div className={bucketOptions.length > 0 ? "space-y-2 border-t border-line pt-3" : "hidden"}>
           {bucketOptions.length > 0 ? (
             <label className="flex items-center gap-3">
-              <span className="shrink-0 text-xs font-semibold text-muted sm:text-[15px]">Linked bucket</span>
+              <span className={`shrink-0 ${ROW_LABEL}`}>Linked bucket</span>
               <select
                 key={s.linkedBucketId ?? s.linkedAccountId ?? "none"}
                 name="linkTarget"
@@ -1229,7 +1269,7 @@ function SavingsForm({ row, currency, bucketOptions, monthKey, formId, runSave }
                     ? `account:${s.linkedAccountId}`
                     : s.linkedBucketId ?? ""
                 }
-                className="ml-auto min-w-0 max-w-[13rem] flex-1 truncate rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className={`ml-auto min-w-0 max-w-[13rem] flex-1 truncate ${FIELD_SELECT}`}
               >
                 <option value="">Not linked</option>
                 {(() => {
@@ -1280,9 +1320,9 @@ function Labeled({
 }: { label: string; hint?: string } & ValueBoxProps) {
   return (
     <label className="flex items-center gap-3">
-      <span className="flex items-center gap-1 text-xs font-semibold text-muted sm:text-[15px]">
+      <span className="flex items-center gap-1 text-xs font-semibold text-foreground sm:text-[15px]">
         {label}
-        {hint && <span className="font-normal text-muted/60">{hint}</span>}
+        {hint && <span className="font-normal text-foreground">{hint}</span>}
       </span>
       <ValueBox
         {...inputProps}
@@ -1305,16 +1345,16 @@ type ValueBoxProps = React.InputHTMLAttributes<HTMLInputElement> & {
 function ValueBox({ prefix, suffix, className, ...inputProps }: ValueBoxProps) {
   return (
     <span
-      className={`ml-auto flex ${inputProps.type === "date" ? "w-40" : "w-28"} shrink-0 items-center justify-center rounded-lg bg-sky-50 px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus-within:ring-2 focus-within:ring-brand dark:bg-background has-[:disabled]:opacity-50 ${className ?? ""}`}
+      className={`ml-auto flex h-9 ${inputProps.type === "date" ? "w-40" : "w-32"} shrink-0 items-center justify-center rounded-lg bg-surface px-2 text-sm font-semibold text-foreground tabular-nums ring-1 ring-foreground/25 transition hover:ring-foreground/45 focus-within:ring-2 focus-within:ring-brand dark:bg-background has-[:disabled]:opacity-50 ${className ?? ""}`}
     >
-      {prefix ? <span className="text-muted">{prefix}</span> : null}
+      {prefix ? <span className="text-foreground">{prefix}</span> : null}
       <input
         {...inputProps}
         // field-sizing makes the input as wide as its value, so "$" sits
         // right beside the number and the pair centers together.
         className={`${prefix || suffix ? "min-w-[2ch] max-w-full [field-sizing:content]" : "w-full min-w-0 flex-1"} bg-transparent text-center focus:outline-none disabled:cursor-not-allowed`}
       />
-      {suffix ? <span className="text-muted">{suffix}</span> : null}
+      {suffix ? <span className="text-foreground">{suffix}</span> : null}
     </span>
   );
 }

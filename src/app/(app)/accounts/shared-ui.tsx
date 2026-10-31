@@ -363,12 +363,6 @@ export function PayCardModal({
                     : `${formatMoney(amountCents - owedCents, currency)} over the balance — leaves a credit.`}
               </p>
             )
-          ) : debtBalanceCents > 0 ? (
-            <p className="text-[10px] text-muted">
-              {debtPlanCents > 0 && debtPlanLeftCents === 0
-                ? "This month\u2019s Budget plan is paid."
-                : `${debtPlanCents > 0 ? "Left of this month\u2019s Budget plan" : "Minimum payment"} — counts toward Budget.`}
-            </p>
           ) : null}
           <LabeledInput label="Date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
           <label className="block">
@@ -425,14 +419,10 @@ export function PayCardModal({
               </p>
             </label>
           ) : null}
-          <LabeledInput
-            key={payingWithPoints ? "points" : `bank-${transferSubId}`}
-            label="Notes"
-            name="notes"
-            defaultValue={payingWithPoints ? "" : `Payment to ${transfer?.name ?? card.name}`}
-          />
+          {/* Starts blank (Victor, 2026-10-31). */}
+          <LabeledInput label="Notes" name="notes" />
           {errorMsg ? <p className="text-xs text-negative">{errorMsg}</p> : null}
-          <div className="flex items-center justify-end gap-2 pt-1">
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={onClose}
@@ -445,7 +435,9 @@ export function PayCardModal({
               disabled={pending}
               className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
             >
-              {pending ? "Paying…" : "Pay Card"}
+              {/* One button: every payment saves already cleared, so it
+                  needn't be cleared on Transactions (Victor, 2026-10-31). */}
+              {pending ? "Paying…" : payingWithPoints ? "Pay Card" : "Pay & Clear"}
             </button>
           </div>
         </form>

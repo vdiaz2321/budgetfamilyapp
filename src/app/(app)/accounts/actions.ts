@@ -1323,6 +1323,8 @@ export async function payCard(formData: FormData) {
     occurred_on: dateStr,
     memo: notes,
     is_withdrawal: false,
+    // Paid from Accounts = already cleared (Victor, 2026-10-31).
+    cleared: true,
   });
   if (txError) return { error: "Couldn't record the payment — please try again." };
 
