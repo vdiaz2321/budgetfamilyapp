@@ -32,6 +32,8 @@ type Props = {
   currency: string;
   filter?: HeroFilter | null;
   onClear?: () => void;
+  /** Months with income logged so far — the Income card's "Avg $x/mo". */
+  incomeMonths?: number;
 };
 
 const CARD_ORDER: CardId[] = ["income", "spending", "savings", "kids", "debt", "net"];
@@ -45,6 +47,7 @@ export function AnnualHero({
   currency,
   filter,
   onClear,
+  incomeMonths = 0,
 }: Props) {
   // Group totals. Investment contributions get
   // folded into "savings" upstream, so the Savings card already reflects both.
@@ -77,7 +80,9 @@ export function AnnualHero({
             value={val("income", totals.income)}
             currency={currency}
             tone="text-positive"
-            subtitle={cap("income", null)}
+            // "% of income" means nothing on Income itself; its own line is the
+            // monthly average, so every card carries a sub-line.
+            subtitle={cap("income", incomeMonths > 0 ? `Avg ${formatMoney(Math.round(totals.income / incomeMonths), currency)}/mo` : null)}
             subtitleTone="text-positive"
           />
         );
@@ -227,7 +232,7 @@ function Stat({
 }) {
   return (
     <div className="h-full rounded-2xl bg-surface px-3 py-3 text-center xl:px-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground">{label}</p>
       <p
         className={`mt-0.5 text-lg font-bold tabular-nums tracking-[-0.01em] ${tone ?? ""}`}
         style={color ? { color } : undefined}

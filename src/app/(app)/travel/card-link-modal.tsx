@@ -118,7 +118,7 @@ export function CardLinkModal({
             type="button"
             disabled={pending || changes.length === 0}
             onClick={save}
-            className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
+            className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
           >
             {pending ? "Linking…" : "Link cards"}
           </button>

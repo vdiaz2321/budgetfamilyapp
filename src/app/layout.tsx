@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
 import { ThemeInit } from "./theme-init";
@@ -6,6 +6,17 @@ import { ThemeInit } from "./theme-init";
 export const metadata: Metadata = {
   title: "Capitall",
   description: "A budget built for how your family actually spends.",
+  // Added to the iPhone home screen, the app opens full-screen like a native app.
+  appleWebApp: { capable: true, title: "Capitall", statusBarStyle: "default" },
+};
+
+// viewport-fit=cover lets the page reach under the notch and home indicator,
+// which is what makes env(safe-area-inset-*) report real values — without it
+// every safe-area padding in the app resolved to 0.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 // Geist (Victor's pick over Inter, 2026-10-08), self-hosted by next/font (no

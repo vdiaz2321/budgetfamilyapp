@@ -36,6 +36,7 @@ import {
   type MilitaryInsurance,
   type PlanChild,
   type ColaPlan,
+  type FiInputs,
   type FiScheduleYear,
   type HealthPlan,
   type HealthPlanKind,
@@ -772,6 +773,22 @@ export function FiSection({
                   label="Financially free"
                   value={fi.fiYear ? `${fi.fiYear}${fiAge != null ? ` · age ${fiAge}` : ""}` : "Not on this plan"}
                   tone={fi.fiYear ? "" : "text-negative"}
+                />
+                {measured.contributionCents + measured.spendCents > 0 ? (
+                  <ValueRow
+                    label="Savings rate"
+                    note="Saved ÷ (saved + spent), last 12 months"
+                    value={`${Math.round((measured.contributionCents / (measured.contributionCents + measured.spendCents)) * 100)}%`}
+                    tone="text-positive"
+                  />
+                ) : null}
+                <FiWhatIf
+                  baseInputs={baseInputs}
+                  schedule={schedule}
+                  thisYear={thisYear}
+                  stopSavingYear={withdrawYear}
+                  fiYear={fi.fiYear}
+                  currency={currency}
                 />
                 {/* Whether the investments pay the spending you've typed for
                     every year to the end of the plan (Victor, 2026-10-19). */}
@@ -1662,6 +1679,135 @@ function ValueRow({
         {note ? <span className="block text-xs font-normal text-foreground sm:text-sm">{note}</span> : null}
       </span>
       <span className={`shrink-0 text-right tabular-nums ${bold ? "" : "font-medium"} ${tone}`}>{value}</span>
+    </li>
+  );
+}
+
+// "What if I saved $X more, spent $X less, or earned 1% more or less?" — the
+// FI year it gives next to today's. Both runs grow the money at the plan's
+// return (not the table's fixed yearly gains, which would ignore the extra
+// saving), and the difference is applied to the year shown above, so the
+// headline and this line never disagree when nothing is changed.
+function FiWhatIf({
+  baseInputs,
+  schedule,
+  thisYear,
+  stopSavingYear,
+  fiYear,
+  currency,
+}: {
+  currency: string;
+  baseInputs: Omit<FiInputs, "schedule">;
+  schedule: FiScheduleYear[];
+  thisYear: number;
+  stopSavingYear: number | null;
+  fiYear: number | null;
+}) {
+  const [saveMore, setSaveMore] = useState("");
+  const [spendLess, setSpendLess] = useState("");
+  const [returnDelta, setReturnDelta] = useState(0);
+  const moreYearly = Math.max(0, Math.round((parseFloat(saveMore.replace(/[$,\s]/g, "")) || 0) * 100)) * 12;
+  const lessYearly = Math.max(0, Math.round((parseFloat(spendLess.replace(/[$,\s]/g, "")) || 0) * 100)) * 12;
+  const changed = moreYearly > 0 || lessYearly > 0 || returnDelta !== 0;
+
+  const run = (more: number, less: number, delta: number) => {
+    // Extra saving stops once paychecks do; spending less helps every year
+    // (it is also money not drawn in retirement).
+    const working = (year: number) => stopSavingYear == null || year < stopSavingYear;
+    const adjusted = schedule.map((y) => ({
+      ...y,
+      growthCents: undefined,
+      spendCents: y.spendCents - less,
+      contributionCents: y.contributionCents + less + (working(y.year) ? more : 0),
+    }));
+    return projectFi(
+      {
+        ...baseInputs,
+        annualSpendCents: baseInputs.annualSpendCents - less,
+        annualContributionCents: baseInputs.annualContributionCents + less + more,
+        returnPct: baseInputs.returnPct + delta,
+        schedule: adjusted,
+        ownGrowthFrom: thisYear + 1,
+      },
+      thisYear,
+    );
+  };
+  const result = useMemo(() => {
+    if (!changed) return null;
+    const baseRun = run(0, 0, 0);
+    const nextRun = run(moreYearly, lessYearly, returnDelta);
+    // The money side: when retired pay already sets the FI year, saving more
+    // doesn't move the year but still leaves more invested by then.
+    const atYear = stopSavingYear ?? fiYear;
+    const endAt = (r: ReturnType<typeof run>) => (atYear != null ? r.years.find((y) => y.year === atYear)?.endCents ?? null : null);
+    const b = endAt(baseRun);
+    const n = endAt(nextRun);
+    const extra = b != null && n != null ? { year: atYear!, cents: n - b } : null;
+    const base = baseRun.fiYear;
+    const next = nextRun.fiYear;
+    if (next == null) return { year: null, shift: 0, extra };
+    const year = fiYear != null && base != null ? fiYear + (next - base) : next;
+    return { year, shift: fiYear != null ? year - fiYear : 0, extra };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [changed, moreYearly, lessYearly, returnDelta, schedule, baseInputs.returnPct, baseInputs.withdrawalRatePct, baseInputs.portfolioCents, fiYear, thisYear, stopSavingYear]);
+
+  const box = "h-9 w-20 rounded-lg bg-surface px-2 text-right text-sm font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand/40";
+  return (
+    <li className="py-2">
+      <p className="font-medium">What if</p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <label className="flex items-center gap-1.5">
+          Save $
+          <input inputMode="decimal" value={saveMore} onChange={(e) => setSaveMore(e.target.value)} placeholder="0" className={box} />
+          more/mo
+        </label>
+        <label className="flex items-center gap-1.5">
+          Spend $
+          <input inputMode="decimal" value={spendLess} onChange={(e) => setSpendLess(e.target.value)} placeholder="0" className={box} />
+          less/mo
+        </label>
+        <div className="flex items-center gap-1" role="group" aria-label="Return">
+          <span className="mr-0.5">Return</span>
+          {[-1, 0, 1].map((d) => (
+            <button
+              key={d}
+              type="button"
+              aria-pressed={returnDelta === d}
+              onClick={() => setReturnDelta(d)}
+              className={`h-9 rounded-full px-3 text-xs font-bold text-foreground transition ${
+                returnDelta === d ? "bg-sky-100 ring-1 ring-sky-300 dark:bg-sky-900/50 dark:ring-sky-700" : "ring-1 ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              }`}
+            >
+              {d === 0 ? "Plan" : d > 0 ? "+1%" : "−1%"}
+            </button>
+          ))}
+        </div>
+      </div>
+      {result ? (
+        <p className="mt-2 text-sm font-semibold">
+          Financially free:{" "}
+          {result.year == null ? (
+            <span className="text-negative">Not on this plan</span>
+          ) : (
+            <>
+              {fiYear ?? "—"} → <span className={result.shift < 0 ? "text-positive" : result.shift > 0 ? "text-negative" : ""}>{result.year}</span>
+              <span className="font-normal">
+                {" "}
+                ({result.shift === 0 ? "no change" : `${Math.abs(result.shift)} yr${Math.abs(result.shift) === 1 ? "" : "s"} ${result.shift < 0 ? "sooner" : "later"}`})
+              </span>
+            </>
+          )}
+          {result.extra && result.extra.cents !== 0 ? (
+            <span className="block font-normal">
+              Invested by {result.extra.year}:{" "}
+              <span className={`font-semibold ${result.extra.cents > 0 ? "text-positive" : "text-negative"}`}>
+                {result.extra.cents > 0 ? "+" : "−"}
+                {formatMoneyWhole(Math.abs(result.extra.cents), currency)}
+              </span>
+            </span>
+          ) : null}
+        </p>
+      ) : null}
     </li>
   );
 }

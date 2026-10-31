@@ -1022,8 +1022,9 @@ export function TravelBoard({
               if (opens) setExpanded(true);
             }}
             aria-pressed={active}
-            className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
-              active ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"
+            // The page's one segmented-toggle style (same as All / Travel / Hotel).
+            className={`rounded-md px-2.5 py-1 text-xs font-semibold text-foreground transition max-sm:min-h-9 ${
+              active ? "bg-surface shadow-sm" : "hover:bg-sky-200 dark:hover:bg-sky-800/60"
             }`}
           >
             {label}
@@ -1102,8 +1103,8 @@ export function TravelBoard({
             if (opens) setExpandedTally(true);
           }}
           aria-pressed={tallyBy === key}
-          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-            tallyBy === key ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"
+          className={`rounded-md px-2.5 py-1 text-xs font-semibold text-foreground transition max-sm:min-h-9 ${
+            tallyBy === key ? "bg-surface shadow-sm" : "hover:bg-sky-200 dark:hover:bg-sky-800/60"
           }`}
         >
           {key === "brands" ? "By brand" : "By card"}
@@ -1303,7 +1304,9 @@ export function TravelBoard({
 
   return (
     <div className="ink-strong space-y-3">
-      <header className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
+      {/* A plain toolbar on the page, not a card: a card holding only three
+          buttons pushed the rewards board and the trips a block further down. */}
+      <header className="px-0.5">
         {/* The actions sit next to the title rather than pinned to the far
              right — on a wide screen that put the primary button an entire
              page away from what it acts on. */}
@@ -1315,7 +1318,7 @@ export function TravelBoard({
             <button
               type="button"
               onClick={() => setAdding(true)}
-              className="rounded-lg bg-sky-700 px-4 py-2 text-base font-bold text-white transition hover:bg-sky-800 sm:text-lg"
+              className="rounded-lg bg-brand px-4 py-2 text-base font-bold text-white transition hover:bg-brand-strong sm:text-lg"
             >
               Add Trip
             </button>
@@ -1355,7 +1358,7 @@ export function TravelBoard({
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="mt-4 rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800"
+            className="mt-4 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
           >
             Add your first stay
           </button>
@@ -1844,10 +1847,11 @@ export function Figure({
 }) {
   return (
     <span className={`flex shrink-0 items-baseline gap-1.5 ${className ?? ""}`}>
-      {/* Label and figure the same size from sm up — a small capitalised
-          label beside a larger figure read as two different things. */}
-      <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">{label}:</span>
-      <span className={`text-sm font-bold tabular-nums ${tone}`} style={style}>{value}</span>
+      {/* Label one step smaller than its figure from sm up (2026-10-31): at
+          the same size only bold told them apart. Kept in normal case — a
+          small CAPITALISED label read as a separate thing. */}
+      <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-xs">{label}:</span>
+      <span className={`text-sm font-bold tabular-nums sm:text-base ${tone}`} style={style}>{value}</span>
     </span>
   );
 }

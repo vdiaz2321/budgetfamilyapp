@@ -180,7 +180,9 @@ export function AnnualPanels({
       {/* Sticky scope for the hero: it stays pinned across these three panels
           and scrolls away with the last of them. */}
       <div ref={scopeRef} className="space-y-4">
-        <div ref={heroRef} className="sticky top-0 z-30 bg-background pb-3 pt-2">
+        {/* Pinned from lg up only: on a tablet the hero plus the table header
+            took a third of the screen. */}
+        <div ref={heroRef} className="z-30 bg-background pb-3 pt-2 lg:sticky lg:top-0">
           <AnnualHero
             year={year}
             outflowKinds={outflowKinds}
@@ -192,6 +194,7 @@ export function AnnualPanels({
             currency={currency}
             filter={filter}
             onClear={clear}
+            incomeMonths={groups.find((g) => g.kind === "income")?.monthTotals.filter((v) => v !== 0).length ?? 0}
           />
         </div>
 

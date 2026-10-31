@@ -16,11 +16,11 @@ const DASH = "—";
 const KIND_LABEL = { flight: "Flight", stay: "Stay", car: "Rental" } as const;
 
 // Each booking kind gets its own tint + icon so Flight / Stay / Rental tell
-// apart at a glance. Sky, teal and rose — no purple or orange.
+// apart at a glance. Sky, teal and olive — no purple, orange or pink.
 const KIND_STYLE = {
   flight: "bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200",
   stay: "bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-200",
-  car: "bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-200",
+  car: "bg-lime-100 text-lime-900 dark:bg-lime-900/40 dark:text-lime-200",
 } as const;
 const KIND_ICON = {
   // plane
@@ -115,7 +115,7 @@ const SECTION_BUTTON =
 // Adding is a different act from editing, so it gets the filled blue of the
 // page's own "Add Trip" button rather than the outline one.
 const ADD_BUTTON =
-  "inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-sky-700 bg-sky-700 px-3 py-1.5 text-sm font-bold text-white shadow-sm transition hover:bg-sky-800";
+  "inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-brand bg-brand px-3 py-1.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong";
 
 /**
  * One trip, whole: its bookings in date order, its spending planned against
@@ -528,7 +528,7 @@ export function TripDetailModal({
                 <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={`${inputClass} resize-y`} />
               </Field>
               <div className="col-span-2 flex flex-wrap gap-2 sm:col-span-3">
-                <button type="submit" disabled={pending} className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
+                <button type="submit" disabled={pending} className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
                   {pending ? "Saving…" : "Save notes / trip"}
                 </button>
                 <button type="button" onClick={() => setMode("view")} className="rounded-md px-3 py-1.5 text-xs font-semibold text-foreground hover:underline">

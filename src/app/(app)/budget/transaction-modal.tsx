@@ -7,7 +7,7 @@ import { shareOut } from "@/lib/share-out";
 import { BookingPaymentPanel, type PaxRow } from "./booking-payment-panel";
 import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { addTransaction, addSplitTransaction, replaceWithSplit, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
+import { addTransaction, addSplitTransaction, replaceWithSplit, updateTransaction, deleteTransaction, deletePayee, mergePayees, toggleCleared, typicalSalesTaxRate } from "./actions";
 import { refreshTripTagging, useTripTagging } from "./trip-tagging-cache";
 import type { AccountOption, BucketsByAccount, PayeeLineItem, PayeeOption, SubOption, TxData } from "./types";
 import { EXPENSE_CATEGORIES } from "../travel/types";
@@ -1041,6 +1041,7 @@ function TransactionModalForm({
                   clearErrors();
                 }}
                 onAddSplit={() => setPickerOpen(true)}
+                taxSubId={options.find((o) => o.name.trim().toLowerCase() === "sales tax")?.id ?? null}
               />
             )}
 
@@ -1317,7 +1318,7 @@ function TransactionModalForm({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg px-1.5 py-1 text-xs font-bold text-muted transition hover:text-foreground sm:px-2 sm:py-1.5 sm:text-sm"
+              className="rounded-lg px-1.5 py-1 text-xs font-bold text-foreground transition max-sm:min-h-10 max-sm:px-2.5 sm:px-2 sm:py-1.5 sm:text-sm"
             >
               Cancel
             </button>
@@ -1422,7 +1423,7 @@ function TransactionModalForm({
               type="submit"
               form="tx-form"
               disabled={pending}
-              className={"inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-bold transition-colors disabled:cursor-wait disabled:opacity-60 sm:px-3.5 sm:py-1.5 sm:text-sm " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
+              className={"inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-bold transition-colors disabled:cursor-wait disabled:opacity-60 max-sm:min-h-10 max-sm:px-4 sm:px-3.5 sm:py-1.5 sm:text-sm " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
             >
               {/* A save takes a few seconds; Clear is a save too, so both show
                   it here, on the button the eye goes to. */}
@@ -1455,6 +1456,7 @@ function SplitRows({
   onRemove,
   onAmountChange,
   onAddSplit,
+  taxSubId,
 }: {
   splits: SplitEntry[];
   options: SubOption[];
@@ -1463,7 +1465,33 @@ function SplitRows({
   onRemove: (subId: string) => void;
   onAmountChange: (subId: string, cents: number) => void;
   onAddSplit: () => void;
+  taxSubId: string | null;
 }) {
+  // "Fill tax": the Sales Tax line from this payee's usual rate (its past
+  // receipts). The receipt total already includes the tax, so the tax is the
+  // total × rate ÷ (1 + rate); with one other line, that line takes the rest.
+  // Both figures stay editable.
+  const [taxNote, setTaxNote] = useState<string | null>(null);
+  const [taxBusy, setTaxBusy] = useState(false);
+  const hasTaxLine = taxSubId != null && splits.some((sp) => sp.subId === taxSubId);
+  const others = splits.filter((sp) => sp.subId !== taxSubId);
+  const totalCents = leftToSplit + splits.reduce((sum, sp) => sum + sp.amountCents, 0);
+  const fillTax = async () => {
+    const form = document.getElementById("tx-form") as HTMLFormElement | null;
+    const payee = form ? String(new FormData(form).get("payee") ?? "").trim() : "";
+    if (!payee) { setTaxNote("Enter the payee first."); return; }
+    setTaxBusy(true);
+    try {
+      const rate = await typicalSalesTaxRate(payee);
+      if (rate == null) { setTaxNote(`No past tax for ${payee}.`); return; }
+      const taxCents = Math.round((totalCents * rate) / (1 + rate));
+      onAmountChange(taxSubId!, taxCents);
+      if (others.length === 1) onAmountChange(others[0].subId, totalCents - taxCents);
+      setTaxNote(`${(rate * 100).toFixed(1)}% — ${payee}'s usual`);
+    } finally {
+      setTaxBusy(false);
+    }
+  };
   return (
     <div className="rounded-xl ring-1 ring-line overflow-hidden">
       {splits.map((sp) => {
@@ -1494,6 +1522,7 @@ function SplitRows({
         );
       })}
 
+      {taxNote ? <p className="border-t border-line/60 px-3 py-1.5 text-[12px] italic text-foreground">{taxNote}</p> : null}
       {/* Add Split + Left to Split footer */}
       <div className="flex items-center justify-between border-t border-line/60 bg-background/60 px-3 py-2">
         <button
@@ -1503,6 +1532,16 @@ function SplitRows({
         >
           + Add Split
         </button>
+        {hasTaxLine && totalCents > 0 ? (
+          <button
+            type="button"
+            onClick={fillTax}
+            disabled={taxBusy}
+            className="min-h-8 rounded-lg px-2 text-sm font-semibold text-foreground ring-1 ring-line disabled:opacity-60"
+          >
+            {taxBusy ? "…" : "Fill tax"}
+          </button>
+        ) : null}
         <span className={`text-xs font-semibold tabular-nums ${Math.abs(leftToSplit) < 2 ? "text-positive" : leftToSplit < 0 ? "text-negative" : "text-warning"}`}>
           {leftToSplit >= 0 ? "$" + (leftToSplit / 100).toFixed(2) + " left to split" : "−$" + (Math.abs(leftToSplit) / 100).toFixed(2) + " over"}
         </span>
@@ -1587,6 +1626,13 @@ function AmountInput({
 function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onChange: (cents: number) => void }) {
   const [raw, setRaw] = useState(amountCents === 0 ? "" : (amountCents / 100).toFixed(2));
   const [focused, setFocused] = useState(false);
+  // An amount set from outside (Fill tax) shows in the box — adjusted during
+  // render against the previous prop, like AmountInput above.
+  const [prevCents, setPrevCents] = useState(amountCents);
+  if (amountCents !== prevCents) {
+    setPrevCents(amountCents);
+    if (!focused && moneyExpressionToCents(raw) !== amountCents) setRaw(amountCents === 0 ? "" : (amountCents / 100).toFixed(2));
+  }
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const commit = (value: string) => {
@@ -2100,6 +2146,14 @@ function PayeeField({
   type Entry = PayeeLineItem | { id: string; name: string };
   const matches: Entry[] = [...lineSlice, ...plainSlice];
 
+  // The saved payee typed in full, and another saved name that looks like the
+  // same place ("Nesspresso", "Talkatone/Phone") — offered as one merge line.
+  const exact = plainOptions.find((p) => p.name.toLowerCase() === q) ?? null;
+  const twin = exact ? plainOptions.find((p) => p.id !== exact.id && looksSamePayee(p.name, exact.name)) ?? null : null;
+  const [confirmMerge, setConfirmMerge] = useState(false);
+  const [mergeNote, setMergeNote] = useState<string | null>(null);
+  const [merging, startMerge] = useTransition();
+
   function select(name: string) {
     setValue(name);
     onDirty?.();
@@ -2195,8 +2249,71 @@ function PayeeField({
           })}
         </ul>
       ) : null}
+      {/* Hidden only while suggestions are actually on screen. */}
+      {exact && twin && !(open && matches.length > 0) ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-foreground">
+          {confirmMerge ? (
+            <>
+              <span className="italic">Move every “{twin.name}” transaction to “{exact.name}”?</span>
+              <button
+                type="button"
+                disabled={merging}
+                onClick={() =>
+                  startMerge(async () => {
+                    const result = await mergePayees(twin.id, exact.id);
+                    setConfirmMerge(false);
+                    if (result.error) setMergeNote(result.error);
+                    else {
+                      setDeletedIds((s) => new Set([...s, twin.id]));
+                      setMergeNote(`Merged — ${result.moved ?? 0} moved to “${exact.name}”.`);
+                    }
+                  })
+                }
+                className="min-h-8 rounded-lg bg-brand px-2.5 font-bold text-white disabled:opacity-60"
+              >
+                {merging ? "Merging…" : "Merge"}
+              </button>
+              <button type="button" onClick={() => setConfirmMerge(false)} className="min-h-8 rounded-lg px-2 font-bold text-foreground">
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="italic">Also saved as “{twin.name}”.</span>
+              <button type="button" onClick={() => { setMergeNote(null); setConfirmMerge(true); }} className="min-h-8 rounded-lg px-2 font-bold text-foreground ring-1 ring-line">
+                Merge into “{exact.name}”
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+      {mergeNote ? <p className="mt-1 text-[12px] italic text-foreground">{mergeNote}</p> : null}
     </div>
   );
+}
+
+// Same payee saved twice: the same letters ("H& M" / "H&M"), one typo apart
+// ("Nespresso" / "Nesspresso", "Tkmax" / "Txmax"), or a "/" note added
+// ("Talkatone" / "Talkatone/Phone"). Not when the names differ by a trailing
+// letter or number ("Venture J" / "Venture V" are two cards) or by the first
+// letter ("Mobile" / "Tmobile").
+function looksSamePayee(a: string, b: string) {
+  const x = a.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const y = b.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (x.length < 4 || y.length < 4) return false;
+  if (x === y) return true;
+  const head = (s: string) => s.toLowerCase().split("/")[0].replace(/[^a-z0-9]/g, "");
+  if ((a.includes("/") || b.includes("/")) && head(a) === head(b)) return true;
+  if (/(\s\S|\d)$/.test(a.trim()) || /(\s\S|\d)$/.test(b.trim())) return false;
+  if (Math.min(x.length, y.length) < 5 || Math.abs(x.length - y.length) > 1) return false;
+  let i = 0;
+  while (i < x.length && i < y.length && x[i] === y[i]) i++;
+  if (i === 0) return false;
+  if (x.length === y.length) {
+    if (x.slice(i + 1) === y.slice(i + 1)) return true;
+    return x[i] === y[i + 1] && x[i + 1] === y[i] && x.slice(i + 2) === y.slice(i + 2);
+  }
+  return x.length > y.length ? x.slice(i + 1) === y.slice(i) : x.slice(i) === y.slice(i + 1);
 }
 
 // Small busy indicator for the footer buttons while a save is in flight.

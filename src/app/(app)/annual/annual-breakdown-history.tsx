@@ -83,14 +83,15 @@ function sumOverYears(byYear: Record<number, number>, years: number[]): number {
   return years.reduce((sum, y) => sum + (byYear[y] ?? 0), 0);
 }
 
-// The Total column, shaded and fenced off with a rule down its right edge —
-// the same treatment the Category by Months table gives its Year total, so a
-// column of sums is never mistaken for another year.
+// The Total column, fenced off with a rule down its right edge — the same
+// treatment the Category by Months table gives its Year total, so a column of
+// sums is never mistaken for another year. No colour wash: blue isn't a data
+// colour.
 function TotalBand({ pad, plain, children }: { pad: string; plain?: boolean; children: React.ReactNode }) {
   return (
     <span
       className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line px-1 ${
-        plain ? "" : "bg-sky-100 dark:bg-sky-950/30"
+        plain ? "" : ""
       }`}
     >
       {children}
@@ -198,7 +199,7 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
           type="button"
           onClick={() => setCollapse({ open: !open })}
           aria-expanded={open}
-          className="flex min-w-0 shrink items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
+          className="flex min-w-0 shrink items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
         >
           <Chevron open={open} />
           <span className="font-semibold">Annual Breakdown</span>
@@ -227,7 +228,7 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
       </div>
 
       {open ? (
-        <div className="space-y-3 border-t border-line bg-brand-soft/10 p-3">
+        <div className="space-y-3 border-t border-line bg-background p-3">
           {/* Summary strip — the whole panel's totals, and sticky: reading a
               line item nine years across is only worth anything next to the
               category totals it belongs to. The hero cards have released by
@@ -245,11 +246,11 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
               className="scroll-handle overflow-x-auto"
             >
               <div style={{ minWidth: minW }}>
-                <div className="grid items-center gap-2 border-b border-line bg-sky-100 pr-4 py-2 dark:bg-sky-950/30" style={gridStyle}>
-                  <span className="pl-4 text-[15px] font-semibold uppercase tracking-wide text-muted">
+                <div className="grid items-center gap-2 border-b border-line bg-surface pr-4 py-2" style={gridStyle}>
+                  <span className="pl-4 text-[15px] font-semibold uppercase tracking-wide text-foreground">
                     Category
                   </span>
-                  <TotalBand pad="-my-2" plain><span className="text-center text-[15px] font-semibold uppercase tracking-wide text-muted">Total</span></TotalBand>
+                  <TotalBand pad="-my-2" plain><span className="text-center text-[15px] font-semibold uppercase tracking-wide text-foreground">Total</span></TotalBand>
                   {years.map((y) => (
                     <span key={y} className={periodHeaderClass(y === CURRENT_YEAR)}>
                       {y}
@@ -473,7 +474,7 @@ function KindBlock({
         type="button"
         onClick={() => setCollapse({ open: !open })}
         aria-expanded={effectiveOpen}
-        className="flex w-full items-center gap-2 bg-brand-soft/40 px-4 py-2 text-left transition hover:bg-brand-soft/60"
+        className="flex w-full items-center gap-2 bg-[color-mix(in_srgb,var(--positive)_8%,var(--surface))] px-4 py-2 text-left transition hover:brightness-[0.98]"
       >
         <Chevron open={effectiveOpen} small />
         <span className="text-[13px] font-bold uppercase tracking-wide">{kind.label}</span>
@@ -492,10 +493,10 @@ function KindBlock({
           >
             <div style={{ minWidth: minW }}>
               <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle}>
-                <span className="pl-4 text-[15px] font-semibold uppercase tracking-wide text-muted">
+                <span className="pl-4 text-[15px] font-semibold uppercase tracking-wide text-foreground">
                   Category
                 </span>
-                <span className="text-center text-[15px] font-semibold uppercase tracking-wide text-muted">Total</span>
+                <span className="text-center text-[15px] font-semibold uppercase tracking-wide text-foreground">Total</span>
                 {years.map((y) => (
                   <span key={y} className={periodHeaderClass(y === CURRENT_YEAR)}>
                     {y}
@@ -552,7 +553,7 @@ function Group({
       {/* Group subtotal header — omitted when the kind is a single group (Income,
           Savings, Investment) whose name would just repeat the section. */}
       {!singleGroup ? (
-        <div className="grid items-center gap-2 bg-brand-soft/15 pr-4 py-1.5" style={gridStyle}>
+        <div className="grid items-center gap-2 bg-[color-mix(in_srgb,var(--positive)_8%,var(--surface))] pr-4 py-1.5" style={gridStyle}>
           <span className="pl-4 text-sm font-bold leading-tight truncate">
             {group.label}
           </span>
@@ -564,7 +565,7 @@ function Group({
           {years.map((y) => {
             const v = group.subtotalByYear[y] ?? 0;
             return (
-              <span key={y} className="text-center text-[18px] tabular-nums text-muted">
+              <span key={y} className="text-center text-[18px] tabular-nums text-foreground">
                 {v !== 0 ? formatMoney(v, currency) : "—"}
               </span>
             );
@@ -610,7 +611,7 @@ function LineRow({
   return (
     <>
       <li
-        className={`grid items-center gap-2 pr-4 py-1.5 ${hasDetails ? "cursor-pointer hover:bg-brand-soft/20" : ""}`}
+        className={`grid items-center gap-2 pr-4 py-1.5 ${hasDetails ? "cursor-pointer hover:bg-sky-50 dark:hover:bg-sky-950/40" : ""}`}
         style={gridStyle}
         onClick={hasDetails ? () => setExpanded((v) => !v) : undefined}
       >
@@ -644,11 +645,11 @@ function LineRow({
       {hasDetails && expanded ? [...line.details!]
         .sort((a, b) => sumOverYears(b.byYear, years) - sumOverYears(a.byYear, years))
         .map((d) => (
-        <li key={`${line.label}::${d.label}`} className="grid items-center gap-2 pr-4 py-1 bg-brand-soft/10" style={gridStyle}>
-          <span className="truncate pl-9 text-[13px] leading-tight text-muted">
+        <li key={`${line.label}::${d.label}`} className="grid items-center gap-2 pr-4 py-1 bg-sky-50 dark:bg-sky-950/40" style={gridStyle}>
+          <span className="truncate pl-9 text-[13px] leading-tight text-foreground">
             └ {d.label}
           </span>
-          <TotalBand pad="-my-1"><span className="text-center text-[16px] font-medium tabular-nums text-muted">{formatMoney(sumOverYears(d.byYear, years), currency)}</span></TotalBand>
+          <TotalBand pad="-my-1"><span className="text-center text-[16px] font-medium tabular-nums text-foreground">{formatMoney(sumOverYears(d.byYear, years), currency)}</span></TotalBand>
           {/* A split line's own cells select like any other figure — a
               subscription or irregular bill is the level you actually want to
               add up. */}
@@ -686,7 +687,7 @@ function Chevron({ open, small }: { open: boolean; small?: boolean }) {
       strokeWidth="2.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+      className={`shrink-0 text-foreground transition-transform ${open ? "" : "-rotate-90"}`}
       aria-hidden
     >
       <path d="M6 9l6 6 6-6" />
@@ -719,7 +720,7 @@ function SelectionRow({
   const tint = (v: number) => (signed ? (v < 0 ? "text-negative" : "text-positive") : "");
   return (
     <div
-      className={`grid items-center gap-2 bg-sky-100 pr-4 py-2 dark:bg-sky-950/30 ${
+      className={`grid items-center gap-2 bg-[color-mix(in_srgb,var(--positive)_8%,var(--surface))] pr-4 py-2 ${
         dividerAbove
           ? "border-t-[3px] border-foreground/80"
           : "border-t border-line"
@@ -748,7 +749,7 @@ function SelectionRow({
         return (
           <span
             key={y}
-            className={`text-center text-[18px] font-semibold tabular-nums tracking-[-0.01em] ${v === 0 ? "text-muted" : tint(v)}`}
+            className={`text-center text-[18px] font-semibold tabular-nums tracking-[-0.01em] ${v === 0 ? "text-foreground" : tint(v)}`}
           >
             {v !== 0 ? formatMoney(v, currency) : "—"}
           </span>

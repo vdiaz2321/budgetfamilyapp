@@ -234,7 +234,7 @@ export function CardPaymentsLedger({
           >
             <svg
               width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden
-              className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+              className={`shrink-0 text-foreground transition-transform ${open ? "" : "-rotate-90"}`}
             >
               <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -248,7 +248,7 @@ export function CardPaymentsLedger({
                   type="button"
                   onClick={() => setView(v)}
                   aria-pressed={view === v}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold sm:text-sm transition ${
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold max-sm:py-2 sm:text-sm transition ${
                     view === v ? "font-bold text-foreground shadow-sm ring-1 ring-foreground/25" : "text-foreground hover:ring-1 hover:ring-line"
                   }`}
                 >
@@ -266,7 +266,7 @@ export function CardPaymentsLedger({
                 onChange={(e) => setYear(e.target.value)}
                 aria-hidden={view !== "month"}
                 tabIndex={view === "month" ? undefined : -1}
-                className={`cursor-pointer rounded-lg bg-surface px-2 py-1 text-xs font-semibold sm:text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${
+                className={`cursor-pointer rounded-lg bg-surface px-2 py-1 text-xs font-semibold max-sm:py-2.5 sm:text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${
                   view === "month" ? "" : "invisible"
                 }`}
               >
@@ -308,16 +308,18 @@ export function CardPaymentsLedger({
           <div ref={scrollBoxRef} className="overflow-x-auto bg-surface">
             {/* The min width only exists to keep 12 month columns readable; a
                 By-year table with a couple of columns fits a phone as-is.
-                From sm: up every column has a set width (table-fixed), so the
-                Credit Card and Debt tables stacked on Accounts line up column
-                for column; extra room is shared out evenly between them. */}
+                From sm: up every column has a set width (table-fixed) and the
+                table is exactly as wide as its columns — no stretching to fill
+                the box, which handed each table's spare room out differently
+                and broke the column-for-column line-up of the Credit Card and
+                Debt tables stacked on Accounts. */}
             <table
-              className={`w-full border-collapse text-xs sm:table-fixed sm:text-[17px] sm:min-w-[var(--ledger-min)] ${columns.length > 3 ? "min-w-[42rem]" : ""}`}
+              className={`w-full border-collapse text-xs sm:table-fixed sm:text-[17px] sm:w-[var(--ledger-min)] ${columns.length > 3 ? "min-w-[42rem]" : ""}`}
               style={{ "--ledger-min": `${COL_NAME + (view === "month" ? COL_AVG : 0) + COL_TOTAL + (showPeriodColumns ? columns.length * COL_PERIOD : 0)}rem` } as React.CSSProperties}
             >
               <colgroup>
                 <col className="sm:w-[var(--col-name)]" style={{ "--col-name": `${COL_NAME}rem` } as React.CSSProperties} />
-                {view === "month" ? <col className="sm:w-[var(--col-avg)]" style={{ "--col-avg": `${COL_AVG}rem` } as React.CSSProperties} /> : null}
+                {view === "month" ? <col className="max-sm:hidden sm:w-[var(--col-avg)]" style={{ "--col-avg": `${COL_AVG}rem` } as React.CSSProperties} /> : null}
                 <col className="sm:w-[var(--col-total)]" style={{ "--col-total": `${COL_TOTAL}rem` } as React.CSSProperties} />
                 {showPeriodColumns
                   ? columns.map((c) => (
@@ -332,8 +334,10 @@ export function CardPaymentsLedger({
                   </th>
                   {/* Avg/mo sits left of the total (Victor's pick). It's the total
                       spread evenly, so it sorts the same as Total. */}
+                  {/* Avg/mo is desktop-only: on a phone it pushed every month
+                      off screen behind the name and total. */}
                   {view === "month" ? (
-                    <th className={head}>
+                    <th className={`${head} max-sm:hidden`}>
                       <SortButton label="Avg/mo" dir={sort?.key === "total" ? sort.dir : null} onClick={() => toggleSort("total")} />
                     </th>
                   ) : null}
@@ -362,17 +366,18 @@ export function CardPaymentsLedger({
                   >
                     <th
                       scope="row"
-                      className="sticky left-0 z-10 max-w-[11rem] bg-surface px-2.5 py-1.5 text-left text-xs font-semibold sm:text-[17px] group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)] sm:max-w-none"
+                      // 8rem on a phone (names truncate) so the months start on screen.
+                      className="sticky left-0 z-10 max-w-[8rem] bg-surface px-2.5 py-1.5 text-left text-xs font-semibold max-sm:py-2.5 sm:text-[17px] group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)] sm:max-w-none"
                     >
                       <span className="flex items-center gap-1">
                         <span className="truncate sm:overflow-visible sm:whitespace-nowrap">{r.name}</span>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 -rotate-90 text-muted" aria-hidden>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 -rotate-90 text-foreground" aria-hidden>
                           <path d="M6 9l6 6 6-6" />
                         </svg>
                       </span>
                     </th>
                     {view === "month" ? (
-                      <td className={`${cell} text-muted`}>{r.total ? money(perMonth(r.total)) : null}</td>
+                      <td className={`${cell} text-foreground max-sm:hidden`}>{r.total ? money(perMonth(r.total)) : null}</td>
                     ) : null}
                     {/* Blank, not $0.00, for a card with nothing paid — same as an empty month. */}
                     <td className={`${cell} border-r border-line font-bold text-negative`}>{r.total ? money(r.total) : null}</td>
@@ -395,7 +400,8 @@ export function CardPaymentsLedger({
                     {labels.all}
                   </th>
                   {view === "month" ? (
-                    <td className={`${cell}`} style={{ color: "var(--viz-savings)" }}>
+                    // Plain ink: these are payments, not savings.
+                    <td className={`${cell} text-foreground max-sm:hidden`}>
                       {money(perMonth(grandTotal))}
                     </td>
                   ) : null}
@@ -416,7 +422,7 @@ export function CardPaymentsLedger({
               </tfoot>
             </table>
           </div>
-          <p className="border-t border-line px-4 py-2 text-xs text-muted sm:text-sm">Select a row to edit its payments.</p>
+          <p className="border-t border-line px-4 py-2 text-xs italic text-foreground sm:text-sm">Select a row to edit its payments.</p>
         </>
       )}
       {detailCardId ? (

@@ -19,6 +19,8 @@ import { ModalShell } from "@/components/modal-shell";
 import { SubscriptionsSummaryCard, IrregularBillsSummaryCard } from "./subscriptions-summary";
 import { BulkAddSubcategories } from "./bulk-add-subcategories";
 import { AddCategoryGroupButton } from "./category-group-controls";
+import { LogDueBillsButton } from "./log-due-bills";
+import { MarkRecurringButton } from "./mark-recurring";
 import { DOT } from "./category-icons";
 import type {
   AccountOption,
@@ -527,6 +529,76 @@ export function BudgetBoard({
     return () => window.removeEventListener("scroll", check);
   }, []);
 
+  // Summary donut / Transactions log. Desktop shows it in the right rail;
+  // below lg the rail is hidden, so phones open the same panels in a sheet.
+  const railPanels = (
+    <>
+      {/* Summary | Transactions toggle */}
+      <div className="grid grid-cols-2 gap-1 rounded-2xl border border-line bg-surface p-1 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setRailTab("summary")}
+          className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-sm font-bold transition-colors ${
+            railTab === "summary"
+              // Tinted with each panel's own accent: Summary navy,
+              // Transactions sky.
+              ? "bg-[color-mix(in_srgb,var(--viz-income)_12%,var(--surface))] text-foreground shadow-sm ring-1 ring-[color-mix(in_srgb,var(--viz-income)_30%,var(--border))] [&>svg]:text-[color:var(--viz-income)]"
+              : "text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
+          }`}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z" />
+          </svg>
+          Summary
+        </button>
+        <button
+          type="button"
+          onClick={() => { loadPayees(); setRailTab("transactions"); }}
+          className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-sm font-bold transition-colors ${
+            railTab === "transactions"
+              ? "bg-[color-mix(in_srgb,var(--viz-expenses)_12%,var(--surface))] text-foreground shadow-sm ring-1 ring-[color-mix(in_srgb,var(--viz-expenses)_30%,var(--border))] [&>span]:text-[color:var(--viz-expenses)]"
+              : "text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
+          }`}
+        >
+          <span className="font-bold">$</span>
+          Transactions
+        </button>
+      </div>
+
+      {railTab === "summary" ? (
+        <>
+          <SummaryPanel groups={groups} currency={currency} />
+        </>
+      ) : (
+        <TransactionsPanel
+          monthKey={month.key}
+          monthLabel={month.label}
+          firstOfMonth={month.firstOfMonth}
+          currency={currency}
+          transactions={transactions}
+          subOptions={subOptions}
+          accountOptions={accountOptions}
+          propertyOptions={propertyOptions}
+          bucketsByAccount={bucketsByAccount}
+          payeeOptions={payeeOptions}
+          payeeLineItems={payeeLineItems}
+          filterKinds={txFilterKinds}
+          filterSubs={txFilterSubs}
+          onRemoveKind={(k) => setTxFilterKinds((prev) => prev.filter((x) => x !== k))}
+          onRemoveSub={(id) => setTxFilterSubs((prev) => prev.filter((s) => s.id !== id))}
+          onClearFilter={() => { setTxFilterKinds([]); setTxFilterSubs([]); }}
+        />
+      )}
+    </>
+  );
+  const [phoneRailOpen, setPhoneRailOpen] = useState(false);
+  // Group figures and card "Spent" links switch the rail; on a phone the rail
+  // isn't on screen, so open the sheet too or the tap does nothing visible.
+  const showRail = (tab: "summary" | "transactions") => {
+    setRailTab(tab);
+    if (!window.matchMedia("(min-width: 1024px)").matches) setPhoneRailOpen(true);
+  };
+
   return (
     // `items-start` would leave the right rail (aside) exactly as tall as its
     // own content — shorter than the budget column next to it — which caps
@@ -536,8 +608,20 @@ export function BudgetBoard({
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
     <div className="-m-4 min-h-[calc(100vh-4rem)] space-y-4 bg-background p-4 md:-m-8 md:min-h-screen md:p-8">
-      <div className="flex items-center justify-between pr-8 md:pr-0">
+      <div className="flex items-center justify-between gap-2 pr-8 md:pr-0">
         <MonthPicker monthKey={month.key} />
+        {/* Below lg the right rail is hidden — this opens its Summary
+            donut and Transactions log in a sheet instead. */}
+        <button
+          type="button"
+          onClick={() => setPhoneRailOpen(true)}
+          className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg bg-surface px-2 text-xs font-bold text-foreground ring-1 ring-line transition hover:bg-sky-50 sm:h-7 sm:gap-1.5 sm:rounded-full sm:px-2.5 lg:hidden dark:hover:bg-sky-950/40"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ color: "var(--viz-income)" }}>
+            <path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z" />
+          </svg>
+          Summary
+        </button>
       </div>
       <div className="flex w-full gap-6">
       {/* Budget column */}
@@ -583,7 +667,7 @@ export function BudgetBoard({
               onClick={() => showingOverspent ? setRowFilter("all") : showOverspent()}
               aria-pressed={showingOverspent}
               disabled={overspentCount === 0}
-              className={`${overspentCount === 0 ? "hidden" : "inline-flex"} items-center gap-1 whitespace-nowrap rounded-full px-2.5 h-7 text-[12px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 sm:text-xs ${showingOverspent ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
+              className={`${overspentCount === 0 ? "hidden" : "inline-flex"} items-center gap-1 whitespace-nowrap rounded-full px-2.5 h-9 sm:h-7 text-[12px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 sm:text-xs ${showingOverspent ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 3.5 22 20.5H2L12 3.5Zm0 5.25a1 1 0 0 0-1 1v4.5a1 1 0 1 0 2 0v-4.5a1 1 0 0 0-1-1Zm0 8.25a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3Z" />
@@ -598,7 +682,7 @@ export function BudgetBoard({
               <button
                 type="button"
                 onClick={() => setShowPrevOverspent(true)}
-                className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-surface px-2.5 h-7 text-[12px] font-semibold text-negative ring-1 ring-negative/25 transition hover:bg-negative/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 sm:text-xs"
+                className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-surface px-2.5 h-9 sm:h-7 text-[12px] font-semibold text-negative ring-1 ring-negative/25 transition hover:bg-negative/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 sm:text-xs"
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M3 10a9 9 0 1 1 2.6 6.4" />
@@ -616,7 +700,7 @@ export function BudgetBoard({
                   type="button"
                   onClick={() => setShowDue((v) => !v)}
                   aria-pressed={showDue}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 h-7 text-[12px] font-semibold transition sm:text-xs ${
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 h-9 sm:h-7 text-[12px] font-semibold transition sm:text-xs ${
                     showDue ? "bg-negative/30 text-foreground" : "bg-negative/20 text-foreground hover:bg-negative/30"
                   }`}
                 >
@@ -627,7 +711,7 @@ export function BudgetBoard({
               <button
                 type="button"
                 onClick={() => { loadPayees(); setShowAddModal(true); }}
-                className="h-7 shrink-0 cursor-pointer items-center rounded-lg bg-brand px-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong sm:rounded-full sm:px-3"
+                className="h-9 sm:h-7 shrink-0 cursor-pointer items-center rounded-lg bg-brand px-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong sm:rounded-full sm:px-3"
               >
                 + Transaction
               </button>
@@ -645,7 +729,7 @@ export function BudgetBoard({
               aria-checked={detailsExpanded}
               aria-label={`Progress ${detailsExpanded ? "On" : "Off"}`}
               onClick={() => setRowDetail((current) => ({ ...current, expanded: current.expanded !== true }))}
-              className={`group relative hidden h-7 items-center rounded-full p-1 transition sm:flex ${
+              className={`relative hidden h-7 items-center rounded-full p-1 transition sm:flex ${
                 detailsExpanded
                   ? "bg-brand-soft text-brand ring-1 ring-brand/20"
                   : "bg-surface text-foreground ring-1 ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
@@ -661,17 +745,19 @@ export function BudgetBoard({
                   }`}
                 />
               </span>
-              <span
-                role="tooltip"
-                className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[10px] font-semibold text-background opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-              >
-                Progress {detailsExpanded ? "On" : "Off"}
-              </span>
+              {/* Visible label instead of a hover tooltip. */}
+              <span className="px-1.5 text-xs font-semibold text-foreground">Progress</span>
             </button>
           </div>
 
           {showDue && dueThisWeek.length > 0 && (
-            <DueItemsList dueItems={dueThisWeek} currency={currency} onPayDue={handlePayDue} onSkipDue={handleSkipDue} onOpen={handleOpenDue} />
+            <div className="space-y-2">
+              <div className="flex flex-wrap justify-end gap-2">
+                <MarkRecurringButton currency={currency} />
+                <LogDueBillsButton dueItems={dueThisWeek} currency={currency} />
+              </div>
+              <DueItemsList dueItems={dueThisWeek} currency={currency} onPayDue={handlePayDue} onSkipDue={handleSkipDue} onOpen={handleOpenDue} />
+            </div>
           )}
 
           {/* Groups */}
@@ -692,7 +778,7 @@ export function BudgetBoard({
                 onFilter={(kind) => {
                   toggleFilterKind(kind);
                   loadPayees();
-                  setRailTab("transactions");
+                  showRail("transactions");
                 }}
               />
             ))}
@@ -765,7 +851,7 @@ export function BudgetBoard({
                     if (subId) {
                       toggleFilterSub(subId, "Subscriptions");
                       loadPayees();
-                      setRailTab("transactions");
+                      showRail("transactions");
                     }
                   }}
                   transactions={transactions}
@@ -792,7 +878,7 @@ export function BudgetBoard({
                     if (subId) {
                       toggleFilterSub(subId, "Irregular Bills");
                       loadPayees();
-                      setRailTab("transactions");
+                      showRail("transactions");
                     }
                   }}
                   transactions={transactions}
@@ -831,66 +917,19 @@ export function BudgetBoard({
         >
           {railContent ?? (
             <>
-              {/* Summary | Transactions toggle */}
-              <div className="grid grid-cols-2 gap-1 rounded-2xl border border-line bg-surface p-1 shadow-sm">
-                <button
-                  type="button"
-                  onClick={() => setRailTab("summary")}
-                  className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-sm font-bold transition-colors ${
-                    railTab === "summary"
-                      // Tinted with each panel's own accent: Summary navy,
-                      // Transactions sky.
-                      ? "bg-[color-mix(in_srgb,var(--viz-income)_12%,var(--surface))] text-foreground shadow-sm ring-1 ring-[color-mix(in_srgb,var(--viz-income)_30%,var(--border))] [&>svg]:text-[color:var(--viz-income)]"
-                      : "text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                  }`}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z" />
-                  </svg>
-                  Summary
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { loadPayees(); setRailTab("transactions"); }}
-                  className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-sm font-bold transition-colors ${
-                    railTab === "transactions"
-                      ? "bg-[color-mix(in_srgb,var(--viz-expenses)_12%,var(--surface))] text-foreground shadow-sm ring-1 ring-[color-mix(in_srgb,var(--viz-expenses)_30%,var(--border))] [&>span]:text-[color:var(--viz-expenses)]"
-                      : "text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                  }`}
-                >
-                  <span className="font-bold">$</span>
-                  Transactions
-                </button>
-              </div>
-
-              {railTab === "summary" ? (
-                <>
-                  <SummaryPanel groups={groups} currency={currency} />
-                </>
-              ) : (
-                <TransactionsPanel
-                  monthKey={month.key}
-                  monthLabel={month.label}
-                  firstOfMonth={month.firstOfMonth}
-                  currency={currency}
-                  transactions={transactions}
-                  subOptions={subOptions}
-                  accountOptions={accountOptions}
-                  propertyOptions={propertyOptions}
-                  bucketsByAccount={bucketsByAccount}
-                  payeeOptions={payeeOptions}
-                  payeeLineItems={payeeLineItems}
-                  filterKinds={txFilterKinds}
-                  filterSubs={txFilterSubs}
-                  onRemoveKind={(k) => setTxFilterKinds((prev) => prev.filter((x) => x !== k))}
-                  onRemoveSub={(id) => setTxFilterSubs((prev) => prev.filter((s) => s.id !== id))}
-                  onClearFilter={() => { setTxFilterKinds([]); setTxFilterSubs([]); }}
-                />
-              )}
+              {railPanels}
             </>
           )}
         </div>
       </aside>
+
+      {phoneRailOpen && !railContent ? (
+        <div className="lg:hidden">
+          <ModalShell title={month.label} onClose={() => setPhoneRailOpen(false)}>
+            <div className="space-y-3">{railPanels}</div>
+          </ModalShell>
+        </div>
+      ) : null}
 
       {/* Mobile: item detail slides up as bottom sheet */}
       {railContent ? (
@@ -1090,14 +1129,15 @@ function AssignLeftover({
       <button
         type="button"
         onClick={() => { setAmount(""); setError(null); setOpen(true); }}
-        className={`mt-1.5 inline-flex w-fit cursor-pointer items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition ${
+        className={`inline-flex w-fit cursor-pointer items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition ${
           trimming
             ? "bg-negative/10 text-negative ring-negative/20 hover:bg-negative/20"
             : "bg-brand-soft text-brand ring-brand/20 hover:bg-brand/20"
         }`}
       >
         <span aria-hidden>{trimming ? "−" : "+"}</span>
-        {trimming ? "Trim an item" : "Assign to an item"}
+        {trimming ? "Trim" : "Assign"}
+        <span className="@max-[16rem]/stat:hidden">{trimming ? " an item" : " to an item"}</span>
       </button>
 
       {open ? (
@@ -1436,7 +1476,7 @@ function CategoryProgressCard({
     // a 3px left edge and a tinted border. Built from the token + --surface
     // with color-mix, so dark mode follows on its own.
     <div
-      className="relative overflow-hidden rounded-xl border border-l-[3px] px-3 py-2 shadow-[0_1px_2px_rgb(0_0_0/0.04)]"
+      className="@container/card relative overflow-hidden rounded-xl border border-l-[3px] px-3 py-2 shadow-[0_1px_2px_rgb(0_0_0/0.04)]"
       style={{
         // Each side on its own: React warns when the borderColor shorthand
         // and borderLeftColor are mixed on one element.
@@ -1451,7 +1491,7 @@ function CategoryProgressCard({
           amounts are long enough to squeeze a truncating label down to an
           ellipsis, so they drop to their own line instead. */}
       {/* Wide (4 across): name centered on line 1, amounts centered on line 2. */}
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 @3xl:justify-center">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 @3xl/hero:justify-center">
         <span
           className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`}
           style={{ boxShadow: `0 0 0 3px color-mix(in srgb, ${accentVar} 18%, transparent)` }}
@@ -1461,10 +1501,12 @@ function CategoryProgressCard({
         {/* The planned figure and the "/ Spent $x" pair each hold together,
             but the line may break between them. Holding the whole thing on one
             line clipped it against the card's edge whenever the summary panel
-            squeezed this column — the amounts were wider than the card. */}
-        <span className="ml-auto max-sm:text-[12px] tabular-nums sm:text-sm @3xl:ml-0 @3xl:basis-full @3xl:text-center">
+            squeezed this column — the amounts were wider than the card.
+            Below 16rem the "/ Spent" pair always takes its own line, so a short
+            card (Debt) breaks the same way as a long one (Income) beside it. */}
+        <span className="ml-auto max-sm:text-[12px] tabular-nums sm:text-sm @3xl/hero:ml-0 @3xl/hero:basis-full @3xl/hero:text-center">
           <span className="whitespace-nowrap font-bold text-foreground">{formatMoney(planned, currency)}</span>{" "}
-          <span className="whitespace-nowrap">
+          <span className="block whitespace-nowrap @[16rem]/card:inline">
             <span className="font-semibold text-foreground">/ {actualLabel} </span>
             {/* Nothing in yet reads plain, not green/red. */}
             <span className={`font-bold ${actual === 0 ? "text-foreground" : actualColorClass}`}>{formatMoney(actual, currency)}</span>
@@ -1528,6 +1570,14 @@ const UNDO_WINDOW_MS = 30_000;
 const ROLLOVER_PILL =
   "inline-flex max-w-full cursor-pointer flex-wrap items-center gap-x-1 whitespace-nowrap rounded-xl @3xl/hero:rounded-full border border-positive/25 bg-positive/10 px-2 py-1 sm:gap-1.5 sm:px-2.5 text-[11px] text-positive transition hover:border-positive/40 hover:bg-positive/15";
 
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="size-3 opacity-80" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+      <path d="M11.5 2.5l2 2L6 12H4v-2l7.5-7.5z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // Under Income Planned once a rollover is in: what's still left of last
 // month's leftover, or the amount box while editing. Hidden when all of it
 // was rolled over and the box is closed.
@@ -1570,7 +1620,11 @@ function RolloverLeftLine({
   return (
     <button type="button" onClick={() => setEditing(true)} className={ROLLOVER_PILL}>
       <span className="font-bold tabular-nums">{formatMoney(leftCents, currency)}</span>
-      <span className="font-semibold opacity-80">Left to Rollover</span>
+      {/* Pencil rides with the label so it never wraps onto a line alone. */}
+      <span className="inline-flex items-center gap-1">
+        <span className="font-semibold opacity-80">Left to Rollover</span>
+        <PencilIcon />
+      </span>
     </button>
   );
 }
@@ -1609,8 +1663,11 @@ function RolloverAddedLine({
         aria-label={`Return some of the ${formatMoney(rolloverCents, currency)} rollover`}
       >
         <span className="font-bold tabular-nums">+{formatMoney(rolloverCents, currency)}</span>
-        <span className="font-semibold opacity-80">
-          used from {shortMonth(prevMonthLabel)}
+        <span className="inline-flex items-center gap-1">
+          <span className="font-semibold opacity-80">
+            used from {shortMonth(prevMonthLabel)}
+          </span>
+          <PencilIcon />
         </span>
         </button>
       {(returning || showUndo) && (
@@ -1804,8 +1861,10 @@ function SummaryHeroCard({
   const FIGURE = "mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums";
   // Bigger on desktop only; the phone keeps its 12px (Victor, 2026-10-31).
   const SUBLINE = "mt-0.5 max-sm:text-[12px] sm:text-sm font-semibold text-foreground";
+  // Thin spaces (\u2009) round the signs + tight tracking keep the
+  // "Rollover" version on one line in the narrow tile, phone included.
   const leftSub =
-    rolloverCents > 0 ? `Received + ${prevMonth} − Spent` : rollover.deficitCents < 0 ? `Received − ${prevMonth} − Spent` : "Received − Spent";
+    rolloverCents > 0 ? "Income\u2009+\u2009Rollover\u2009−\u2009Spent" : rollover.deficitCents < 0 ? "Income\u2009−\u2009Rollover\u2009−\u2009Spent" : "Income − Spent";
 
   return (
     <div className="@container/hero -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
@@ -1855,7 +1914,9 @@ function SummaryHeroCard({
                 </span>
               </p>
             )}
-            <div className="mt-1.5 flex flex-col items-start gap-1.5 @3xl/hero:items-center">
+            {/* Side by side when they fit; wraps to two lines only when the
+                tile is too narrow for both. */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 @3xl/hero:justify-center">
               <RollInPlanControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
               {/* Zero-based budgeting: give the unplanned money a job, or take
                   one away when the month plans more than it has. */}
@@ -1886,7 +1947,7 @@ function SummaryHeroCard({
           <HeroStat accentVar={leftAccent} className="@3xl:text-center">
             <p className={TITLE}>{leftCents < 0 ? "Overspent" : "Income Remaining"}</p>
             <p className={`${FIGURE} ${leftClass}`}>{formatMoney(leftCents, currency)}</p>
-            <p className={SUBLINE}>{leftSub}</p>
+            <p className={`${SUBLINE} tracking-tight`}>{leftSub}</p>
             {/* Last month's money used this month (or a deficit carried in). */}
             <div className="mt-1.5 flex flex-wrap items-center gap-1 empty:hidden @3xl/hero:justify-center">
               {rolloverCents > 0 && (
@@ -1908,7 +1969,7 @@ function SummaryHeroCard({
           </HeroStat>
         </div>
 
-        <div className="mt-5 grid grid-cols-1 gap-2.5 @xl:grid-cols-2 @3xl:grid-cols-4">
+        <div className="mt-5 grid grid-cols-2 gap-2.5 @3xl:grid-cols-4">
           <CategoryProgressCard label="Income" accentVar="var(--positive)" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--positive)]" fillClass="bg-[color:var(--positive)]" currency={currency} />
           <CategoryProgressCard label="Savings" accentVar="var(--viz-savings)" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--viz-savings)]" fillClass="bg-[color:var(--viz-savings)]" currency={currency} />
           {/* Red, not the teal bills colour: this is money going out, and teal
@@ -1995,8 +2056,11 @@ function DueItemsList({
                   )}
                 </span>
               </div>
-              <p className="mt-0.5 truncate text-[11px] text-muted sm:hidden">
+              {/* Phones: the "Amount not set" cell is hidden for room, so say
+                  it here on the account line instead of dropping it. */}
+              <p className="mt-0.5 truncate text-[11px] italic text-foreground sm:hidden">
                 {item.accountName ? `Charged to ${item.accountName}` : "No account linked"}
+                {item.amountCents > 0 ? null : " · No amount"}
               </p>
             </button>
             {/* Amount and buttons sit beside the name; on a phone a row with
@@ -2026,7 +2090,7 @@ function DueItemsList({
                   <button
                     type="button"
                     onClick={() => onPayDue(item)}
-                    className="rounded-md bg-negative/15 px-2 py-1 text-[11px] font-semibold text-negative transition hover:bg-negative/25"
+                    className="rounded-md bg-negative/15 px-2 py-1 text-[11px] font-semibold text-negative transition hover:bg-negative/25 max-sm:min-h-10 max-sm:px-3"
                   >
                     Pay
                   </button>
@@ -2041,7 +2105,7 @@ function DueItemsList({
                           setSkippingId(null);
                         });
                       }}
-                      className="whitespace-nowrap rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 disabled:opacity-60 dark:bg-sky-900/50 dark:hover:bg-sky-900"
+                      className="whitespace-nowrap rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 max-sm:min-h-10 max-sm:px-3 disabled:opacity-60 dark:bg-sky-900/50 dark:hover:bg-sky-900"
                     >
                       {skippingId === item.id ? "Saving…" : <>Skip<span className="hidden sm:inline"> month</span></>}
                     </button>
@@ -2054,7 +2118,7 @@ function DueItemsList({
                     <button
                       type="button"
                       onClick={() => onPayDue(item, item.prevSpentCents)}
-                      className="whitespace-nowrap rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
+                      className="whitespace-nowrap rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 max-sm:min-h-10 dark:bg-sky-900/50 dark:hover:bg-sky-900"
                     >
                       <span aria-hidden="true">↺</span> Prev Mo {formatMoney(item.prevSpentCents, currency)}
                     </button>
@@ -2354,7 +2418,12 @@ function RollInPlanControl({
               onClick={() => setConfirming(true)}
               className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
-              {`↓ Roll in ${shortMonth(prevMonthLabel)} Planned`}
+              {/* Words drop as the tile narrows so it fits beside Trim / Assign
+                  on one line: full on a wide tile, then "Roll in Oct", then
+                  "Roll in" on a phone. Same font size throughout. */}
+              ↓ Roll in
+              <span className="@max-[11rem]/stat:hidden"> {shortMonth(prevMonthLabel)}</span>
+              <span className="@max-[16rem]/stat:hidden"> Planned</span>
             </button>
           )}
     </div>
@@ -2391,17 +2460,18 @@ function StickyFooterBar({
         <p className="truncate text-sm font-bold tabular-nums text-foreground sm:text-lg">
           {formatMoney(outflowPlanned, currency)}
         </p>
-        <p className="text-[10px] font-bold uppercase tracking-wide text-muted sm:text-xs">Planned</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-foreground sm:text-xs">Planned</p>
       </div>
       <div className="min-w-0 border-l border-line px-1 text-center">
         <p className={`truncate text-sm font-bold tabular-nums sm:text-lg ${displayLeft < 0 ? "text-negative" : "text-positive"}`}>
-          {formatMoney(displayLeft, currency)}
+          {formatMoney(Math.abs(displayLeft), currency)}
         </p>
-        <p className="text-[10px] font-bold uppercase tracking-wide text-muted sm:text-xs">Income Left to Budget</p>
+        {/* Same words as the hero's Planned card, so it fits one line. */}
+        <p className="text-[10px] font-bold uppercase tracking-wide text-foreground sm:text-xs">{displayLeft < 0 ? "Over by" : "Unplanned"}</p>
       </div>
       <div className="min-w-0 border-l border-line px-1 text-center">
         <p className="truncate text-sm font-bold tabular-nums text-negative sm:text-lg">{formatMoney(actualSpent, currency)}</p>
-        <p className="text-[10px] font-bold uppercase tracking-wide text-muted sm:text-xs">Actual Spent</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-foreground sm:text-xs">Spent</p>
       </div>
     </div>
   );

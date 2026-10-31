@@ -444,7 +444,7 @@ export function StayModal({
         type="submit"
         form={formId}
         disabled={pending}
-        className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
+        className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
       >
         {pending ? "Saving…" : justSaved ? "Saved" : stay ? "Save stay" : "Add stay"}
       </button>

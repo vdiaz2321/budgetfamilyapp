@@ -10,12 +10,20 @@ import { logCreditCardRewardActivity, matchCardStatement, payCard } from "./acti
 import type { AccountData, BucketData, NonCardAccount } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 
+// Labels are full ink (never grey), 12px on a phone and 12px+ from sm.
+// Inputs are 44px tall on a phone so they're easy to tap. `compact` sizes the
+// box to a short value (due day, ¢ per pt, APR) — a w-28 box, value centered —
+// instead of stretching it across the column.
+const LABEL_CLS = "mb-0.5 block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground";
+const PAD = "py-1.5 max-sm:py-2.5";
+
 export function LabeledInput({
   label,
   prefix,
   hint,
+  compact = false,
   ...inputProps
-}: { label: string; prefix?: string; hint?: React.ReactNode } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { label: string; prefix?: string; hint?: React.ReactNode; compact?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) {
   const isDate = inputProps.type === "date";
   const { defaultValue: initialDefaultValue, ...dateInputProps } = inputProps;
   const [dateVal, setDateVal] = useState(isDate ? (typeof initialDefaultValue === "string" ? initialDefaultValue : "") : "");
@@ -30,7 +38,7 @@ export function LabeledInput({
       // explicit showPicker() means a click anywhere in the field opens the
       // calendar, including on the value text rather than only the icon.
       <div className="block">
-        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+        <span className={LABEL_CLS}>
           {label}
         </span>
         <div className="flex items-center gap-1">
@@ -49,44 +57,45 @@ export function LabeledInput({
                 /* no-op */
               }
             }}
-            className="w-full cursor-pointer rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className={`w-full cursor-pointer rounded-md bg-surface px-2 ${PAD} text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand`}
           />
-          {dateVal ? (
-            <button
-              type="button"
-              onClick={() => { setDateVal(""); if (dateRef.current) { dateRef.current.value = ""; dateRef.current.dispatchEvent(new Event("change", { bubbles: true })); } }}
-              className="shrink-0 rounded p-1 text-muted hover:text-foreground"
-              aria-label="Clear date"
-            >
-              ✕
-            </button>
-          ) : null}
+          {/* The ✕ slot is always there (invisible when empty) so every date
+              box in a column is the same width, set or not. */}
+          <button
+            type="button"
+            onClick={() => { setDateVal(""); if (dateRef.current) { dateRef.current.value = ""; dateRef.current.dispatchEvent(new Event("change", { bubbles: true })); } }}
+            className={`shrink-0 rounded p-1 text-foreground hover:text-negative max-sm:p-2.5 ${dateVal ? "" : "invisible"}`}
+            aria-label="Clear date"
+            tabIndex={dateVal ? 0 : -1}
+          >
+            ✕
+          </button>
         </div>
-        {hint ? <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">{hint}</span> : null}
+        {hint ? <span className="mt-1 block text-[11px] font-normal italic normal-case tracking-normal text-foreground">{hint}</span> : null}
       </div>
     );
   }
 
   return (
     <label className="block">
-      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+      <span className={LABEL_CLS}>
         {label}
       </span>
       {prefix ? (
-        <div className="flex items-center rounded-md ring-1 ring-line focus-within:ring-2 focus-within:ring-brand bg-surface">
-          <span className="pl-2 text-sm text-muted select-none">{prefix}</span>
+        <div className={`flex items-center rounded-md ring-1 ring-line focus-within:ring-2 focus-within:ring-brand bg-surface ${compact ? "w-28" : ""}`}>
+          <span className="pl-2 text-sm text-foreground select-none">{prefix}</span>
           <input
             {...inputProps}
-            className="min-w-0 flex-1 rounded-md bg-surface px-1.5 py-1.5 text-sm focus:outline-none"
+            className={`min-w-0 flex-1 rounded-md bg-surface px-1.5 ${PAD} text-sm focus:outline-none ${compact ? "text-center" : ""}`}
           />
         </div>
       ) : (
         <input
           {...inputProps}
-          className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className={`rounded-md bg-surface px-2 ${PAD} text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${compact ? "w-28 text-center" : "w-full"}`}
         />
       )}
-      {hint ? <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">{hint}</span> : null}
+      {hint ? <span className="mt-1 block text-[11px] font-normal italic normal-case tracking-normal text-foreground">{hint}</span> : null}
     </label>
   );
 }
@@ -583,7 +592,7 @@ export function FreeNightCapField({ pointsLimit, categoryMax }: { pointsLimit: n
   return (
     <div className="block">
       <div className="mb-0.5 flex items-center justify-between gap-2">
-        <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">Free night up to</span>
+        <span className="block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">Free night up to</span>
         <div className="inline-flex rounded-md text-[10px] font-semibold ring-1 ring-line">
           {(["points", "category"] as const).map((option) => (
             <button
@@ -607,13 +616,13 @@ export function FreeNightCapField({ pointsLimit, categoryMax }: { pointsLimit: n
           min="0"
           defaultValue={pointsLimit ?? ""}
           placeholder="35000"
-          className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-md bg-surface px-2 py-1.5 max-sm:py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       ) : (
         <select
           name="freeNightCategoryMax"
           defaultValue={String(categoryMax ?? 4)}
-          className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-md bg-surface px-2 py-1.5 max-sm:py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         >
           {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
             <option key={n} value={n}>{n === 1 ? "Category 1" : `Category 1\u2013${n}`}</option>

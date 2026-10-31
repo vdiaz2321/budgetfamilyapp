@@ -537,8 +537,8 @@ function CreditCardSection({
   // style — boxed in white chips they shouted over the heading itself.
   const bannerChip = (label: string, text: string, valueClass: string, slot = "") => (
     <span key={label} className={`flex shrink-0 flex-col gap-0.5 sm:inline-flex sm:flex-row sm:items-baseline sm:gap-1.5 ${slot}`}>
-      <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">{label}:</span>
-      <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${valueClass}`}>{text}</span>
+      <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-xs">{label}:</span>
+      <span className={`whitespace-nowrap text-sm font-bold tabular-nums sm:text-base ${valueClass}`}>{text}</span>
     </span>
   );
   const groupFigures = (cards: AccountData[], cat: "travel" | "hotel", owed: number) => {
@@ -582,7 +582,7 @@ function CreditCardSection({
         // A light-blue pill at rest marks it as a filter control; switched
         // on it fills solid.
         // Straight after the group's figures, not pushed to the far edge.
-        className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ring-1 transition ${
+        className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 transition max-sm:min-h-10 ${
           active
             ? "bg-sky-700 text-white ring-sky-700 dark:bg-sky-300 dark:text-[#0b1a2a] dark:ring-sky-300"
             : "bg-sky-100 text-foreground ring-sky-600/25 hover:bg-sky-200 dark:bg-sky-900/50 dark:ring-sky-300/30 dark:hover:bg-sky-900/80"
@@ -791,7 +791,7 @@ function CreditCardSection({
         <button
           type="button"
           onClick={() => setShowOnlyFeeCards((v) => !v)}
-          className={`rounded-xl px-3 py-1.5 font-semibold shadow-sm ring-1 transition ${showOnlyFeeCards ? "bg-negative/10 ring-negative/40" : "bg-surface ring-line hover:ring-negative/40"}`}
+          className={`rounded-lg px-3 py-1.5 font-semibold ring-1 transition max-sm:min-h-10 ${showOnlyFeeCards ? "bg-negative/10 ring-negative/40" : "bg-surface ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"}`}
         >
           <span className="text-negative">Active fees:</span> <span className="tabular-nums text-foreground">{formatMoneyWhole(feesPaid, currency)}/yr</span>
         </button>
@@ -814,10 +814,10 @@ function CreditCardSection({
               aria-expanded={filtersOpen}
               // Outlined with a funnel, like the other pressable chips
               // on this card — as bare text it read as a label.
-              className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-semibold transition ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-semibold ring-1 transition max-sm:min-h-10 ${
                 on.length > 0
-                  ? "border-transparent text-white"
-                  : "border-black/25 bg-surface text-foreground hover:bg-sky-200 dark:border-white/30 dark:hover:bg-sky-900"
+                  ? "text-white ring-transparent"
+                  : "bg-surface text-foreground ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
               }`}
               style={on.length > 0 ? { backgroundColor: "var(--viz-savings)" } : undefined}
             >
@@ -883,7 +883,7 @@ function CreditCardSection({
                   type="button"
                   onClick={() => setCategoryFilter(o.cat)}
                   aria-pressed={active}
-                  className={`rounded-md px-2.5 py-[3px] font-semibold text-foreground transition ${
+                  className={`rounded-md px-2.5 py-1 font-semibold text-foreground transition max-sm:min-h-9 ${
                     active ? "bg-surface shadow-sm" : "hover:bg-sky-200 dark:hover:bg-sky-800/60"
                   }`}
                 >
@@ -1016,7 +1016,7 @@ function CreditCardSection({
               <span className="min-w-0">
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
-                  <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold text-foreground ring-1 ring-line dark:bg-sky-900/50">
+                  <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-foreground ring-1 ring-sky-600/25 dark:bg-sky-900/50 dark:ring-sky-300/30">
                     {allStats.openCards.length} active cards
                   </span>
                 </span>
@@ -1072,7 +1072,7 @@ function CreditCardSection({
               href="https://www.dailydrop.com/calculator"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-sky-700/20 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 lg:ml-auto dark:border-sky-400/20 dark:bg-sky-950/40 dark:text-sky-400 dark:hover:bg-sky-900/40"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-50 max-sm:min-h-10 lg:ml-auto dark:hover:bg-sky-950/40"
             >
               <span className="sm:hidden">Calculator</span>
               <span className="hidden sm:inline">Pts value calculator</span>
@@ -1100,7 +1100,7 @@ function CreditCardSection({
               Only the grid is gated on that — the filter row below is what
               clears the filter, so it must never be hidden by it. */}
           {(allStats.totalPoints > 0 || allStats.travelRedeemable > 0 || allStats.hotelRedeemable > 0 || allStats.feesPaid > 0 || allStats.totalOwed > 0) ? (
-            <div className="mt-5 grid grid-cols-2 items-stretch gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="mt-5 grid grid-cols-2 items-stretch gap-3 sm:grid-cols-3 lg:grid-cols-5 max-sm:[&>*:last-child:nth-child(odd)]:col-span-2">
               {allStats.totalPoints > 0 ? (
                 <RewardTile
                   label="Current Pts"
@@ -1438,11 +1438,13 @@ function RewardTile({
   };
   const inner = (
     <>
-      <span className="flex items-center justify-center gap-1.5">
+      {/* Phone: icon above the label, so a two-word label doesn't wrap with
+          the icon stranded beside its first line. */}
+      <span className="flex flex-col items-center justify-center gap-0.5 sm:flex-row sm:gap-1.5">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: t.color }} aria-hidden>
           {REWARD_TILE_ICONS[icon]}
         </svg>
-        <span className="text-center text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-xs" style={tone === "owed" ? { color: t.color } : undefined}>
+        <span className="text-center max-sm:text-[12px] font-semibold uppercase tracking-wide text-foreground sm:text-xs" style={tone === "owed" ? { color: t.color } : undefined}>
           {label}
         </span>
       </span>
@@ -1450,7 +1452,7 @@ function RewardTile({
         {value}
       </span>
       {sub ? (
-        <span className="mt-1 text-center text-xs font-medium tabular-nums text-muted" style={subColor ? { color: subColor } : undefined}>
+        <span className="mt-1 text-center text-xs font-medium tabular-nums text-foreground" style={subColor ? { color: subColor } : undefined}>
           {sub}
         </span>
       ) : null}
@@ -1655,23 +1657,23 @@ function PointsByCard({
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
-        <span className="shrink-0 whitespace-nowrap text-sm font-extrabold sm:text-lg">Points/Value Historical Data</span>
+        <span className="shrink-0 whitespace-nowrap text-sm font-bold sm:text-base">Points/Value Historical Data</span>
         </span>
         {total.redeemed.points > 0 ? (
           <>
             <span className="flex shrink-0 items-baseline gap-1.5 sm:min-w-[16.75rem]">
-              <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">
+              <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-xs">
                 Total pts used:
               </span>
-              <span className="whitespace-nowrap text-sm font-bold tabular-nums">
+              <span className="whitespace-nowrap text-sm font-bold tabular-nums sm:text-base">
                 {total.redeemed.points.toLocaleString()}
               </span>
             </span>
             <span className="flex shrink-0 items-baseline gap-1.5">
-              <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">
+              <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-xs">
                 Total cash saved:
               </span>
-              <span className="whitespace-nowrap text-sm font-bold tabular-nums">
+              <span className="whitespace-nowrap text-sm font-bold tabular-nums sm:text-base">
                 {formatMoneyWhole(total.redeemed.valueCents, currency)}
               </span>
             </span>
@@ -1918,7 +1920,7 @@ function EditRewardActivityModal({
             This entry was made by a booking{entry.note ? ` (${entry.note})` : ""}. To change its points, edit that booking
             in its trip.
           </p>
-          <button type="button" onClick={onDone} className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800">
+          <button type="button" onClick={onDone} className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong">
             OK
           </button>
         </div>
@@ -1997,7 +1999,7 @@ function EditRewardActivityModal({
           </div>
           {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
           <div className="sm:col-span-2 flex flex-wrap items-center gap-3 pt-1">
-            <button type="submit" disabled={pending} className="shrink-0 rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800 disabled:opacity-60">
+            <button type="submit" disabled={pending} className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60">
               {pending ? "Saving…" : "Save changes"}
             </button>
           </div>
@@ -2109,14 +2111,14 @@ function CardTableHeader() {
 }
 
 // One colour per issuer, used by both the little card icon and the bank tag
-// so the two always match. Blues, slate and a red for Capital One — no purple
-// or amber (CLAUDE.md).
+// so the two always match. Blues, teal and a true red for Capital One — no
+// purple, amber, pink/rose or grey (CLAUDE.md).
 const BANK_STYLES = {
   chase: { chip: "from-blue-700 to-blue-950", tag: "bg-blue-50 text-blue-800 ring-blue-300 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-blue-800" },
   amex: { chip: "from-sky-400 to-sky-700", tag: "bg-sky-50 text-sky-800 ring-sky-300 dark:bg-sky-950/50 dark:text-sky-300 dark:ring-sky-800" },
-  cap1: { chip: "from-rose-600 to-rose-900", tag: "bg-rose-50 text-rose-800 ring-rose-300 dark:bg-rose-950/50 dark:text-rose-300 dark:ring-rose-800" },
+  cap1: { chip: "from-red-600 to-red-900", tag: "bg-red-50 text-red-800 ring-red-300 dark:bg-red-950/50 dark:text-red-300 dark:ring-red-800" },
   citi: { chip: "from-cyan-600 to-cyan-900", tag: "bg-cyan-50 text-cyan-800 ring-cyan-300 dark:bg-cyan-950/50 dark:text-cyan-300 dark:ring-cyan-800" },
-  other: { chip: "from-slate-500 to-slate-800", tag: "bg-sky-100 text-foreground ring-sky-300 dark:bg-sky-900/50 dark:text-foreground dark:ring-sky-700" },
+  other: { chip: "from-teal-600 to-teal-900", tag: "bg-sky-100 text-foreground ring-sky-300 dark:bg-sky-900/50 dark:text-foreground dark:ring-sky-700" },
 } as const;
 
 // Capital One cards are the debt cards: red while their Budget debt still has
@@ -2699,7 +2701,7 @@ function CreditCardPanel({
               <button
                 type="button"
                 onClick={() => setPaying(true)}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-sky-700 px-1.5 py-1.5 text-xs font-medium text-white hover:bg-sky-800 sm:w-auto sm:shrink-0 sm:px-2"
+                className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-brand px-1.5 py-1.5 text-xs font-medium text-white hover:bg-brand-strong sm:w-auto sm:shrink-0 sm:px-2"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <rect x="2" y="6" width="20" height="12" rx="2" />
@@ -2923,7 +2925,7 @@ function RewardActivityForm({
           }
         />
         <div className="sm:col-span-2">
-          <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Direction</span>
+          <span className="mb-0.5 block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">Direction</span>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <div className="inline-flex rounded-md ring-1 ring-line">
             {(["earned", "returned", "used"] as const).map((option) => (
@@ -2967,7 +2969,7 @@ function RewardActivityForm({
           <>
             <LabeledInput label="Cash received" name="cashReceived" prefix="$" inputMode="decimal" placeholder="0.00" autoComplete="off" />
             <div className="block">
-              <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">Received as</span>
+              <span className="mb-0.5 block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">Received as</span>
               <input type="hidden" name="receivedAs" value={receivedAs} />
               <div className="flex flex-wrap items-center gap-2">
                 <div className="inline-flex rounded-md ring-1 ring-line">
@@ -3002,11 +3004,11 @@ function RewardActivityForm({
           </>
         ) : null}
         <div className="sm:col-span-2">
-          <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Note (optional)</label>
+          <label className="mb-0.5 block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">Note (optional)</label>
           <input name="note" placeholder="Hotel, trip, confirmation, or redemption details" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
         </div>
         <div className="sm:col-span-2 flex flex-wrap items-center gap-3 pt-1">
-          <button type="submit" disabled={pending} className="shrink-0 rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800 disabled:opacity-60">{pending ? "Saving…" : "Add activity"}</button>
+          <button type="submit" disabled={pending} className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60">{pending ? "Saving…" : "Add activity"}</button>
         </div>
         {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
       </form>
@@ -3042,15 +3044,20 @@ function RewardActivityForm({
 function LockedDate({ label, name, value }: { label: string; name: string; value: string }) {
   return (
     <div className="block">
-      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
-      <input
-        type="date"
-        name={name}
-        value={value}
-        readOnly
-        tabIndex={-1}
-        className="w-full rounded-md bg-surface px-2 py-1.5 text-sm opacity-70 ring-1 ring-line focus:outline-none"
-      />
+      <span className="mb-0.5 block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">{label}</span>
+      {/* Same row shape as LabeledInput's dates (an invisible ✕ slot) so a
+          locked date lines up with the editable ones beside it. */}
+      <div className="flex items-center gap-1">
+        <input
+          type="date"
+          name={name}
+          value={value}
+          readOnly
+          tabIndex={-1}
+          className="w-full rounded-md bg-surface px-2 py-1.5 text-sm opacity-70 ring-1 ring-line focus:outline-none max-sm:py-2.5"
+        />
+        <span aria-hidden className="invisible shrink-0 rounded p-1 max-sm:p-2.5">✕</span>
+      </div>
     </div>
   );
 }
@@ -3141,10 +3148,11 @@ function EditCreditCardForm({
     <button
       type="button"
       onClick={() => setActiveTab(id)}
-      className={`h-8 min-w-0 whitespace-nowrap px-1 text-xs font-semibold transition sm:px-2.5 sm:text-sm ${
+      // Active tab: full ink, bold, a brand underline — not sky text.
+      className={`h-10 min-w-0 whitespace-nowrap px-1 text-xs text-foreground transition sm:h-9 sm:px-2.5 sm:text-sm ${
         activeTab === id
-          ? "text-sky-700 dark:text-sky-400 shadow-[inset_0_-2px_0_var(--color-sky-700)]"
-          : "text-foreground hover:bg-sky-200 hover:text-foreground dark:hover:bg-sky-900"
+          ? "font-bold shadow-[inset_0_-2px_0_var(--brand)]"
+          : "font-semibold hover:bg-sky-50 dark:hover:bg-sky-950/40"
       }`}
       aria-pressed={activeTab === id}
     >
@@ -3155,11 +3163,41 @@ function EditCreditCardForm({
 
   return (
     // Wider than the default, for three fields to a row.
-    <ModalShell title={`Edit ${card.name}`} onClose={onDone} className="sm:max-w-4xl">
+    // Save is pinned in the header (with the close X beside it) so it's reachable
+    // without scrolling on a phone; Delete stays at the bottom, out of the way.
+    <ModalShell
+      // Just the card name on a phone, so Save and ✕ fit on the title's row.
+      title={<><span className="sm:hidden">{card.name}</span><span className="max-sm:hidden">Edit {card.name}</span></>}
+      onClose={onDone}
+      className="sm:max-w-4xl"
+      headerEnd={
+        <>
+          <button
+            type="submit"
+            form={`card-form-${card.id}`}
+            disabled={savePending}
+            className="min-h-10 rounded-lg bg-brand px-4 text-sm font-bold text-white hover:bg-brand-strong disabled:opacity-60 sm:min-h-9"
+          >
+            {savePending ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={onDone}
+            aria-label="Close"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-foreground transition hover:bg-negative/10 hover:text-negative sm:h-9 sm:w-9"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </>
+      }
+    >
       <div className="bg-background p-3">
       {/* One form: saves both account-level basics AND rewards details together.
           All tabs stay mounted (hidden via CSS) so a single Save submits every field. */}
       <form
+        id={`card-form-${card.id}`}
         action={(fd) =>
           startSave(async () => {
             setDetailsError(null);
@@ -3173,7 +3211,7 @@ function EditCreditCardForm({
             onDone();
           })
         }
-        className="flex flex-col gap-3 [&_input]:!bg-white [&_select]:!bg-white dark:[&_input]:!bg-neutral-900 dark:[&_select]:!bg-neutral-900"
+        className="flex flex-col gap-3 [&_input]:!bg-white [&_select]:!bg-white dark:[&_input]:!bg-background dark:[&_select]:!bg-background"
       >
         <input type="hidden" name="id" value={card.id} />
         <input type="hidden" name="accountId" value={card.id} />
@@ -3190,20 +3228,26 @@ function EditCreditCardForm({
 
         {/* Tab 2: Key fields */}
         <div className={activeTab === "key" ? "" : "hidden"}>
-          <div className="rounded-lg border border-line bg-background/60 p-3">
-            {/* Three to a row from md up, grouped by row: the card (points,
-                limit, site), its benefit (credit, free-night cap, reset), then
-                the benefit's dates. Two columns stretched a short form into
-                wide, mostly empty boxes on a desktop. */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 [&_input]:bg-white [&_input]:ring-sky-300 [&_select]:bg-white [&_select]:ring-sky-300 dark:[&_input]:bg-neutral-900 dark:[&_input]:ring-sky-300 dark:[&_select]:bg-neutral-900 dark:[&_select]:ring-sky-300">
-              <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
+          <div>
+            {/* Three to a row from md up, grouped by row: the points (balance,
+                what each is worth), the card (limit, site), its benefit
+                (credit, free-night cap, reset), then the benefit's dates. One
+                plain grid — no second bordered box inside the tab. */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+              <div className="flex items-end gap-3">
+                <div className="min-w-0 flex-1">
+                  <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
+                </div>
+                {/* Beside the balance it prices (it used to sit on Basics). */}
+                <LabeledInput label="¢ per pt" name="pointsValueCents" type="number" step="any" min="0" compact defaultValue={d?.pointsValueMicros ? String(Number((d.pointsValueMicros / 10_000).toFixed(4))) : ""} placeholder="0.75" />
+              </div>
               <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
               <LabeledInput label="Card website" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
               <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
               <FreeNightCapField pointsLimit={d?.freeNightPointsLimit ?? null} categoryMax={d?.freeNightCategoryMax ?? null} />
               <label className="block">
-                <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground">Benefits reset</span>
-                <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md px-2 py-1.5 text-sm ring-1 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                <span className="mb-0.5 block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">Benefits reset</span>
+                <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md bg-surface px-2 py-1.5 max-sm:py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
                   <option value="annual">Annual</option>
@@ -3258,7 +3302,7 @@ function EditCreditCardForm({
             {/* Feeds the Accounts tiles' "Payment due" strip, and a payoff
                 debt's due day — one box for both. Beside the name, where
                 the tiles' Edit lands. */}
-            <LabeledInput label="Payment due day" name="paymentDueDay" type="number" min="1" max="31" step="1" defaultValue={card.paymentDueDay ?? d?.payoffDueDay ?? ""} placeholder="1–31" />
+            <LabeledInput label="Payment due day" name="paymentDueDay" type="number" min="1" max="31" step="1" compact defaultValue={card.paymentDueDay ?? d?.payoffDueDay ?? ""} placeholder="1–31" />
             <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
             <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
             <div>
@@ -3275,37 +3319,43 @@ function EditCreditCardForm({
             </div>
             <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
             <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
-            <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
+            {/* "Fee waived" sits under the fee it waives. */}
+            <div className="space-y-1.5">
+              <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
+              <label className="flex min-h-8 items-center gap-2 text-xs font-semibold text-foreground">
+                <input type="checkbox" name="feeWaived" defaultChecked={card.feeWaived} className="h-5 w-5 shrink-0 rounded accent-[color:var(--brand)]" />
+                Fee waived (e.g. military)
+              </label>
+            </div>
             <label className="block">
-              <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Rewards category</span>
-              <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500">
+              <span className="mb-0.5 block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">Rewards category</span>
+              <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-surface px-2 py-1.5 max-sm:py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
                 <option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option>
               </select>
             </label>
             <LabeledInput label="Rewards program" name="rewardsProgram" defaultValue={d?.rewardsProgram ?? ""} placeholder="Hilton, Hyatt, Chase UR…" />
-            <LabeledInput label="Value per pt (¢)" name="pointsValueCents" type="number" step="any" min="0" defaultValue={d?.pointsValueMicros ? String(Number((d.pointsValueMicros / 10_000).toFixed(4))) : ""} placeholder="0.75" />
             <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
             <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
             <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
-            <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
-            <div className="col-span-full lg:col-span-1">
-              <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Remarks</label>
-              <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
-            </div>
-            <div className="col-span-full flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
-              <label className="flex items-center gap-1.5 text-xs text-foreground">
-                <input type="checkbox" name="feeWaived" defaultChecked={card.feeWaived} className="h-3.5 w-3.5 rounded accent-sky-700" />
-                Fee waived (e.g. military benefit)
-              </label>
-              <label className="flex items-center gap-1.5 text-xs text-foreground">
-                <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-sky-700" />
+            {/* "Bonus earned" sits under the bonus deadline it closes out. */}
+            <div className="space-y-1.5">
+              <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
+              <label className="flex min-h-8 items-center gap-2 text-xs font-semibold text-foreground">
+                <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-5 w-5 shrink-0 rounded accent-[color:var(--brand)]" />
                 Bonus earned
               </label>
+            </div>
+            {/* Plain notes box with an inline bold label — no tint. */}
+            <label className="col-span-full flex items-start gap-2 rounded-md bg-surface px-2.5 py-2 ring-1 ring-line focus-within:ring-2 focus-within:ring-brand">
+              <span className="shrink-0 pt-0.5 text-xs font-bold uppercase tracking-wide text-foreground">Remarks:</span>
+              <textarea name="remarks" defaultValue={d?.remarks ?? ""} rows={2} className="min-w-0 flex-1 resize-y bg-transparent text-sm text-foreground focus:outline-none" />
+            </label>
+            <div className="col-span-full flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
               <a
                 href="https://thepointsguy.com/loyalty-programs/monthly-valuations/"
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-xs font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-sky-900/50 dark:text-sky-400 dark:hover:bg-sky-900/40"
+                className="inline-flex min-h-9 items-center gap-1 rounded-lg bg-surface px-3 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
               >
                 TPG point values <span aria-hidden>↗</span>
               </a>
@@ -3315,13 +3365,13 @@ function EditCreditCardForm({
 
         {/* Tab 3: Debt tracking */}
         <div className={activeTab === "debt" ? "" : "hidden"}>
-          <div className="space-y-3 rounded-lg border-2 border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
+          <div className="space-y-3 rounded-lg border-2 border-negative/30 bg-negative/5 p-3">
             <label className="flex items-start gap-2 text-sm font-semibold text-foreground">
               <input
                 type="checkbox"
                 name="trackAsPayoffDebt"
                 defaultChecked={d?.isRevolvingDebt ?? false}
-                className="mt-0.5 h-4 w-4 rounded accent-sky-700"
+                className="mt-0.5 h-5 w-5 shrink-0 rounded accent-[color:var(--brand)]"
               />
               <span>
                 Track this card as payoff debt
@@ -3332,9 +3382,9 @@ function EditCreditCardForm({
             </label>
             {/* All five on one line from md up — the date widest, APR narrow;
                 three to a row in between. The due day is Basics' Payment due day. */}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 md:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 md:grid-cols-[minmax(0,1fr)_7rem_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
               <LabeledInput label="Balance owed" name="payoffBalance" type="number" min="0" step="0.01" defaultValue={d?.payoffBalanceCents ? centsToDisplay(d.payoffBalanceCents) : card.owedCents ? centsToDisplay(Math.max(0, card.owedCents)) : ""} />
-              <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" defaultValue={d?.payoffApr ?? ""} />
+              <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" compact defaultValue={d?.payoffApr ?? ""} />
               <LabeledInput label="0% promo ends" name="promoAprEndsOn" type="date" defaultValue={d?.promoAprEndsOn ?? ""} />
               <LabeledInput label="Minimum / mo" name="payoffMinimum" type="number" min="0" step="0.01" defaultValue={d?.payoffMinimumCents ? centsToDisplay(d.payoffMinimumCents) : ""} />
               <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" defaultValue={d?.payoffPlannedCents ? centsToDisplay(d.payoffPlannedCents) : ""} />
@@ -3349,21 +3399,12 @@ function EditCreditCardForm({
           <p className="text-sm font-medium text-negative">{detailsError}</p>
         ) : null}
         {migrationWarning ? (
-          <p className="text-xs text-amber-600 dark:text-amber-400">
+          <p className="text-xs text-negative">
             Saved (most fields). To also save Booked dates and free-night point values, run migration 0026 in Supabase SQL Editor.
           </p>
         ) : null}
 
-        <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
-          <div className="flex items-center gap-2">
-            <button
-              type="submit"
-              disabled={savePending}
-              className="h-8 rounded-md bg-sky-700 px-3 text-xs font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
-            >
-              {savePending ? "Saving…" : "Save"}
-            </button>
-          </div>
+        <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
           {confirmDelete ? (
             <span className="flex items-center gap-2">
               <span className="text-xs text-foreground">Delete &quot;{card.name}&quot;?</span>
@@ -3393,7 +3434,7 @@ function EditCreditCardForm({
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="h-8 rounded-md px-2.5 text-xs font-medium text-negative hover:bg-negative/10"
+              className="min-h-10 rounded-md px-2.5 text-xs font-medium text-negative hover:bg-negative/10 sm:min-h-8"
             >
               Delete card
             </button>

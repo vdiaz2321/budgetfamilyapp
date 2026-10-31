@@ -31,9 +31,14 @@ type Props = {
   rowsOnly?: boolean;
 };
 
+// Phone only: an invisible ~40px tap area around a small button, so the
+// button looks the same but is easy to hit with a thumb.
+const TAP_AREA = "relative before:absolute before:-inset-2.5 before:content-[''] sm:before:hidden";
+
 // Per-kind accent for the "+ Add" pill so users can tell at a glance which
 // group a button belongs to when it's the only thing visible.
 // The "+" add button, tinted with the card's own --acc colour.
+
 const ADD_BTN =
   "bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))] text-[color:var(--acc)] hover:bg-[color-mix(in_srgb,var(--acc)_26%,var(--surface))]";
 
@@ -208,7 +213,7 @@ export function BudgetGroup({
             type="button"
             onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
             aria-label="Add item"
-            className={`flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition ${ADD_BTN}`}
+            className={`flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition ${TAP_AREA} ${ADD_BTN}`}
           >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
@@ -544,7 +549,7 @@ function CategoryGroupMenu({ group, className = "" }: { group: GroupData; classN
         type="button"
         onClick={(event) => { event.stopPropagation(); setOpen(true); }}
         aria-label={`Manage ${group.name}`}
-        className={`rounded-md px-1.5 py-0.5 text-sm font-bold leading-none text-muted hover:bg-surface/70 hover:text-foreground ${className}`}
+        className={`rounded-md px-1.5 py-0.5 text-sm font-bold leading-none text-foreground hover:bg-surface/70 ${TAP_AREA} ${className}`}
       >
         ···
       </button>

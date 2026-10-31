@@ -64,7 +64,6 @@ const MORE_LINKS: { href: string; label: string; icon: React.ReactNode; phoneHid
   {
     href: "/annual",
     label: "Annual Overview",
-    phoneHidden: true,
     icon: (
       <>
         <rect x="3" y="5" width="18" height="16" rx="2" />

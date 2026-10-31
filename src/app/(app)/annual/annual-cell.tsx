@@ -4,7 +4,7 @@
  *  so "now" is easy to find across every table on the page. */
 export function periodHeaderClass(current: boolean) {
   return `text-center text-[15px] uppercase tracking-wide ${
-    current ? "font-bold text-foreground" : "font-semibold text-muted"
+    current ? "font-bold text-foreground" : "font-semibold text-foreground"
   }`;
 }
 
@@ -17,7 +17,7 @@ export function PeriodHeader({ label, current }: { label: string; current: boole
     <span className={`flex flex-col items-center ${periodHeaderClass(current)}`}>
       {label}
       {current ? (
-        <span className="text-[11px] font-medium normal-case tracking-normal text-muted">(so far)</span>
+        <span className="text-[11px] font-medium normal-case tracking-normal text-foreground">(so far)</span>
       ) : null}
     </span>
   );
@@ -50,7 +50,7 @@ export function MoneyCell({
   stopPropagation?: boolean;
 }) {
   if (empty) {
-    return <span className="text-center text-[18px] tabular-nums text-muted">—</span>;
+    return <span className="text-center text-[18px] tabular-nums text-foreground">—</span>;
   }
   return (
     <button

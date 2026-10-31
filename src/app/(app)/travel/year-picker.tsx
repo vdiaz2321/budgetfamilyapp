@@ -164,7 +164,7 @@ export function CheckPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className={`flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 ${className}`}
+        className={`flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg bg-surface px-2.5 py-1 text-xs font-semibold ring-1 ring-line max-sm:min-h-10 focus:outline-none focus:ring-2 focus:ring-sky-500 ${className}`}
       >
         {buttonText}
         <svg aria-hidden viewBox="0 0 20 20" className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

@@ -69,7 +69,7 @@ export function EditTripPicker({ trips, onPick }: { trips: TravelTrip[]; onPick:
         onClick={() => (open ? close() : setOpen(true))}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex items-center gap-1.5 rounded-lg border border-black/25 bg-background px-4 py-2 text-base font-bold transition hover:border-sky-400 hover:bg-sky-100 sm:text-lg dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
+        className="flex items-center gap-1.5 rounded-lg bg-surface px-4 py-2 text-base font-bold text-foreground ring-1 ring-line transition hover:bg-sky-50 sm:text-lg dark:hover:bg-sky-950/40"
       >
         Edit trip
         <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

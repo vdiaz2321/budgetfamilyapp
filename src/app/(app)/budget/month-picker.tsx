@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 const MONTHS_SHORT = [
@@ -61,6 +61,18 @@ export function MonthPicker({
     }
   }
 
+  // One step back or forward without opening the panel. Both neighbours are
+  // prefetched on load so an arrow tap opens almost at once.
+  const shiftKey = (offset: number) => {
+    const d = new Date(year, month1 - 1 + offset, 1);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  };
+  useEffect(() => {
+    for (const offset of [-1, 1]) router.prefetch(`${basePath}?month=${shiftKey(offset)}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthKey, basePath]);
+  const arrow = "flex h-9 w-8 shrink-0 touch-manipulation select-none items-center justify-center rounded-lg text-brand ring-1 ring-line transition hover:bg-brand-soft disabled:opacity-50 sm:h-8 sm:w-8";
+
   // While a month is loading the trigger shows where you're going, not where
   // you were.
   const [shownYear, shownMonth1] = (pending && target ? target : monthKey).split("-").map(Number);
@@ -71,14 +83,23 @@ export function MonthPicker({
   // a phone until the page was reloaded. `touch-manipulation` drops the
   // double-tap-zoom delay on the same taps.
   return (
-    <div className="relative">
+    <div className="relative flex items-center gap-1 sm:gap-1.5">
+      <button type="button" onClick={() => goTo(shiftKey(-1))} disabled={pending} aria-label="Previous month" className={arrow}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M15 18l-6-6 6-6" />
+        </svg>
+      </button>
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
         className={`flex touch-manipulation select-none items-center gap-1.5 text-2xl tracking-tight transition-opacity ${pending ? "opacity-50" : ""}`}
       >
-        <span className="font-bold text-foreground">{MONTHS_FULL[shownMonth1 - 1]}</span>
+        {/* Short name on a phone so the ‹ › arrows and Summary fit beside it. */}
+        <span className="font-bold text-foreground">
+          <span className="sm:hidden">{MONTHS_SHORT[shownMonth1 - 1]}</span>
+          <span className="max-sm:hidden">{MONTHS_FULL[shownMonth1 - 1]}</span>
+        </span>
         <span className="font-normal text-muted">{shownYear}</span>
         <svg
           width="18"
@@ -93,6 +114,11 @@ export function MonthPicker({
           aria-hidden
         >
           <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      <button type="button" onClick={() => goTo(shiftKey(1))} disabled={pending} aria-label="Next month" className={arrow}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M9 18l6-6-6-6" />
         </svg>
       </button>
 

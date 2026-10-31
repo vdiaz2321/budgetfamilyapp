@@ -128,9 +128,17 @@ type Props = {
 function DueAccountIndicator({ dueDay, accountName, compact = false }: { dueDay: number; accountName: string | null; compact?: boolean }) {
   const due = compact ? `D${dueDay}` : `Due ${dueDay}`;
   return (
-    <span className="flex min-w-0 max-w-full items-baseline gap-1 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-foreground ring-1 ring-sky-200 dark:bg-sky-900/50 dark:ring-sky-800">
+    // Teal (the bills colour), not sky: a label that should stand out gets a
+    // colour tied to its meaning, never another blue element.
+    <span
+      className="flex min-w-0 max-w-full items-baseline gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none text-foreground ring-1"
+      style={{
+        background: "color-mix(in srgb, var(--viz-bills) 14%, var(--surface))",
+        ["--tw-ring-color" as string]: "color-mix(in srgb, var(--viz-bills) 35%, var(--surface))",
+      }}
+    >
       <span className="shrink-0 whitespace-nowrap">
-        {accountName ? (compact ? `${due} ·` : `${due} · Linked:`) : `${due} · linked`}
+        {accountName ? `${due} ·` : `${due} · linked`}
       </span>
       {accountName ? <span className="min-w-0 truncate">{accountName}</span> : null}
     </span>

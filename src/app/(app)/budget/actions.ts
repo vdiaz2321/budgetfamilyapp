@@ -2073,6 +2073,150 @@ export async function addTransaction(formData: FormData) {
   return finishTransactionSave(supabase, householdId, [outcome]);
 }
 
+// "Log due bills": several due items posted in one call — one sign-in check,
+// one snapshot, one refresh — each through the same insert the modal uses, so
+// balances, debts and buckets move exactly as a one-by-one Pay would. Parts go
+// one after another (they usually share an account). A subscription's payee is
+// its own name — every subscription shares one "Subscriptions" item, so that
+// item's last payee is just whichever subscription was logged last. A budget
+// item uses the payee it was last paid to, falling back to its own name — the
+// same name the Pay button prefills.
+export type DueBillInput = { subcategoryId: string; date: string; amountCents: number; accountId: string | null; name: string; isSubscription: boolean };
+export async function logDueBills(items: DueBillInput[]): Promise<{ error?: string; saved: number }> {
+  const { supabase, householdId } = await requireHousehold();
+  const valid = items.filter((i) => i.subcategoryId && /^\d{4}-\d{2}-\d{2}$/.test(i.date) && i.amountCents > 0);
+  if (valid.length === 0) return { saved: 0 };
+  const lastPayees = unwrap(
+    await supabase
+      .from("transactions")
+      .select("subcategory_id, occurred_on, payees(name)")
+      .eq("household_id", householdId)
+      .in("subcategory_id", valid.map((i) => i.subcategoryId))
+      .not("payee_id", "is", null)
+      .order("occurred_on", { ascending: false })
+      .limit(500),
+    "reading past payees",
+  ) as unknown as { subcategory_id: string; payees: { name: string } | null }[];
+  const payeeBySub = new Map<string, string>();
+  for (const row of lastPayees) {
+    if (row.payees?.name && !payeeBySub.has(row.subcategory_id)) payeeBySub.set(row.subcategory_id, row.payees.name);
+  }
+  const outcomes: SaveOutcome[] = [];
+  for (const [i, item] of valid.entries()) {
+    const fd = new FormData();
+    fd.set("subcategoryId", item.subcategoryId);
+    fd.set("date", item.date);
+    fd.set("amount", (item.amountCents / 100).toFixed(2));
+    fd.set("payee", item.isSubscription ? item.name : payeeBySub.get(item.subcategoryId) ?? item.name);
+    if (item.accountId) fd.set("accountId", item.accountId);
+    try {
+      const outcome = await insertTransactionCore(supabase, householdId, fd, null);
+      if (outcome) outcomes.push(outcome);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      await finishTransactionSave(supabase, householdId, outcomes);
+      return { error: i > 0 ? `Logged ${i} of ${valid.length}, then failed — ${detail}` : detail, saved: i };
+    }
+  }
+  await finishTransactionSave(supabase, householdId, outcomes);
+  return { saved: outcomes.length };
+}
+
+// Bills/debt items that already behave like fixed bills — a charge in at
+// least 3 of the last 4 months, every month's total within 5% of the others —
+// but aren't marked Recurring yet. Split parts are left out (a receipt split
+// isn't a fixed bill). Expenses can't be recurring (moving an item there
+// clears the flag), so only bills and debt are offered.
+export type RecurringCandidate = { subcategoryId: string; name: string; months: number; typicalCents: number };
+export async function listRecurringCandidates(): Promise<RecurringCandidate[]> {
+  const { supabase, householdId } = await requireHousehold();
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+  const fromIso = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-01`;
+  const [subs, txs] = await Promise.all([
+    supabase
+      .from("subcategories")
+      .select("id, name, is_recurring, categories!inner(kind)")
+      .eq("household_id", householdId)
+      .eq("active", true)
+      .eq("is_recurring", false)
+      .in("categories.kind", ["bills", "debt"]),
+    supabase
+      .from("transactions")
+      .select("subcategory_id, occurred_on, amount_cents")
+      .eq("household_id", householdId)
+      .gte("occurred_on", fromIso)
+      .is("split_group_id", null),
+  ]);
+  const subRows = unwrap(subs, "reading budget items") as { id: string; name: string }[];
+  const txRows = unwrap(txs, "reading transactions") as { subcategory_id: string | null; occurred_on: string; amount_cents: number }[];
+  const byMonth = new Map<string, Map<string, number>>();
+  for (const t of txRows) {
+    if (!t.subcategory_id) continue;
+    const months = byMonth.get(t.subcategory_id) ?? new Map<string, number>();
+    const key = t.occurred_on.slice(0, 7);
+    months.set(key, (months.get(key) ?? 0) + t.amount_cents);
+    byMonth.set(t.subcategory_id, months);
+  }
+  return subRows.flatMap((sub) => {
+    const totals = [...(byMonth.get(sub.id)?.values() ?? [])].filter((c) => c > 0);
+    if (totals.length < 3) return [];
+    const min = Math.min(...totals);
+    const max = Math.max(...totals);
+    if (max > min * 1.05) return [];
+    return [{ subcategoryId: sub.id, name: sub.name, months: totals.length, typicalCents: max }];
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function markSubcategoriesRecurring(ids: string[]) {
+  const { supabase, householdId } = await requireHousehold();
+  if (ids.length === 0) return;
+  unwrap(
+    await supabase.from("subcategories").update({ is_recurring: true }).in("id", ids).eq("household_id", householdId),
+    "marking items recurring",
+  );
+  revalidatePath("/budget");
+}
+
+// The rate this payee's receipts usually carry on their "Sales Tax" line —
+// the median of tax ÷ the rest of the receipt over its past splits. Per payee,
+// not one household %: the Commissary's 5% and German stores' 7–19% VAT are
+// all on the same household's receipts. null when the payee has no history.
+export async function typicalSalesTaxRate(payeeName: string): Promise<number | null> {
+  const { supabase, householdId } = await requireHousehold();
+  const name = payeeName.trim();
+  if (!name) return null;
+  const [taxSubs, payees] = await Promise.all([
+    supabase.from("subcategories").select("id").eq("household_id", householdId).ilike("name", "sales tax"),
+    supabase.from("payees").select("id").eq("household_id", householdId).ilike("name", name),
+  ]);
+  const taxIds = new Set((unwrap(taxSubs, "the Sales Tax item") as { id: string }[]).map((r) => r.id));
+  const payeeIds = (unwrap(payees, "payees") as { id: string }[]).map((r) => r.id);
+  if (taxIds.size === 0 || payeeIds.length === 0) return null;
+  const rows = unwrap(
+    await supabase
+      .from("transactions")
+      .select("split_group_id, subcategory_id, amount_cents")
+      .eq("household_id", householdId)
+      .in("payee_id", payeeIds)
+      .not("split_group_id", "is", null)
+      .order("occurred_on", { ascending: false })
+      .limit(400),
+    "past receipts",
+  ) as { split_group_id: string; subcategory_id: string | null; amount_cents: number }[];
+  const groups = new Map<string, { tax: number; rest: number }>();
+  for (const r of rows) {
+    const g = groups.get(r.split_group_id) ?? { tax: 0, rest: 0 };
+    if (r.subcategory_id && taxIds.has(r.subcategory_id)) g.tax += r.amount_cents;
+    else g.rest += r.amount_cents;
+    groups.set(r.split_group_id, g);
+  }
+  const rates = [...groups.values()].filter((g) => g.tax > 0 && g.rest > 0).map((g) => g.tax / g.rest).sort((a, b) => a - b);
+  if (rates.length === 0) return null;
+  const mid = Math.floor(rates.length / 2);
+  return rates.length % 2 ? rates[mid] : (rates[mid - 1] + rates[mid]) / 2;
+}
+
 // The parts of a split, as the modal sends them: JSON in "splits",
 // [{ subcategoryId, amountCents, bookingRef? }]. Everything else on the form
 // is shared. A part with its own bookingRef pays for that booking — one card
@@ -2883,6 +3027,27 @@ export async function updateGlobals(formData: FormData) {
 }
 
 // ---------- Rollover (carry a month's leftover cash into the next) ----------
+
+// Two saved names for one payee ("Nesspresso" / "Nespresso"): every
+// transaction on the duplicate moves to the kept name, then the duplicate is
+// removed — so autofill and subscription matching see one history.
+export async function mergePayees(fromId: string, intoId: string): Promise<{ error?: string; moved?: number }> {
+  const { supabase, householdId } = await requireHousehold();
+  if (!fromId || !intoId || fromId === intoId) return { error: "Pick two different payees." };
+  const both = unwrap(
+    await supabase.from("payees").select("id").eq("household_id", householdId).in("id", [fromId, intoId]),
+    "payees",
+  ) as { id: string }[];
+  if (both.length !== 2) return { error: "One of those payees no longer exists." };
+  const moved = unwrap(
+    await supabase.from("transactions").update({ payee_id: intoId }).eq("household_id", householdId).eq("payee_id", fromId).select("id"),
+    "moving transactions",
+  ) as { id: string }[];
+  unwrap(await supabase.from("payees").delete().eq("id", fromId).eq("household_id", householdId), "removing the duplicate payee");
+  revalidatePath("/budget");
+  revalidatePath("/transactions");
+  return { moved: moved.length };
+}
 
 export async function deletePayee(id: string) {
   const { supabase, householdId } = await requireHousehold();

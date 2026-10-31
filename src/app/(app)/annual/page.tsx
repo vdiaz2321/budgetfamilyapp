@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AnnualPhone } from "./annual-phone";
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { getSessionContext } from "@/lib/auth-context";
 import { PROPERTY_KIND } from "@/lib/net-worth";
@@ -573,18 +574,11 @@ export default async function AnnualOverviewPage({
 
   return (
     <div className="mx-auto w-full space-y-4 max-w-[1800px]">
-      {/* Phones get a note instead of the page: twelve months across five
-          kinds is too much table for a 375px screen, and /annual is left out
-          of the mobile tab bar for the same reason. From sm (tablets, small
-          laptops) up the page renders and its wide tables scroll sideways in
-          their own boxes, so it never reads as empty there. */}
-      <div className="rounded-xl bg-surface p-5 shadow-sm ring-1 ring-black/5 sm:hidden dark:ring-white/10">
-        <h1 className="text-lg font-bold">Annual Overview</h1>
-        <p className="mt-1 text-sm text-muted">Open this page on a tablet or computer.</p>
-      </div>
-
-      <div className="hidden space-y-4 sm:block">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      {/* Title and year picker on every screen. Below sm the year reads as a
+          list (AnnualPhone) — twelve months across every group is too wide a
+          table for a 375px screen; from sm up the full tables render.
+          pr-8 on a phone keeps the year picker clear of the ··· menu. */}
+      <div className="flex flex-wrap items-end justify-between gap-3 max-sm:pr-8">
         <div className="flex flex-wrap items-baseline gap-x-3">
           <h1 className="text-xl font-bold">Annual Overview</h1>
         </div>
@@ -592,12 +586,30 @@ export default async function AnnualOverviewPage({
         {/* Year navigator */}
         <div className="flex items-center gap-1 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
           {/* Nothing before the first spreadsheet year. */}
-          {year > firstYear ? <YearArrow year={year - 1} dir="prev" /> : <span className="h-7 w-7" aria-hidden />}
+          {year > firstYear ? <YearArrow year={year - 1} dir="prev" /> : <span className="h-7 w-7 max-sm:h-10 max-sm:w-10" aria-hidden />}
           <YearPicker year={year} currentYear={currentYear} firstYear={firstYear} />
           {/* No later years: nothing has happened in them yet. */}
-          {year < currentYear ? <YearArrow year={year + 1} dir="next" /> : <span className="h-7 w-7" aria-hidden />}
+          {year < currentYear ? <YearArrow year={year + 1} dir="next" /> : <span className="h-7 w-7 max-sm:h-10 max-sm:w-10" aria-hidden />}
         </div>
       </div>
+
+      <div className="sm:hidden">
+        <AnnualPhone
+          year={year}
+          outflowKinds={OUTFLOW_KINDS}
+          totals={heroTotals}
+          kidsTotal={heroKids}
+          totalNet={totalNet}
+          remainingMonths={historyYear ? remainingMonths.map(() => null) : remainingMonths}
+          currentMonthIdx={year === currentYear ? currentMonthIdx : null}
+          groups={historyYear ? [] : categoryGroups}
+          emptyNote={historyYear ? `Months start in 2026. See ${year} on a tablet or computer for its Annual Breakdown.` : undefined}
+          monthLabels={monthLabels}
+          currency={currency}
+        />
+      </div>
+
+      <div className="hidden space-y-4 sm:block">
 
       {/* The hero cards ride along inside AnnualPanels: they stay pinned over
           Months / Category by Months / Properties and release at Annual
@@ -987,7 +999,7 @@ function YearArrow({ year, dir }: { year: number; dir: "prev" | "next" }) {
     <Link
       href={`/annual?year=${year}`}
       aria-label={dir === "prev" ? "Previous year" : "Next year"}
-      className="flex h-7 w-7 items-center justify-center rounded-lg text-foreground hover:bg-sky-100 dark:hover:bg-sky-900/50"
+      className="flex h-7 w-7 items-center justify-center rounded-lg text-foreground hover:bg-sky-100 max-sm:h-10 max-sm:w-10 dark:hover:bg-sky-900/50"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d={dir === "prev" ? "M15 18l-6-6 6-6" : "M9 6l6 6-6 6"} />

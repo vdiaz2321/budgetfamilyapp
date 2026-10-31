@@ -30,7 +30,7 @@ const CHIP_ICONS: Record<"flight" | "hotel" | "car" | "spend", React.ReactNode> 
 };
 
 /** "in 4 days" — aqua once the trip is a week or less away. */
-function DaysPill({ days, className }: { days: number; className: string }) {
+function DaysPill({ days, className = "" }: { days: number; className?: string }) {
   const soon = days <= 7;
   return (
     <span
@@ -92,7 +92,7 @@ export function TripCards({
   const upcomingFigures = [
     { label: "Total trips", value: String(ahead.length), tone: "" },
     { label: "Total spent", value: formatMoneyWhole(sumOf((t) => t.spent), currency), tone: "text-negative" },
-    { label: "Total planned", value: formatMoneyWhole(sumOf((t) => t.plannedTotal), currency), tone: "text-sky-700 dark:text-sky-300" },
+    { label: "Total planned", value: formatMoneyWhole(sumOf((t) => t.plannedTotal), currency), tone: TEAL_TEXT },
     // Points actually redeemed and the cash they replaced — shown even at 0.
     { label: "Total pts used", value: upcomingPts.toLocaleString(), tone: "" },
     { label: "Total cash saved", value: formatMoneyWhole(upcomingSaved, currency), tone: upcomingSaved > 0 ? "text-positive" : "" },
@@ -126,17 +126,22 @@ export function TripCards({
             same label + figure style as the other section headers. */}
         {ahead.length > 0 ? (
           <>
+            {/* Phone: the five figures in a tidy 2-column grid under the title
+                instead of wrapping into uneven lines. From sm up the wrapper
+                dissolves and they sit in the header's own columns. */}
+            <span className="grid basis-full grid-cols-2 gap-x-4 gap-y-1 sm:contents">
             {upcomingFigures.map((f, i) => (
               <span key={f.label} className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[i] ?? ""}`}>
-                <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">{f.label}:</span>
-                <span className={`text-sm font-bold tabular-nums ${f.tone}`}>{f.value}</span>
+                <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-xs">{f.label}:</span>
+                <span className={`text-sm font-bold tabular-nums sm:text-base ${f.tone}`}>{f.value}</span>
               </span>
             ))}
+            </span>
             {/* Folded, the header still says what's next — on wide screens
                 only, where it fits on the same line as the totals. */}
             {!open && next ? (
               <span className="hidden min-w-0 items-baseline gap-1.5 2xl:flex">
-                <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">Next:</span>
+                <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-xs">Next:</span>
                 <span className="text-sm font-semibold">
                   {next.trip.name.split(" · ")[0]}{" "}
                   <span className="font-medium text-muted">{nextDays > 0 ? `in ${plural(nextDays, "day")}` : "now"}</span>
@@ -208,17 +213,16 @@ export function TripCards({
                         <span className="truncate text-base font-semibold">{name}</span>
                         {sub ? <span className={`shrink-0 text-[11px] font-semibold uppercase tracking-wide ${TEAL_TEXT}`}>· {sub}</span> : null}
                       </span>
-                      {/* One line from sm up; under the dates on a phone. */}
-                      <span className="block text-xs tabular-nums text-muted">
-                        <span className="block sm:inline">{sheetDateRange(start, t.end)}</span>
-                        {t.nights ? <span className="block sm:inline"><span className="hidden sm:inline"> · </span>{plural(t.nights, "night")}</span> : null}
+                      {/* Dates and nights each stay whole; on a narrow phone card
+                          the nights drop under the dates as one piece. */}
+                      <span className="block text-xs tabular-nums text-foreground">
+                        <span className="whitespace-nowrap">{sheetDateRange(start, t.end)}</span>
+                        {t.nights ? <>{" "}<span className="whitespace-nowrap">· {plural(t.nights, "night")}</span></> : null}
                       </span>
                     </span>
-                    <DaysPill days={days} className="hidden sm:inline-block" />
+                    <DaysPill days={days} />
                   </span>
 
-                  {/* On a phone the days pill moves down here, so the dates
-                      get the full width. */}
                   {booked || hasSpending ? (
                     <span className="flex flex-wrap items-center gap-1.5">
                       {!booked ? (
@@ -234,14 +238,12 @@ export function TripCards({
                           {spendingPlanned > 0 ? <span className="font-bold"> · {formatMoneyWhole(spendingPlanned, currency)} planned</span> : null}
                         </Chip>
                       ) : null}
-                      <DaysPill days={days} className="ml-auto sm:hidden" />
                     </span>
                   ) : (
                     <span className="flex items-center gap-1.5">
                       <span className="flex-1 rounded-lg border border-dashed border-line py-1.5 text-center text-xs font-medium text-muted">
                         Nothing booked yet
                       </span>
-                      <DaysPill days={days} className="sm:hidden" />
                     </span>
                   )}
 
