@@ -566,6 +566,7 @@ export default async function AccountsPage() {
       cardId: t.paid_to_account_id as string,
       reimbursedCents: t.reimbursed_cents ?? 0,
       editedAt: editedAtOf(t),
+      createdAt: t.created_at,
       fromAccountId: t.account_id ?? null,
       // A statement credit from cashed-out points (Travel rewards log).
       fromPoints: Boolean(t.reward_activity_id),
@@ -599,6 +600,7 @@ export default async function AccountsPage() {
     cardId: t.subcategory_id,
     reimbursedCents: t.reimbursed_cents ?? 0,
     editedAt: editedAtOf(t),
+    createdAt: t.created_at,
     fromAccountId: t.account_id ?? null,
     memo: t.memo ?? null,
     // A Pay Card row on a debt card refunds like a card payment. Its debt is

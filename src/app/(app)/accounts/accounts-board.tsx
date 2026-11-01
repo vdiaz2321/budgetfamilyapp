@@ -484,6 +484,13 @@ export function AccountsBoard({
   const [transferOpen, setTransferOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
+  // Each card's latest payment, for the tile's "Paid Oct 31" strip.
+  const lastPaidByCard = new Map<string, string>();
+  for (const p of cardPayments) {
+    if (p.amountCents <= 0) continue;
+    const prev = lastPaidByCard.get(p.cardId);
+    if (!prev || p.date > prev) lastPaidByCard.set(p.cardId, p.date);
+  }
   // Period picker on the Accounts header — same control as Insights. Local
   // state (no URL sync) since the state is UI-only here. The picker's
   // filtering DOES NOT extend to the Credit Card Rewards section below —
@@ -786,27 +793,40 @@ export function AccountsBoard({
       }}
     >
     <div className="mx-auto w-full max-w-[110rem] space-y-4">
-      {/* Title, actions and period picker in one row, left-aligned so the
-          controls sit beside the title. Subtitle removed at Victor's request. */}
-      <div className="flex flex-wrap items-center gap-3">
+      {/* Header: title, then three kinds of control that must read apart
+          (Victor, 2026-11-01: "all the buttons look the same"):
+          1. Tools — popups you open to check or fill in — one joined,
+             quiet strip with small icons.
+          2. Actions — Move Money (outlined) and Add account (filled) —
+             the only brand-coloured controls.
+          3. The period filter — a round pill group pushed to the right,
+             so it never reads as more buttons.
+          Below md the tools and actions move into the ⋯ menu (registered
+          above) and only the filter stays in the header. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 className="text-xl font-bold">Accounts</h1>
-        {/* Actions sit immediately left of the period picker so the header
-            carries every page-level control in one row. Below md they move
-            into the ⋯ menu instead (registered above), so on a phone the
-            header doesn't spend a whole row on two buttons. */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="hidden items-center gap-1 rounded-lg bg-surface p-0.5 shadow-sm ring-1 ring-inset ring-line md:inline-flex">
           <button
             type="button"
             onClick={() => setMonthEndOpen(true)}
-            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="3" y="4" width="18" height="17" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18M9 15.5l2 2 4-4" />
+            </svg>
             Month-end update
           </button>
+          <span className="h-4 w-px bg-line" aria-hidden />
           <button
             type="button"
             onClick={() => setEstateOpen(true)}
-            className="hidden shrink-0 items-center gap-1.5 md:inline-flex whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 19.5V5a2 2 0 0 1 2-2h14v16H6.5a2.5 2.5 0 0 0 0 5H20" />
+              <path d="M9 8h7M9 12h5" />
+            </svg>
             Estate guide
             {/* Accounts still to fill in — a new account shows up here, so
                 it can't be forgotten. */}
@@ -814,15 +834,28 @@ export function AccountsBoard({
               <span className="rounded-full bg-negative/15 px-1.5 text-[10px] font-bold text-foreground ring-1 ring-negative/15">{estateToFill}</span>
             ) : null}
           </button>
+          <span className="h-4 w-px bg-line" aria-hidden />
+          <button
+            type="button"
+            onClick={() => setActivityOpen(true)}
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
+            </svg>
+            Transfer Activity
+          </button>
+        </div>
+        <div className="hidden items-center gap-2 md:flex">
           {/* Every move between your own accounts — bank transfer, invest,
               withdraw — in one popup that works out which from From / To.
-              Three buttons read as the same thing (Victor, 2026-10-27). */}
+              Three buttons read as the same thing (Victor, 2026-10-27).
+              Outlined in the brand color; Add account is the one filled
+              button. */}
           <button
             type="button"
             onClick={() => setTransferOpen(true)}
-            // Outlined in the brand color: stands apart from the plain
-            // buttons, while Add account stays the one filled button.
-            className="hidden shrink-0 items-center gap-1.5 md:inline-flex whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-surface px-3 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
@@ -831,18 +864,16 @@ export function AccountsBoard({
           </button>
           <button
             type="button"
-            onClick={() => setActivityOpen(true)}
-            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-          >
-            Transfer Activity
-          </button>
-          <button
-            type="button"
             onClick={() => setAddOpen(true)}
-            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-brand px-3 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
           >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
             Add account
           </button>
+        </div>
+        <div className="md:ml-auto">
           <PeriodPicker
             granularity={periodGranularity}
             periodKey={periodKey}
@@ -1030,6 +1061,7 @@ export function AccountsBoard({
               allBuckets={accounts.flatMap((a) => a.buckets)}
               allCards={creditCards}
               freeNightStays={freeNightStays}
+              lastPaidByCard={lastPaidByCard}
               open={!collapsed[section.key]}
               onToggle={() => toggleSection(section.key)}
             />
@@ -1179,10 +1211,23 @@ function BankBadge({ bank }: { bank: string }) {
 // a strip saying when the payment is due. The top opens Pay, as the phone row
 // does; the strip's Edit opens the card's own form (due day included) — the
 // same one the Travel Log uses, so cards are editable without leaving here.
+/** The same day a month before `iso` (clamped to that month's last day). */
+function monthEarlier(iso: string, day: number): string {
+  let [y, m] = iso.split("-").map(Number);
+  m -= 1;
+  if (m < 1) {
+    m = 12;
+    y -= 1;
+  }
+  const d = Math.min(day, new Date(Date.UTC(y, m, 0)).getUTCDate());
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 function CardTile({
   card,
   currency,
   due,
+  lastPaid,
   ready,
   grip,
   onPay,
@@ -1191,6 +1236,8 @@ function CardTile({
   card: AccountData;
   currency: string;
   due: { iso: string; daysLeft: number } | null;
+  /** The card's latest payment date, YYYY-MM-DD. */
+  lastPaid: string | null;
   /** False until the browser's date is known — the strip waits for it. */
   ready: boolean;
   grip: React.ReactNode;
@@ -1200,12 +1247,28 @@ function CardTile({
   const owed = card.owedCents ?? 0;
   const closed = !!card.dateClosed;
   const bank = card.cardDetails?.bank ?? card.institution;
-  // The strip under the card: when the payment is due, red within a week.
-  let strip: { text: string; className: string } | null = null;
+  const todayIso = useLocalToday();
+  // The strip under the card: when the payment is due, red within
+  // DUE_SOON_DAYS.
+  let strip: { text: React.ReactNode; className: string } | null = null;
   if (closed) {
     strip = { text: "Closed", className: "bg-sky-50 text-foreground dark:bg-sky-950/40" };
   } else if (owed <= 0 && (card.transferCents ?? 0) <= 0) {
-    strip = { text: "Nothing owed", className: "bg-emerald-50 text-positive dark:bg-emerald-950/30" };
+    // The due day still shows when nothing is owed, so every card's day is
+    // visible at a glance (Victor, 2026-11-01).
+    // Never red: nothing is owed, so a close due date needs no action
+    // (Victor, 2026-11-01). Red is only for cards that owe.
+    // "Paid Oct 31" when the balance was paid off this cycle — a payment
+    // on or after the previous due date (or in the last month with no due day);
+    // "Nothing owed" when the card simply wasn't used.
+    const nextDue = todayIso && card.paymentDueDay ? nextDueDate(card.paymentDueDay, todayIso) : null;
+    const cycleStart = nextDue ? monthEarlier(nextDue.iso, card.paymentDueDay!) : todayIso ? monthEarlier(todayIso, Number(todayIso.slice(8))) : null;
+    const paidThisCycle = lastPaid != null && cycleStart != null && lastPaid >= cycleStart;
+    const head = paidThisCycle ? `Paid ${formatDueDate(lastPaid)}` : "Nothing owed";
+    strip = {
+      text: nextDue ? `${head} · Due ${formatDueDate(nextDue.iso)}` : head,
+      className: "bg-emerald-50 text-positive dark:bg-emerald-950/30",
+    };
   } else if (!card.paymentDueDay) {
     strip = { text: "No due day set", className: "bg-sky-50 text-foreground dark:bg-sky-950/40" };
   } else if (due) {
@@ -1214,7 +1277,7 @@ function CardTile({
     strip = {
       text: soon ? `Payment due ${formatDueDate(due.iso)} · ${when}` : `Payment due ${formatDueDate(due.iso)}`,
       className: soon
-        ? "bg-rose-50 text-negative dark:bg-rose-950/40"
+        ? "bg-negative/10 text-negative"
         : "bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200",
     };
   }
@@ -1288,6 +1351,7 @@ function CreditCardListSection({
   allBuckets,
   allCards,
   freeNightStays,
+  lastPaidByCard,
   open,
   onToggle,
 }: {
@@ -1299,6 +1363,8 @@ function CreditCardListSection({
   /** Every credit card, closed ones too — the Edit form's Bank list. */
   allCards: AccountData[];
   freeNightStays: FreeNightStayLite[];
+  /** card id -> date of its latest payment (YYYY-MM-DD). */
+  lastPaidByCard: Map<string, string>;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -1315,10 +1381,16 @@ function CreditCardListSection({
   const todayIso = useLocalToday();
   const dueOf = (a: AccountData) =>
     todayIso && a.paymentDueDay && !a.dateClosed && ((a.owedCents ?? 0) > 0 || (a.transferCents ?? 0) > 0) ? nextDueDate(a.paymentDueDay, todayIso) : null;
-  const dueSoon = accounts.filter((a) => {
-    const due = dueOf(a);
-    return due != null && due.daysLeft <= DUE_SOON_DAYS;
-  }).length;
+  // Named, soonest first, so the header says WHICH card (Victor,
+  // 2026-11-01: "which card is due?").
+  const dueSoonCards = accounts
+    .map((a) => ({ a, due: dueOf(a) }))
+    .filter((x): x is { a: AccountData; due: { iso: string; daysLeft: number } } => x.due != null && x.due.daysLeft <= DUE_SOON_DAYS)
+    .sort((x, y) => x.due.daysLeft - y.due.daysLeft);
+  // Clicking the due pill shows only those cards; clicking again shows all.
+  const [dueOnly, setDueOnly] = useState(false);
+  const dueIds = new Set(dueSoonCards.map((x) => x.a.id));
+  const showDueOnly = dueOnly && dueIds.size > 0;
 
   // Drag a tile by its grip onto another to SWAP the two. Inserting (as the
   // account lists do) shifted every later tile one slot and reflowed the
@@ -1427,12 +1499,30 @@ function CreditCardListSection({
           </span>
           <span className="whitespace-nowrap border-teal-300 text-xs font-semibold uppercase tracking-wide text-teal-800 sm:border-l sm:pl-2 dark:border-teal-700 dark:text-teal-300">Not in net worth</span>
         </span>
-        {/* Cards owing money whose due date is a week away or less — said
-            once here so it isn't missed among the tiles. Desktop only. */}
-        {dueSoon > 0 ? (
-          <span className="hidden whitespace-nowrap rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-negative ring-1 ring-rose-200 sm:inline-block dark:bg-rose-950/40 dark:ring-rose-900">
-            {dueSoon} card{dueSoon === 1 ? "" : "s"} due this week
-          </span>
+        {/* Cards owing money whose due date is DUE_SOON_DAYS away or less —
+            said once here so it isn't missed among the tiles. Clicking it
+            shows just those cards (opening the section if it's closed);
+            the ✕ shows it's on. Desktop only. */}
+        {dueSoonCards.length > 0 ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!showDueOnly && !open) onToggle();
+              setDueOnly(!showDueOnly);
+            }}
+            aria-pressed={showDueOnly}
+            className={`hidden cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-bold ring-1 transition sm:inline-flex ${
+              showDueOnly
+                ? "bg-negative text-white ring-negative"
+                : "bg-negative/10 text-negative ring-negative/25 hover:bg-negative/20"
+            }`}
+          >
+            {dueSoonCards
+              .map(({ a, due }) => `${cardShortName(a.name)} due ${formatDueDate(due.iso)}`)
+              .join(" · ")}
+            {showDueOnly ? <span aria-hidden>✕</span> : null}
+          </button>
         ) : null}
         </div>
         <button
@@ -1468,7 +1558,7 @@ function CreditCardListSection({
           // (27"/34" screens). No fifth: at the page's 110rem cap five-wide
           // tiles (333px) ran the amount into the grip.
           <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 @[40rem]:grid-cols-2 sm:gap-3 sm:px-6 @[70rem]:grid-cols-3 @[92rem]:grid-cols-4">
-            {localCards.map((a) => (
+            {(showDueOnly ? localCards.filter((a) => dueIds.has(a.id)) : localCards).map((a) => (
               <li key={a.id} data-drop-key={`card:${a.id}`} className={`rounded-lg ${dragOverId === a.id ? "ring-2 ring-sky-400" : ""}`}>
                 {/* Desktop: a tile like the Amex dashboard — the card drawn
                     in its brand's look, what it owes, its name, and when the
@@ -1477,6 +1567,7 @@ function CreditCardListSection({
                   card={a}
                   currency={currency}
                   due={dueOf(a)}
+                  lastPaid={lastPaidByCard.get(a.id) ?? null}
                   ready={todayIso != null}
                   grip={grip(a.id)}
                   onPay={() => setPayCardFor(a)}
@@ -1656,7 +1747,7 @@ function PickCardModal({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold">{a.name}</span>
                   {/* The next due date when the card has a due day; red with
-                      the days left inside a week, as on the card tile. */}
+                      the days left inside DUE_SOON_DAYS, as on the card tile. */}
                   {(() => {
                     const d = todayIso && a.paymentDueDay ? nextDueDate(a.paymentDueDay, todayIso) : null;
                     if (!d) return null;

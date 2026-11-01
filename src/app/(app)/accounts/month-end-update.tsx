@@ -39,6 +39,11 @@ function monthName(firstOfMonth: string, style: "short" | "long" = "short"): str
   return new Date(y, m - 1, 1).toLocaleString("en-US", { month: style });
 }
 
+function lastDayOfMonth(firstOfMonth: string): number {
+  const [y, m] = firstOfMonth.split("-").map(Number);
+  return new Date(y, m, 0).getDate();
+}
+
 // Read-only figures in whole dollars, the way Investments and Kids Funding
 // read on the board.
 function money(cents: number): string {
@@ -170,13 +175,13 @@ export function MonthEndUpdateModal({
     return baseCents(i);
   };
 
-  const save = (i: Item, raw: string) => {
+  const save = (i: Item, raw: string, tick = false) => {
     const rowKey = `${month}|${i.key}`;
     setError(null);
     setSaving((s) => new Set(s).add(rowKey));
-    setTickOverride((o) => ({ ...o, [rowKey]: true }));
+    if (tick) setTickOverride((o) => ({ ...o, [rowKey]: true }));
     startTransition(async () => {
-      const res = await saveMonthEndValue({ month, accountId: i.accountId, bucketId: i.bucketId, balance: raw });
+      const res = await saveMonthEndValue({ month, accountId: i.accountId, bucketId: i.bucketId, balance: raw, tick });
       setSaving((s) => {
         const n = new Set(s);
         n.delete(rowKey);
@@ -184,7 +189,7 @@ export function MonthEndUpdateModal({
       });
       if (res.error) {
         setError(`${i.name}: ${res.error}`);
-        setTickOverride((o) => ({ ...o, [rowKey]: false }));
+        if (tick) setTickOverride((o) => ({ ...o, [rowKey]: false }));
         return;
       }
       router.refresh();
@@ -230,7 +235,7 @@ export function MonthEndUpdateModal({
     }
     // Ticking with nothing typed confirms the figure already there.
     const cents = shownCents(i) ?? i.balancesByMonth[compareMonth] ?? 0;
-    save(i, String(cents / 100));
+    save(i, String(cents / 100), true);
   };
 
   const chip = (active: boolean) =>
@@ -279,10 +284,7 @@ export function MonthEndUpdateModal({
             />
           </div>
           <p className="mt-2 text-xs">
-            Saves and ticks when you leave a box.
-            {month === lastMonth
-              ? ` ${monthName(month, "long")} values also fill ${monthName(currentMonth, "long")} unless it's ticked there.`
-              : null}
+            {`Adjust each balance to its ${monthName(month)} ${lastDayOfMonth(month)} statement. Change includes this month's transactions.`}
           </p>
           {error ? <p className="mt-2 text-xs font-semibold text-negative">{error}</p> : null}
         </div>

@@ -1928,9 +1928,34 @@ function SummaryHeroCard({
           <HeroStat accentVar="var(--viz-soft)" className="@3xl:text-center">
             <p className={TITLE}>Planned</p>
             <p className={`${FIGURE} text-foreground`}>{formatMoney(outflowPlanned, currency)}</p>
-            {/* Planned vs. the money: over plans more than there is, unplanned
-                is money with no job yet. Hidden when they match. */}
-            {displayLeft !== 0 && (
+            {/* Planned vs. income alone, before any rollover: Victor wants to
+                see how much the plan leans on last month's money (what he'd
+                cut from savings/invest without it). The second line says
+                whether the rollover covers it. */}
+            {outflowPlanned > incomePlanned ? (
+              <>
+                <p className={SUBLINE}>
+                  Over income by:{" "}
+                  <span className="font-bold tabular-nums text-negative">
+                    {formatMoney(outflowPlanned - incomePlanned, currency)}
+                  </span>
+                </p>
+                {rolloverCents > 0 && (
+                  <p className={`${SUBLINE} italic`}>
+                    {displayLeft >= 0 ? (
+                      `${prevMonth} rollover covers it`
+                    ) : (
+                      <>
+                        Still over with rollover:{" "}
+                        <span className="font-bold not-italic tabular-nums text-negative">
+                          {formatMoney(-displayLeft, currency)}
+                        </span>
+                      </>
+                    )}
+                  </p>
+                )}
+              </>
+            ) : displayLeft !== 0 && (
               <p className={SUBLINE}>
                 {displayLeft < 0 ? "Over by" : "Left to Budget"}:{" "}
                 <span className={`font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-positive"}`}>

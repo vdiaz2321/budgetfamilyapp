@@ -113,8 +113,8 @@ export function nextDueDate(dueDay: number, todayIso: string): { iso: string; da
   };
 }
 
-/** A due date within this many days reads red. */
-export const DUE_SOON_DAYS = 7;
+/** A due date within this many days reads red (Victor, 2026-11-01: 15). */
+export const DUE_SOON_DAYS = 15;
 
 export function formatDueDate(iso: string): string {
   const [, m, d] = iso.split("-").map(Number);

@@ -14,6 +14,16 @@ import { deleteTransaction } from "@/app/(app)/budget/actions";
 const PAYMENT_GRID =
   "grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center gap-x-2 sm:grid-cols-[9.5rem_7rem_7rem_var(--from-w)_8.5rem] sm:gap-x-3";
 
+// "edited Oct 12" only when the change came on a later day than the payment
+// was logged — a fix the same day isn't worth flagging, and "edited Oct 7"
+// beside an Oct 7 payment read as a second date (Victor, 2026-11-01). Days
+// are the browser's own.
+function laterEdit(p: CardPayment): string | null {
+  if (!p.editedAt) return null;
+  const day = (iso: string) => new Date(iso).toLocaleDateString("en-CA");
+  return day(p.editedAt) === day(p.createdAt) ? null : p.editedAt;
+}
+
 const PAYMENT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
@@ -31,6 +41,8 @@ export type CardPayment = {
   reimbursedCents: number;
   // When it was last changed after being logged; null if never edited.
   editedAt: string | null;
+  /** When it was first logged. */
+  createdAt: string;
   fromAccountId: string | null;
   /** Paid by cashing out points (a statement credit) — no bank behind it. */
   fromPoints?: boolean;
@@ -110,14 +122,17 @@ export function CardPaymentsLedger({
   const now = new Date();
   const lastMonthShown =
     view === "month" && year === String(now.getFullYear()) ? now.getMonth() + 1 : 12;
-  // Nor the months before anything was recorded: card payments start in
-  // August 2026, and Jan–Jul were seven columns of nothing.
+  // The first recorded month: card payments start in August 2026.
   const firstRecorded = payments.reduce<string | null>((min, p) => (min == null || p.date < min ? p.date : min), null);
   const firstMonthShown = firstRecorded && firstRecorded.slice(0, 4) === year ? Number(firstRecorded.slice(5, 7)) : 1;
+  // Columns always run from Jan, blank before the first payment, so Credit
+  // Card and Debt Payments show the same months (Victor, 2026-11-01). The
+  // average still starts at the first recorded month.
+  const firstColumnShown = 1;
   const columns =
     view === "month"
-      ? PAYMENT_MONTHS.slice(firstMonthShown - 1, lastMonthShown)
-          .map((label, i) => ({ key: String(i + firstMonthShown).padStart(2, "0"), label }))
+      ? PAYMENT_MONTHS.slice(firstColumnShown - 1, lastMonthShown)
+          .map((label, i) => ({ key: String(i + firstColumnShown).padStart(2, "0"), label }))
           .reverse()
       : years.map((y) => ({ key: y, label: y }));
   const columnOf = (p: CardPayment) => (view === "month" ? p.date.slice(5, 7) : p.date.slice(0, 4));
@@ -459,6 +474,11 @@ function CardPaymentsDetail({
 }) {
   const sorted = [...payments].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
   const total = payments.reduce((sum, p) => sum + p.amountCents, 0);
+  // Opens read-only: the rows are history, and boxes that are always live
+  // invite a stray keystroke (Victor, 2026-11-01). One Edit for the whole
+  // popup turns them into boxes; Done drops anything unsaved.
+  const [editing, setEditing] = useState(false);
+  const [editRound, setEditRound] = useState(0);
   return (
     <ModalShell
       title={cardName}
@@ -468,9 +488,33 @@ function CardPaymentsDetail({
       className="sm:w-fit sm:max-w-[95vw]"
       mobileAlign="top"
       headerExtra={
-        <span className="text-sm text-muted">
-          {payments.some((p) => p.reimbursedCents > 0) ? "Net payments:" : "Total payments:"} <span className="font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>{formatMoney(total, currency)}</span>
-        </span>
+        <>
+          <span className="text-sm text-muted">
+            {payments.some((p) => p.reimbursedCents > 0) ? "Net payments:" : "Total payments:"} <span className="font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>{formatMoney(total, currency)}</span>
+          </span>
+          {sorted.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (editing) setEditRound((n) => n + 1);
+                setEditing((v) => !v);
+              }}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-surface px-2.5 py-1 text-xs font-bold text-foreground ring-1 ring-sky-300 transition hover:bg-sky-100 dark:ring-sky-700 dark:hover:bg-sky-900/50"
+            >
+              {editing ? (
+                "Done"
+              ) : (
+                <>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                  Edit
+                </>
+              )}
+            </button>
+          ) : null}
+        </>
       }
     >
       <div className="px-5 py-3">
@@ -479,8 +523,8 @@ function CardPaymentsDetail({
         ) : (
           <div
             // Every row is its own grid, so the From column's width is set once
-            // here — the longest name at roughly 0.47rem per character.
-            style={{ ["--from-w" as string]: `${Math.max(3, ...sorted.map((p) => (p.fromPoints ? "Points" : p.fromAccountId ? accountNames[p.fromAccountId] ?? "Closed account" : "").length + (p.editedAt ? 16 : 0))) * 0.47 + 0.5}rem` }}
+            // here — the longest name at roughly 0.5rem per character.
+            style={{ ["--from-w" as string]: `${Math.max(3, ...sorted.map((p) => (p.fromPoints ? "Points" : p.fromAccountId ? accountNames[p.fromAccountId] ?? "Closed account" : "").length + (laterEdit(p) ? 16 : 0))) * 0.5 + 0.5}rem` }}
           >
           <div className={`border-b border-line pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted ${PAYMENT_GRID}`}>
             <span className="text-center">Date</span>
@@ -491,7 +535,9 @@ function CardPaymentsDetail({
           <ul className="divide-y divide-line">
             {sorted.map((p) => (
               <PaymentRow
-                key={p.id}
+                // A new key each time Done is pressed, so unsaved typing is dropped.
+                key={`${p.id}:${editRound}`}
+                editing={editing}
                 payment={p}
                 itemName={cardName}
                 // CSV-imported rows carry no account — show nothing rather than a dash.
@@ -502,20 +548,24 @@ function CardPaymentsDetail({
           </ul>
           </div>
         )}
-        <p className="pt-3 text-xs text-muted">
-          Changing a date doesn&rsquo;t change balances.
-        </p>
+        {editing ? (
+          <p className="pt-3 text-xs">
+            A new amount, a Remove, or a date in another month asks before it saves.
+          </p>
+        ) : null}
       </div>
     </ModalShell>
   );
 }
 
 function PaymentRow({
+  editing,
   payment,
   itemName,
   fromName,
   currency,
 }: {
+  editing: boolean;
   payment: CardPayment;
   itemName: string;
   fromName: string | null;
@@ -528,8 +578,9 @@ function PaymentRow({
   const [date, setDate] = useState(payment.date);
   const [paid, setPaid] = useState(startPaid);
   const [reimbursed, setReimbursed] = useState(startReimbursed);
-  // Which confirmation is open: removing the payment, or saving a new amount.
-  const [confirm, setConfirm] = useState<"remove" | "amount" | null>(null);
+  // Which confirmation is open: removing the payment, saving a new amount, or
+  // moving it to another month.
+  const [confirm, setConfirm] = useState<"remove" | "amount" | "date" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const cents = (v: string) => Math.round(Number(v.replace(/[$,\s]/g, "") || "0") * 100);
@@ -539,6 +590,9 @@ function PaymentRow({
   const newCents = paidCents - reimbursedCents;
   const amountChanged = Number.isFinite(newCents) && newCents !== payment.amountCents;
   const changed = date !== payment.date || paid !== startPaid || reimbursed !== startReimbursed;
+  // A new date in another month moves the payment between month columns (and
+  // the averages), so it gets a check too; a same-month fix doesn't.
+  const monthChanged = /^\d{4}-\d{2}-\d{2}$/.test(date) && date.slice(0, 7) !== payment.date.slice(0, 7);
 
   const reset = () => {
     setDate(payment.date);
@@ -566,7 +620,8 @@ function PaymentRow({
     });
   };
   // A new amount moves balances, so it gets the same Now / After check as
-  // Remove first; a date-only change saves straight away.
+  // Remove first; so does a date in another month (Victor, 2026-11-01). A
+  // date fix within the same month saves straight away.
   const onSave = () => {
     if (!Number.isFinite(paidCents) || paidCents <= 0) {
       setError("Enter an amount above $0.");
@@ -577,6 +632,7 @@ function PaymentRow({
       return;
     }
     if (amountChanged) setConfirm("amount");
+    else if (monthChanged) setConfirm("date");
     else save();
   };
   const remove = () => {
@@ -588,6 +644,37 @@ function PaymentRow({
       if (!res?.error) router.refresh();
     });
   };
+
+  if (!editing) {
+    const shown = new Date(`${payment.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return (
+      <li className="py-2">
+        <div className={`gap-y-1 ${PAYMENT_GRID}`}>
+          <span className="text-center text-sm font-semibold tabular-nums">{shown}</span>
+          <span className="text-center text-sm font-bold tabular-nums">{formatMoney(payment.amountCents + payment.reimbursedCents, currency)}</span>
+          <span className="text-center text-sm font-semibold tabular-nums">{payment.reimbursedCents > 0 ? formatMoney(payment.reimbursedCents, currency) : ""}</span>
+          <div className="col-span-3 min-w-0 text-xs font-semibold sm:col-span-2 sm:text-sm">
+            {fromName || laterEdit(payment) ? (
+              <div className="truncate whitespace-nowrap">
+                {fromName}
+                {laterEdit(payment) ? (
+                  <span className="font-normal italic">
+                    {fromName ? " · " : ""}edited{" "}
+                    {new Date(laterEdit(payment)!).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            {payment.reimbursedCents > 0 ? (
+              <div className="tabular-nums">
+                Net <span className="font-semibold">{formatMoney(payment.amountCents, currency)}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </li>
+    );
+  }
 
   return (
     <li className="py-1.5">
@@ -606,14 +693,14 @@ function PaymentRow({
         {/* From + buttons: their own columns on a wide screen (`contents`),
             one shared line under the boxes on a phone. */}
         <div className="col-span-3 flex items-center gap-2 sm:contents">
-        <div className="min-w-0 flex-1 text-xs text-muted">
-          {fromName || payment.editedAt ? (
+        <div className="min-w-0 flex-1 text-xs font-semibold sm:text-sm">
+          {fromName || laterEdit(payment) ? (
             <div className="truncate whitespace-nowrap">
               {fromName}
-              {payment.editedAt ? (
-                <span className="text-muted/80">
+              {laterEdit(payment) ? (
+                <span className="font-normal italic">
                   {fromName ? " · " : ""}edited{" "}
-                  {new Date(payment.editedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  {new Date(laterEdit(payment)!).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </span>
               ) : null}
             </div>
@@ -667,6 +754,7 @@ function PaymentRow({
           backCents={confirm === "remove" ? payment.amountCents : payment.amountCents - newCents}
           mode={confirm}
           newCents={newCents}
+          newDate={monthChanged ? date : null}
           pending={pending}
           error={error}
           onCancel={() => {
@@ -681,9 +769,10 @@ function PaymentRow({
 }
 
 /**
- * The confirmation before Remove or a new amount: a Now / After table of each
- * balance that moves, because either one changes today's balances — ones
- * Victor may already have typed in by hand.
+ * The confirmation before Remove, a new amount, or a date in another month:
+ * a Now / After table of each balance that moves, because Remove and a new
+ * amount change today's balances — ones Victor may already have typed in by
+ * hand. A month move changes no balance, only which month it counts in.
  */
 function BalanceChangeWarning({
   payment,
@@ -692,6 +781,7 @@ function BalanceChangeWarning({
   backCents,
   mode,
   newCents,
+  newDate,
   pending,
   error,
   onCancel,
@@ -701,8 +791,10 @@ function BalanceChangeWarning({
   itemName: string;
   currency: string;
   backCents: number;
-  mode: "remove" | "amount";
+  mode: "remove" | "amount" | "date";
   newCents: number;
+  /** The new date when it lands in another month; null otherwise. */
+  newDate: string | null;
   pending: boolean;
   error: string | null;
   onCancel: () => void;
@@ -711,12 +803,14 @@ function BalanceChangeWarning({
   const money = (cents: number) => formatMoney(cents, currency);
   const refund = payment.undo?.refund ?? null;
   const debt = payment.undo?.debt ?? null;
-  const when = new Date(`${payment.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const fmtDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const fmtMonth = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const when = fmtDate(payment.date);
   const back = Math.abs(backCents);
   const owed = (cents: number) => (cents <= 0 ? "Paid off" : money(cents));
   return (
     <ModalShell
-      title={mode === "remove" ? "Remove this payment?" : "Change this payment?"}
+      title={mode === "remove" ? "Remove this payment?" : mode === "date" ? "Move this payment?" : "Change this payment?"}
       onClose={onCancel}
       className="sm:max-w-md"
       mobileAlign="top"
@@ -727,6 +821,10 @@ function BalanceChangeWarning({
             <>
               <span className="font-semibold tabular-nums">{money(payment.amountCents)}</span> paid to {itemName} on {when}.
             </>
+          ) : mode === "date" ? (
+            <>
+              <span className="font-semibold tabular-nums">{money(payment.amountCents)}</span> paid to {itemName}.
+            </>
           ) : (
             <>
               {itemName} on {when}. Net paid: <span className="font-semibold tabular-nums">{money(payment.amountCents)}</span> →{" "}
@@ -734,9 +832,32 @@ function BalanceChangeWarning({
             </>
           )}
         </p>
+        {newDate ? (
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-line text-[11px] font-semibold uppercase tracking-wide text-muted">
+                <th className="py-1.5 text-left font-semibold">What changes</th>
+                <th className="px-2 py-1.5 text-center font-semibold">Now</th>
+                <th className="px-2 py-1.5 text-center font-semibold">After</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-line">
+                <td className="py-2 pr-2 font-semibold">Date</td>
+                <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{when}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-center font-semibold tabular-nums">{fmtDate(newDate)}</td>
+              </tr>
+              <tr>
+                <td className="py-2 pr-2 font-semibold">Counts in</td>
+                <td className="whitespace-nowrap px-2 py-2 text-center">{fmtMonth(payment.date)}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-center font-semibold">{fmtMonth(newDate)}</td>
+              </tr>
+            </tbody>
+          </table>
+        ) : null}
         {/* One row per balance that moves; a payment with no bank account on
             record simply has no bank row. */}
-        {refund || debt ? (
+        {mode !== "date" && (refund || debt) ? (
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-line text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -772,6 +893,7 @@ function BalanceChangeWarning({
         {mode === "remove" ? (
           <p className="text-xs font-semibold text-negative">Remove only to make an adjustment or reimbursement.</p>
         ) : null}
+        {mode === "date" ? <p className="text-xs">Balances don&rsquo;t change.</p> : null}
         {error ? <p className="text-xs text-negative">{error}</p> : null}
         <div className="flex flex-wrap justify-end gap-2 pt-1">
           <button
@@ -790,7 +912,7 @@ function BalanceChangeWarning({
               mode === "remove" ? "bg-negative" : "bg-brand hover:bg-brand-strong"
             }`}
           >
-            {pending ? "Saving…" : mode === "remove" ? "Remove payment" : "Save change"}
+            {pending ? "Saving…" : mode === "remove" ? "Remove payment" : mode === "date" ? "Move payment" : "Save change"}
           </button>
         </div>
       </div>

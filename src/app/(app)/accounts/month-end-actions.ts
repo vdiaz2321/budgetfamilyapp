@@ -115,6 +115,8 @@ export async function saveMonthEndValue(input: {
   accountId: string;
   bucketId: string | null;
   balance: string;
+  /** Only the Done circle ticks; typing a figure just saves it. */
+  tick?: boolean;
 }): Promise<{ error: string | null }> {
   const { supabase, household } = await getSessionContext();
   const householdId = household.id;
@@ -205,7 +207,7 @@ export async function saveMonthEndValue(input: {
     : await supabase.from("accounts").update({ balance_updated_at: now }).eq("id", accountId).eq("household_id", householdId);
   if (stampError) return { error: stampError.message };
 
-  await tick(supabase, householdId, month, { accountId, bucketId });
+  if (input.tick) await tick(supabase, householdId, month, { accountId, bucketId });
   revalidate();
   return { error: null };
 }
