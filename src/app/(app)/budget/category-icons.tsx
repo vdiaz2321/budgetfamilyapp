@@ -51,6 +51,13 @@ export const SECTION_CLS =
   "@container relative isolate -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-[color-mix(in_srgb,var(--acc)_22%,var(--border))] sm:mx-0 sm:rounded-xl";
 export const ACC_CHIP =
   "shrink-0 whitespace-nowrap rounded-full bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))] px-1.5 py-0.5 text-[10px] font-semibold text-foreground ring-1 ring-[color-mix(in_srgb,var(--acc)_30%,var(--border))]";
+// Phone only: an invisible ~40px tap area around a small button, so the
+// button looks the same but is easy to hit with a thumb.
+export const TAP_AREA = "relative before:absolute before:-inset-2.5 before:content-[''] sm:before:hidden";
+// The "+" add button, tinted with the card's own --acc colour.
+export const ADD_BTN =
+  "bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))] text-[color:var(--acc)] hover:bg-[color-mix(in_srgb,var(--acc)_26%,var(--surface))]";
+
 export const ACC_HOVER = "hover:bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))]";
 // 3px left edge in the card's colour, running down the header and open rows.
 export function AccentEdge() {

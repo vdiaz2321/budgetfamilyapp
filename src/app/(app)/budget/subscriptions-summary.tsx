@@ -4,10 +4,10 @@ import { type CSSProperties, useEffect, useRef, useState, useTransition } from "
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoney, centsToDisplay, currencySymbol } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { ACC_HOVER, AccentEdge, SECTION_CLS, headerWash } from "./category-icons";
+import { ACC_HOVER, ADD_BTN, AccentEdge, SECTION_CLS, TAP_AREA, headerWash } from "./category-icons";
 import { reorderIrregularBills, reorderSubscriptions, setIrregularBillMonthPlan, updateSubscriptionAmount, updateSubscriptionDueDate } from "../subscriptions/actions";
 import { SubscriptionForm, type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
-import { actualColorClass, remainingColorClass } from "./budget-row";
+import { actualColorClass, progressLabel, remainingColorClass } from "./budget-row";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 import type { TxData, TxPrefill } from "./types";
 import { planNavKeyDown } from "./plan-nav";
@@ -16,9 +16,23 @@ import { currentMonthStart } from "@/lib/subscription-renewal";
 
 // One column template for the header and every row, so a column added on one
 // can't drift from the other. Mobile keeps Name / Plan / Left — Spent is the
-// one of the three that can be inferred from the other two.
+// one of the three that can be inferred from the other two. A wide card uses
+// the budget groups' 14-column grid (name block 4, five tiles 2 each), so the
+// cells sit under CardHeader's Planned / Spent / Remaining / Spent % / Total Yr
+// tiles. It swaps on the card's width (@md), like the groups.
 const ROW_COLS =
-  "grid-cols-[auto_minmax(0,1fr)_4.75rem_4.75rem] sm:grid-cols-[auto_minmax(0,1.5fr)_4.75rem_4.75rem_4.75rem_6.5rem_5.5rem_minmax(0,0.85fr)]";
+  "grid-cols-[minmax(0,1fr)_4.75rem_4.75rem] gap-3 px-4 @md:grid-cols-14 @md:gap-2 @md:px-3";
+const NAME_CELL = "flex min-w-0 items-center gap-2 @md:col-span-4";
+const WIDE_CELL = "hidden text-center text-sm font-semibold tabular-nums @md:col-span-2 @md:block";
+// Section-heading subtotal: the same slot, bold so it reads as a total.
+const HEAD_WIDE = "hidden text-center text-sm font-bold tabular-nums @md:col-span-2 @md:block";
+// Column-label version: same slot, the label row's own small caps text.
+const WIDE_LABEL = "hidden text-center @md:col-span-2 @md:block";
+// Same look as the budget groups' column-label row.
+const LABEL_ROW = "items-center bg-background/40 py-2 text-[11px] font-bold uppercase tracking-wide text-muted";
+// Irregular Bills: phones show the name, then Plan / Spent inline at the right.
+const IRREGULAR_COLS =
+  "items-center grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 @md:grid-cols-14 @md:gap-2 @md:px-3";
 
 // Weekly and monthly charges come first — they are the ones that repeat inside
 // the month you are looking at — then quarterly, then annual.
@@ -46,6 +60,11 @@ function compareByCycleThenDue(a: SubscriptionRow, b: SubscriptionRow): number {
   };
   const byDue = key(a).localeCompare(key(b));
   return byDue !== 0 ? byDue : a.name.localeCompare(b.name);
+}
+
+/** Weekly and monthly rows bill inside the month being viewed; the rest don't. */
+function isMonthlyCycle(cycle: SubscriptionRow["billingCycle"]): boolean {
+  return cycle === "monthly" || cycle === "weekly";
 }
 
 const DragHandle = (
@@ -131,13 +150,36 @@ export function SubscriptionsSummaryCard({
     const reset = window.setTimeout(() => setManualRows(subscriptions), 0);
     return () => window.clearTimeout(reset);
   }, [subscriptions]);
-  const { dragOverId, startDrag } = usePointerReorder(manualRows, (next) => {
+  // Manual drag stays inside a section: dropping a monthly row onto an annual
+  // one would save an order the split list can't show, so it's ignored.
+  const dragFrom = useRef<string | null>(null);
+  const { dragOverId, startDrag: startPointerDrag } = usePointerReorder(manualRows, (next) => {
+    const from = dragFrom.current;
+    dragFrom.current = null;
+    if (from) {
+      const oldIndex = manualRows.findIndex((r) => r.id === from);
+      const newIndex = next.findIndex((r) => r.id === from);
+      const target = next[newIndex > oldIndex ? newIndex - 1 : newIndex + 1];
+      if (target && isMonthlyCycle(target.billingCycle) !== isMonthlyCycle(next[newIndex].billingCycle)) return;
+    }
     setManualRows(next);
     startReorder(() => reorderSubscriptions(next.map((r) => r.id)));
   });
+  const startDrag = (id: string) => {
+    dragFrom.current = id;
+    startPointerDrag(id);
+  };
+  // Monthly open, Annual shut: the yearly rows show "—" eleven months of the
+  // year, so they stay folded until wanted.
+  const [sectionOpen, setSectionOpen] = useSessionCollapse("subs-sections", () => ({ monthly: true, annual: false }));
   const rows = byDue ? [...subscriptions].sort(compareByCycleThenDue) : manualRows;
   const isOver = (s: SubscriptionRow) => (s.monthSpentCents ?? 0) > (s.monthPlannedCents ?? 0);
   const visibleRows = overspentOnly ? rows.filter(isOver) : rows;
+  const monthlyRows = visibleRows.filter((s) => isMonthlyCycle(s.billingCycle));
+  const yearlyRows = visibleRows.filter((s) => !isMonthlyCycle(s.billingCycle));
+  const yearlyLabel = yearlyRows.some((s) => s.billingCycle === "quarterly")
+    ? yearlyRows.some((s) => s.billingCycle === "annual") ? "Annual & quarterly" : "Quarterly"
+    : "Annual";
   const activeSubs = rows.filter((s) => s.isActive);
   const monthlyTotal = activeSubs
     .filter((s) => s.billingCycle === "monthly")
@@ -156,6 +198,100 @@ export function SubscriptionsSummaryCard({
   const editorTxIds = new Set(editorRow?.monthTxIds ?? []);
   const editorTxs = transactions.filter((t) => editorTxIds.has(t.id));
 
+  const renderRow = (s: SubscriptionRow) => {
+            const cardName = s.accountId ? cardMap.get(s.accountId) : null;
+            const planned = s.monthPlannedCents ?? 0;
+            const spent = s.monthSpentCents ?? 0;
+            const left = planned - spent;
+            // An annual sub in one of its eleven quiet months has no
+            // figures for this month — "—" says that, where three $0.00s
+            // read like real amounts. Its due month shows the numbers,
+            // zeros included, because then the zero means "not paid yet".
+            const offCycle = s.billingCycle !== "monthly" && planned === 0 && spent === 0;
+            const money = (cents: number) => (offCycle ? "—" : formatMoney(cents, currency));
+            return (
+              <div
+                key={s.id}
+                data-reorder-id={s.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => (onSelect ? onSelect(s.id) : setEditorTarget(s.id))}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    if (onSelect) onSelect(s.id);
+                    else setEditorTarget(s.id);
+                  }
+                }}
+                className={`group grid cursor-pointer items-center py-2 text-sm transition hover:bg-brand-soft/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${ROW_COLS} ${
+                  !byDue && dragOverId === s.id ? "bg-brand-soft/40" : ""
+                } ${selectedId === s.id ? "bg-sky-50 dark:bg-sky-950/40" : ""}`}
+              >
+                {/* Name block: handle, name with its card under it (wide
+                    card only), and the Due pill — right after the name on
+                    a phone, lined up at the block's right edge when wide. */}
+                <div className={NAME_CELL}>
+                  {byDue ? (
+                    <span className="w-3 shrink-0" aria-hidden />
+                  ) : (
+                    <span
+                      onClick={(event) => event.stopPropagation()}
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag(s.id); }}
+                      className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+                    >
+                      {DragHandle}
+                    </span>
+                  )}
+                  <span className="min-w-0 leading-tight">
+                    <span className={`block truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
+                    {cardName ? (
+                      <span className="hidden truncate text-[11px] text-foreground/80 @md:block">{cardName}</span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 @md:ml-auto" onClick={(event) => event.stopPropagation()}>
+                    <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
+                  </span>
+                </div>
+                {/* Plan is this month's charge, not the sticker price: an
+                    annual sub plans nothing in the eleven months it isn't
+                    billed, which is what makes "am I under plan?" readable
+                    row by row. */}
+                {offCycle ? (
+                  <span className="text-center tabular-nums text-muted/50 @md:col-span-2">—</span>
+                ) : planLocked ? (
+                  // A finished month plans what was charged — nothing to edit.
+                  <span className="text-center text-sm tabular-nums @md:col-span-2">{formatMoney(planned, currency)}</span>
+                ) : (
+                  <span className="@md:col-span-2" onClick={(event) => event.stopPropagation()}>
+                    <PlanInput
+                      id={s.id}
+                      amountCents={planned}
+                      spentCents={spent}
+                      currency={currency}
+                      month={monthFirstOfMonth}
+                      perMonth={s.chargesThisMonth === false}
+                    />
+                  </span>
+                )}
+                <span className={`${WIDE_CELL} ${offCycle ? "text-muted/50" : actualColorClass("bills", spent)}`}>
+                  {money(spent)}
+                </span>
+                <span className={`text-center tabular-nums @md:col-span-2 @md:text-sm @md:font-semibold ${offCycle ? "text-muted/50" : remainingColorClass("bills", left, planned)}`}>
+                  {money(left)}
+                </span>
+                <span className={`${WIDE_CELL} ${offCycle ? "text-muted/50" : remainingColorClass("bills", left, planned)}`}>
+                  {offCycle ? "—" : progressLabel("bills", spent, planned)}
+                </span>
+                {/* Year to date for this one subscription, matched the
+                    same way its monthly Spent is — an annual renewal that
+                    already billed in March still shows here in September. */}
+                <span className={`${WIDE_CELL} ${(s.ytdSpentCents ?? 0) === 0 ? "text-muted/50" : "text-foreground"}`}>
+                  {formatMoney(s.ytdSpentCents ?? 0, currency)}
+                </span>
+              </div>
+            );
+  };
+
   return (
     <section className={SECTION_CLS} style={{ "--acc": "var(--viz-bills)" } as CSSProperties}>
       <CardHeader
@@ -165,36 +301,11 @@ export function SubscriptionsSummaryCard({
         overCount={overspentOnly ? visibleRows.length : null}
         plannedCents={monthPlannedCents}
         spentCents={monthSpentCents}
+        ytdCents={subscriptions.reduce((sum, s) => sum + (s.ytdSpentCents ?? 0), 0)}
         currency={currency}
         onOpenSpent={onOpenSpent}
-      >
-        {overspentOnly ? null : (
-          <div className="flex shrink-0 overflow-hidden rounded-lg text-[11px] ring-1 ring-[color-mix(in_srgb,var(--acc)_30%,var(--border))]">
-            {([true, false] as const).map((mode) => (
-              <button
-                key={String(mode)}
-                type="button"
-                onClick={() => setSortState((current) => ({ ...current, byDue: mode }))}
-                aria-pressed={byDue === mode}
-                className={`px-2 py-1 font-medium transition ${
-                  byDue === mode
-                    ? "bg-[color-mix(in_srgb,var(--acc)_18%,var(--surface))] text-foreground"
-                    : "text-foreground hover:bg-[color-mix(in_srgb,var(--acc)_10%,var(--surface))]"
-                }`}
-              >
-                {mode ? "By due" : "Manual"}
-              </button>
-            ))}
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => setEditorTarget("new")}
-          className="inline-flex shrink-0 items-center justify-center rounded-lg border border-brand/30 px-2.5 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft"
-          >
-            + Add
-          </button>
-      </CardHeader>
+        onAdd={() => setEditorTarget("new")}
+      />
 
       {open ? (
         <div className="border-t border-line">
@@ -221,110 +332,73 @@ export function SubscriptionsSummaryCard({
                   <SummaryMetric label="Total Combined Annual" value={formatMoney(annualizedTotal, currency)} />
                 </div>
               )}
-              <div className={`grid items-center gap-3 border-b border-line px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted ${ROW_COLS}`}>
-                <span className="w-3" aria-hidden />
-                <span>Name</span>
-                <span className="text-center">Plan</span>
-                <span className="hidden text-center sm:inline">Spent</span>
-                <span className="text-center">Left</span>
-                <span className="hidden text-center sm:inline">Total Yr Spent</span>
-                <span className="hidden text-center sm:inline">Due</span>
-                <span className="hidden sm:inline">Card</span>
+              <div className={`grid border-b border-line/60 ${LABEL_ROW} ${ROW_COLS}`}>
+                <span className={NAME_CELL}>
+                  <span className="w-3 shrink-0" aria-hidden />
+                  Name
+                  {/* The sort sits over the column it sorts, and only once the
+                      card is open — in the header it crowded out the name. */}
+                  {overspentOnly ? null : (
+                    <span className="flex shrink-0 overflow-hidden rounded-lg text-[11px] font-medium normal-case tracking-normal ring-1 ring-[color-mix(in_srgb,var(--acc)_30%,var(--border))]">
+                      {([true, false] as const).map((mode) => (
+                        <button
+                          key={String(mode)}
+                          type="button"
+                          onClick={() => setSortState((current) => ({ ...current, byDue: mode }))}
+                          aria-pressed={byDue === mode}
+                          className={`px-2 py-0.5 transition ${
+                            byDue === mode
+                              ? "bg-[color-mix(in_srgb,var(--acc)_18%,var(--surface))] text-foreground"
+                              : "text-foreground hover:bg-[color-mix(in_srgb,var(--acc)_10%,var(--surface))]"
+                          }`}
+                        >
+                          {mode ? "By due" : "Manual"}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                  {/* Over the Due pills, which sit at the right of the name block. */}
+                  <span className="ml-auto hidden @md:inline">Due</span>
+                </span>
+                <span className="text-center @md:col-span-2">Plan</span>
+                <span className={WIDE_LABEL}>Spent</span>
+                <span className="text-center @md:col-span-2">Left</span>
+                <span className={WIDE_LABEL}>Spent %</span>
+                <span className={WIDE_LABEL}>Total Yr Spent</span>
               </div>
               <div className="divide-y divide-line">
-              {visibleRows.map((s) => {
-                const cardName = s.accountId ? cardMap.get(s.accountId) : null;
-                const planned = s.monthPlannedCents ?? 0;
-                const spent = s.monthSpentCents ?? 0;
-                const left = planned - spent;
-                // An annual sub in one of its eleven quiet months has no
-                // figures for this month — "—" says that, where three $0.00s
-                // read like real amounts. Its due month shows the numbers,
-                // zeros included, because then the zero means "not paid yet".
-                const offCycle = s.billingCycle !== "monthly" && planned === 0 && spent === 0;
-                const money = (cents: number) => (offCycle ? "—" : formatMoney(cents, currency));
-                return (
-                  <div
-                    key={s.id}
-                    data-reorder-id={s.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => (onSelect ? onSelect(s.id) : setEditorTarget(s.id))}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        if (onSelect) onSelect(s.id);
-                        else setEditorTarget(s.id);
-                      }
-                    }}
-                    className={`group grid cursor-pointer items-center gap-3 px-4 py-2 text-sm transition hover:bg-brand-soft/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${ROW_COLS} ${
-                      !byDue && dragOverId === s.id ? "bg-brand-soft/40" : ""
-                    } ${selectedId === s.id ? "bg-sky-50 dark:bg-sky-950/40" : ""}`}
-                  >
-                    {byDue ? (
-                      <span className="w-3" aria-hidden />
-                    ) : (
-                      <span
-                        onClick={(event) => event.stopPropagation()}
-                        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag(s.id); }}
-                        className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
-                      >
-                        {DragHandle}
-                      </span>
-                    )}
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className={`min-w-0 truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
-                      {/* Due badge sits inline right of the name on mobile —
-                          no extra row. On sm+ this hides and the dedicated
-                          Due column to the right takes over. */}
-                      <span className="shrink-0 sm:hidden" onClick={(event) => event.stopPropagation()}>
-                        <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
-                      </span>
-                    </div>
-                    {/* Plan is this month's charge, not the sticker price: an
-                        annual sub plans nothing in the eleven months it isn't
-                        billed, which is what makes "am I under plan?" readable
-                        row by row. */}
-                    {offCycle ? (
-                      <span className="text-center tabular-nums text-muted/50">—</span>
-                    ) : planLocked ? (
-                      // A finished month plans what was charged — nothing to edit.
-                      <span className="text-center text-sm font-medium tabular-nums">{formatMoney(planned, currency)}</span>
-                    ) : (
-                      <span onClick={(event) => event.stopPropagation()}>
-                        <PlanInput
-                          id={s.id}
-                          amountCents={planned}
-                          spentCents={spent}
-                          currency={currency}
-                          month={monthFirstOfMonth}
-                          perMonth={s.chargesThisMonth === false}
-                        />
-                      </span>
-                    )}
-                    <span className={`hidden text-center tabular-nums sm:inline ${offCycle ? "text-muted/50" : actualColorClass("bills", spent)}`}>
-                      {money(spent)}
-                    </span>
-                    <span className={`text-center tabular-nums ${offCycle ? "text-muted/50" : remainingColorClass("bills", left, planned)}`}>
-                      {money(left)}
-                    </span>
-                    {/* Year to date for this one subscription, matched the
-                        same way its monthly Spent is — an annual renewal that
-                        already billed in March still shows here in September. */}
-                    <span className="hidden text-center tabular-nums sm:inline">
-                      <span className={(s.ytdSpentCents ?? 0) === 0 ? "text-muted/50" : "font-medium text-foreground"}>
-                        {formatMoney(s.ytdSpentCents ?? 0, currency)}
-                      </span>
-                    </span>
-                    <span className="hidden sm:flex sm:items-center sm:justify-center" onClick={(event) => event.stopPropagation()}>
-                      <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
-                    </span>
-                    <span className="hidden min-w-0 truncate text-xs text-muted sm:inline">{cardName ?? "—"}</span>
-                  </div>
-                );
-              })}
+              {overspentOnly ? (
+                visibleRows.map(renderRow)
+              ) : (
+                <>
+                  {monthlyRows.length > 0 ? (
+                    <CycleSectionHeading
+                      label="Monthly"
+                      dot={CYCLE_PILL.monthly}
+                      bar="var(--color-teal-400)"
+                      rows={monthlyRows}
+                      open={sectionOpen.monthly}
+                      onToggle={() => setSectionOpen((c) => ({ ...c, monthly: !c.monthly }))}
+                      currency={currency}
+                    />
+                  ) : null}
+                  {sectionOpen.monthly ? monthlyRows.map(renderRow) : null}
+                  {yearlyRows.length > 0 ? (
+                    <CycleSectionHeading
+                      label={yearlyLabel}
+                      dot={CYCLE_PILL.other}
+                      bar="var(--color-sky-400)"
+                      rows={yearlyRows}
+                      open={sectionOpen.annual}
+                      onToggle={() => setSectionOpen((c) => ({ ...c, annual: !c.annual }))}
+                      currency={currency}
+                    />
+                  ) : null}
+                  {sectionOpen.annual ? yearlyRows.map(renderRow) : null}
+                </>
+              )}
               {!overspentOnly && otherSpentCents > 0 ? (
-                <OtherChargesRow cols={ROW_COLS} spentCents={otherSpentCents} planLocked={planLocked} currency={currency} />
+                <OtherChargesRow spentCents={otherSpentCents} planLocked={planLocked} currency={currency} />
               ) : null}
               </div>
             </>
@@ -372,6 +446,58 @@ export function SubscriptionsSummaryCard({
         </ModalShell>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Fold-up heading over one cycle's rows. Pale sage like the other heading rows
+ * over a table, with the cycle's Due-pill colour as the left bar and dot, so it
+ * keys to the Monthly / Annual Total figures above. Its subtotals sit in every
+ * column, zeros included, so a folded section still reads.
+ */
+function CycleSectionHeading({
+  label,
+  dot,
+  bar,
+  rows,
+  open,
+  onToggle,
+  currency,
+}: {
+  label: string;
+  dot: string;
+  bar: string;
+  rows: SubscriptionRow[];
+  open: boolean;
+  onToggle: () => void;
+  currency: string;
+}) {
+  const plan = rows.reduce((sum, s) => sum + (s.monthPlannedCents ?? 0), 0);
+  const spent = rows.reduce((sum, s) => sum + (s.monthSpentCents ?? 0), 0);
+  const left = plan - spent;
+  const ytd = rows.reduce((sum, s) => sum + (s.ytdSpentCents ?? 0), 0);
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className={`grid w-full cursor-pointer items-center bg-[color-mix(in_srgb,var(--positive)_8%,var(--surface))] py-2 text-left text-sm transition hover:bg-[color-mix(in_srgb,var(--positive)_14%,var(--surface))] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${ROW_COLS}`}
+      style={{ boxShadow: `inset 4px 0 0 ${bar}` }}
+    >
+      <span className={NAME_CELL}>
+        <Chevron open={open} />
+        <span aria-hidden className={`inline-block h-2 w-2 shrink-0 rounded-full ring-1 ${dot}`} />
+        <span className="truncate font-bold uppercase tracking-wide">{label}</span>
+        <span className="shrink-0 text-xs font-semibold text-foreground/80">{rows.length}</span>
+      </span>
+      <span className="text-center font-bold tabular-nums @md:col-span-2">{formatMoney(plan, currency)}</span>
+      <span className={`${HEAD_WIDE} ${actualColorClass("bills", spent)}`}>{formatMoney(spent, currency)}</span>
+      <span className={`text-center font-bold tabular-nums @md:col-span-2 @md:text-sm ${remainingColorClass("bills", left, plan)}`}>
+        {formatMoney(left, currency)}
+      </span>
+      <span className={`${HEAD_WIDE} ${remainingColorClass("bills", left, plan)}`}>{progressLabel("bills", spent, plan)}</span>
+      <span className={`${HEAD_WIDE}`}>{formatMoney(ytd, currency)}</span>
+    </button>
   );
 }
 
@@ -564,8 +690,6 @@ export function IrregularBillsSummaryCard({
   const totalSpent = irregularBills.reduce((sum, b) => sum + (b.monthSpentCents ?? 0), 0) + otherSpentCents;
   // A finished month plans what was charged — the Planned cells are fixed.
   const planLocked = monthFirstOfMonth < currentMonthStart();
-  const IRREGULAR_COLS =
-    "grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_6.5rem_8rem_minmax(0,1.2fr)]";
   const isOver = (b: IrregularBillRow) => (b.monthSpentCents ?? 0) > (b.plannedCents ?? 0);
   const visibleRows = overspentOnly ? rows.filter(isOver) : rows;
   const paymentsBill = paymentsFor ? rows.find((b) => b.id === paymentsFor) ?? null : null;
@@ -581,6 +705,7 @@ export function IrregularBillsSummaryCard({
         overCount={overspentOnly ? visibleRows.length : null}
         plannedCents={totalPlanned}
         spentCents={totalSpent}
+        ytdCents={irregularBills.reduce((sum, b) => sum + (b.ytdSpentCents ?? 0), 0)}
         currency={currency}
         onOpenSpent={onOpenSpent}
       />
@@ -597,13 +722,19 @@ export function IrregularBillsSummaryCard({
             </div>
           ) : (
             <div className="divide-y divide-line">
-              <div className="hidden grid-cols-[auto_minmax(0,1.5fr)_6.5rem_6.5rem_8rem_minmax(0,1.2fr)] items-center gap-3 bg-background/40 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted sm:grid">
-                <span className="w-3" aria-hidden />
-                <span>Item</span>
-                <span className="text-center">Planned</span>
-                <span className="text-center">Spent</span>
-                <span className="text-center">Total Yr Spent</span>
-                <span className="pl-4">Card used</span>
+              {/* Same 14 columns as the header: Planned and Spent under
+                  theirs, Total Yr under its tile; a bill has no Remaining or
+                  Spent % of its own, so those two cells stay empty. */}
+              <div className={`hidden ${LABEL_ROW} ${IRREGULAR_COLS} @md:grid`}>
+                <span className={NAME_CELL}>
+                  <span className="w-3 shrink-0" aria-hidden />
+                  Item
+                </span>
+                <span className={WIDE_LABEL}>Planned</span>
+                <span className={WIDE_LABEL}>Spent</span>
+                <span className="hidden @md:col-span-2 @md:block" aria-hidden />
+                <span className="hidden @md:col-span-2 @md:block" aria-hidden />
+                <span className={WIDE_LABEL}>Total Yr Spent</span>
               </div>
               {visibleRows.map((b) => {
                 const dragOver = dragOverId === b.id;
@@ -623,43 +754,51 @@ export function IrregularBillsSummaryCard({
                         setPaymentsFor(b.id);
                       }
                     }}
-                    className={`grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm transition hover:bg-brand-soft/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_6.5rem_8rem_minmax(0,1.2fr)] ${dragOver ? "bg-brand-soft/40" : ""}`}
+                    className={`grid cursor-pointer py-2 text-sm transition hover:bg-brand-soft/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${IRREGULAR_COLS} ${dragOver ? "bg-brand-soft/40" : ""}`}
                   >
-                    {/* Dragging a FILTERED list would save an order built
-                        from the rows that happen to be over — handle off. */}
-                    {overspentOnly ? (
-                      <span className="w-3" aria-hidden />
-                    ) : (
-                      <span
-                        onClick={(e) => e.stopPropagation()}
-                        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag(b.id); }}
-                        className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
-                      >
-                        {DragHandle}
+                    <div className={NAME_CELL}>
+                      {/* Dragging a FILTERED list would save an order built
+                          from the rows that happen to be over — handle off. */}
+                      {overspentOnly ? (
+                        <span className="w-3 shrink-0" aria-hidden />
+                      ) : (
+                        <span
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag(b.id); }}
+                          className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+                        >
+                          {DragHandle}
+                        </span>
+                      )}
+                      {/* The card(s) it was paid on sit under the name on a
+                          wide card — the Card used column is gone. */}
+                      <span className="min-w-0 leading-tight">
+                        <span className="block truncate">{b.name}</span>
+                        {b.monthAccountNames?.length ? (
+                          <span className="hidden truncate text-[11px] text-foreground/80 @md:block">{b.monthAccountNames.join(", ")}</span>
+                        ) : null}
                       </span>
-                    )}
-                    <span className="min-w-0 flex-1 truncate px-1 py-0.5 text-left">{b.name}</span>
+                    </div>
                     <div
-                      className="hidden justify-center sm:flex"
+                      className="hidden justify-center @md:col-span-2 @md:flex"
                       onClick={(e) => e.stopPropagation()}
                       onMouseDown={(e) => e.stopPropagation()}
                     >
                       {planLocked ? (
-                        <span className="font-medium tabular-nums">{formatMoney(b.plannedCents ?? 0, currency)}</span>
+                        <span className="text-sm tabular-nums">{formatMoney(b.plannedCents ?? 0, currency)}</span>
                       ) : (
                         <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} spentCents={b.monthSpentCents ?? 0} currency={currency} />
                       )}
                     </div>
-                    <span className="hidden text-center font-medium tabular-nums sm:block">
+                    <span className={`${WIDE_CELL}`}>
                       {formatMoney(b.monthSpentCents ?? 0, currency)}
                     </span>
-                    <span className={`hidden text-center tabular-nums sm:block ${(b.ytdSpentCents ?? 0) === 0 ? "text-muted/50" : "font-medium text-foreground"}`}>
+                    <span className="hidden @md:col-span-2 @md:block" aria-hidden />
+                    <span className="hidden @md:col-span-2 @md:block" aria-hidden />
+                    <span className={`${WIDE_CELL} ${(b.ytdSpentCents ?? 0) === 0 ? "text-muted/50" : "text-foreground"}`}>
                       {formatMoney(b.ytdSpentCents ?? 0, currency)}
                     </span>
-                    <span className="hidden min-w-0 truncate pl-4 text-xs text-muted sm:block">
-                      {b.monthAccountNames?.join(", ") || "—"}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-2 sm:hidden">
+                    <div className="flex shrink-0 items-center gap-2 @md:hidden">
                       <span className="text-xs text-muted">Plan</span>
                       <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
                         {planLocked ? (
@@ -675,7 +814,7 @@ export function IrregularBillsSummaryCard({
                 );
               })}
               {!overspentOnly && otherSpentCents > 0 ? (
-                <OtherChargesRow variant="irregular" cols={IRREGULAR_COLS} spentCents={otherSpentCents} planLocked={planLocked} currency={currency} />
+                <OtherChargesRow variant="irregular" spentCents={otherSpentCents} planLocked={planLocked} currency={currency} />
               ) : null}
             </div>
           )}
@@ -728,29 +867,30 @@ export function IrregularBillsSummaryCard({
 // Budget row. A finished month plans what was charged; this month plans $0.
 function OtherChargesRow({
   variant = "subscriptions",
-  cols,
   spentCents,
   planLocked,
   currency,
 }: {
   variant?: "subscriptions" | "irregular";
-  cols: string;
   spentCents: number;
   planLocked: boolean;
   currency: string;
 }) {
   const planned = planLocked ? spentCents : 0;
   const left = planned - spentCents;
+  const nameCell = (
+    <span className={NAME_CELL}>
+      <span className="w-3 shrink-0" aria-hidden />
+      <span className="min-w-0 truncate">Other</span>
+    </span>
+  );
   if (variant === "irregular") {
     return (
-      <div className={`grid items-center gap-3 px-4 py-2 text-sm ${cols}`}>
-        <span className="w-3" aria-hidden />
-        <span className="min-w-0 truncate px-1 py-0.5">Other</span>
-        <span className="hidden text-center font-medium tabular-nums sm:block">{formatMoney(planned, currency)}</span>
-        <span className="hidden text-center font-medium tabular-nums sm:block">{formatMoney(spentCents, currency)}</span>
-        <span className="hidden sm:block" aria-hidden />
-        <span className="hidden sm:block" aria-hidden />
-        <div className="flex shrink-0 items-center gap-2 sm:hidden">
+      <div className={`grid py-2 text-sm ${IRREGULAR_COLS}`}>
+        {nameCell}
+        <span className={`${WIDE_CELL}`}>{formatMoney(planned, currency)}</span>
+        <span className={`${WIDE_CELL}`}>{formatMoney(spentCents, currency)}</span>
+        <div className="flex shrink-0 items-center gap-2 @md:hidden">
           <span className="text-xs text-muted">Plan</span>
           <span className="font-medium tabular-nums">{formatMoney(planned, currency)}</span>
           <span className="text-xs text-muted">Spent</span>
@@ -760,15 +900,12 @@ function OtherChargesRow({
     );
   }
   return (
-    <div className={`grid items-center gap-3 px-4 py-2 text-sm ${cols}`}>
-      <span className="w-3" aria-hidden />
-      <span className="min-w-0 truncate">Other</span>
-      <span className="text-center text-sm font-medium tabular-nums">{formatMoney(planned, currency)}</span>
-      <span className={`hidden text-center tabular-nums sm:inline ${actualColorClass("bills", spentCents)}`}>{formatMoney(spentCents, currency)}</span>
-      <span className={`text-center tabular-nums ${remainingColorClass("bills", left, planned)}`}>{formatMoney(left, currency)}</span>
-      <span className="hidden sm:inline" aria-hidden />
-      <span className="hidden sm:inline" aria-hidden />
-      <span className="hidden sm:inline" aria-hidden />
+    <div className={`grid items-center py-2 text-sm ${ROW_COLS}`}>
+      {nameCell}
+      <span className="text-center text-sm tabular-nums @md:col-span-2">{formatMoney(planned, currency)}</span>
+      <span className={`${WIDE_CELL} ${actualColorClass("bills", spentCents)}`}>{formatMoney(spentCents, currency)}</span>
+      <span className={`text-center tabular-nums @md:col-span-2 @md:text-sm @md:font-semibold ${remainingColorClass("bills", left, planned)}`}>{formatMoney(left, currency)}</span>
+      <span className={`${WIDE_CELL} ${remainingColorClass("bills", left, planned)}`}>{progressLabel("bills", spentCents, planned)}</span>
     </div>
   );
 }
@@ -834,7 +971,7 @@ function PlanInput({
   const [focused, setFocused] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const initial = centsToDisplay(amountCents);
+  const initial = `${currencySymbol(currency)}${centsToDisplay(amountCents)}`;
   // Same offer the budget rows make: a charge that came in over (or under)
   // plan is nearly always fixed by planning what was actually spent. Nothing
   // to match on an untouched row, and no point when the two already agree.
@@ -869,9 +1006,6 @@ function PlanInput({
           Match spent ({formatMoney(spentCents, currency)})
         </button>
       ) : null}
-      <span className={`pointer-events-none select-none text-sm ${amountCents === 0 ? "text-muted/50" : "text-muted"}`}>
-        {currencySymbol(currency)}
-      </span>
       <input
         key={`${month}:${initial}`}
         ref={inputRef}
@@ -894,12 +1028,7 @@ function PlanInput({
           setFocused(false);
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        style={{
-          width: `calc(${initial.replace(/[^0-9]/g, "").length}ch + ${
-            initial.length - initial.replace(/[^0-9]/g, "").length
-          } * 0.42ch)`,
-        }}
-        className={`min-w-0 rounded-md bg-transparent px-0 py-0.5 text-center text-sm font-medium tabular-nums transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${
+        className={`w-full max-w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-center text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${
           amountCents === 0 ? "text-muted/50" : ""
         } ${pending ? "ring-2 ring-brand" : "focus:ring-brand"}`}
       />
@@ -974,7 +1103,7 @@ function IrregularPlannedInput({
           setFocused(false);
           if (e.currentTarget.value !== initialValue) formRef.current?.requestSubmit();
         }}
-        className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-center text-sm font-medium text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
+        className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-center text-sm text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -984,10 +1113,9 @@ function IrregularPlannedInput({
 
 // Header for the Subscriptions and Irregular Bills cards, built like a budget
 // group's header so the three sit as one list: on a wide card the same
-// 14-column grid, so Planned / Spent / Remaining land under the group rows'
-// Planned / actual / Remaining tiles; on a narrow one the name, then the
-// totals on a second line. `children` (the sort toggle and + Add) sit at the
-// right end. The overspent view drops the totals — they'd be whole-card
+// 14-column grid, so Planned / Spent / Remaining / Spent % / Total Yr land
+// under the group rows' five tiles; on a narrow one the name, then the
+// totals on a second line. `onAdd` gets the same "+" as the groups. The overspent view drops the totals — they'd be whole-card
 // figures over a filtered list.
 function CardHeader({
   name,
@@ -996,9 +1124,10 @@ function CardHeader({
   overCount,
   plannedCents,
   spentCents,
+  ytdCents,
   currency,
   onOpenSpent,
-  children,
+  onAdd,
 }: {
   name: string;
   open: boolean;
@@ -1006,9 +1135,10 @@ function CardHeader({
   overCount: number | null;
   plannedCents: number;
   spentCents: number;
+  ytdCents: number;
   currency: string;
   onOpenSpent?: () => void;
-  children?: React.ReactNode;
+  onAdd?: () => void;
 }) {
   const remainingCents = plannedCents - spentCents;
   const showTotals = overCount === null;
@@ -1030,6 +1160,8 @@ function CardHeader({
     { label: "Planned", value: formatMoney(plannedCents, currency), color: "text-foreground", onClick: onOpenSpent },
     { label: "Spent", value: formatMoney(spentCents, currency), color: actualColorClass("bills", spentCents), onClick: onOpenSpent },
     { label: "Remaining", value: formatMoney(remainingCents, currency), color: remainingColorClass("bills", remainingCents, plannedCents) },
+    { label: "Spent %", value: progressLabel("bills", spentCents, plannedCents), color: remainingColorClass("bills", remainingCents, plannedCents) },
+    { label: "Total Yr Spent", value: formatMoney(ytdCents, currency), color: "text-foreground" },
   ];
 
   return (
@@ -1039,15 +1171,29 @@ function CardHeader({
       <div className="relative flex flex-wrap items-center gap-x-2 gap-y-0.5 px-4 py-2.5 @md:hidden">
         <span aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={headerWash(open)} />
         {nameButton(false)}
-        <div className="ml-auto flex shrink-0 items-center gap-2">{children}</div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {/* Same "100% spent" readout as the budget groups' phone header. */}
+          {showTotals ? (
+            <span className={`whitespace-nowrap text-[11px] font-bold tabular-nums ${remainingColorClass("bills", remainingCents, plannedCents)}`}>
+              {progressLabel("bills", spentCents, plannedCents)} spent
+            </span>
+          ) : null}
+          {onAdd ? (
+            <button
+              type="button"
+              onClick={onAdd}
+              aria-label={`Add ${name} item`}
+              className={`flex shrink-0 cursor-pointer items-center rounded-md px-1.5 py-1 transition ${TAP_AREA} ${ADD_BTN}`}
+            >
+              <PlusIcon size={10} />
+            </button>
+          ) : null}
+        </div>
         {showTotals ? (
           <span className="w-full whitespace-nowrap pl-[23px] text-xs tabular-nums">
             <span className="font-medium text-foreground">{formatMoney(plannedCents, currency)} / </span>
             <span className={`font-semibold ${actualColorClass("bills", spentCents)}`}>{formatMoney(spentCents, currency)}</span>
-            <span className="font-medium text-foreground"> · Left </span>
-            <span className={`font-semibold ${remainingColorClass("bills", remainingCents, plannedCents)}`}>
-              {formatMoney(remainingCents, currency)}
-            </span>
+            <span className="font-medium text-foreground"> · Total Yr {formatMoney(ytdCents, currency)}</span>
           </span>
         ) : null}
       </div>
@@ -1055,7 +1201,21 @@ function CardHeader({
       {/* Wide card — same columns as the budget group header */}
       <div className="relative hidden grid-cols-14 items-center gap-2 px-3 py-2.5 @md:grid">
         <span aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={headerWash(open)} />
-        <div className="col-span-4 flex min-w-0 items-center">{nameButton(true)}</div>
+        {/* "+" sits in the name column, as on the budget groups, so the
+            five tiles land under theirs. */}
+        <div className="col-span-4 flex min-w-0 items-center gap-2">
+          {nameButton(true)}
+          {onAdd ? (
+            <button
+              type="button"
+              onClick={onAdd}
+              aria-label={`Add ${name} item`}
+              className={`ml-auto flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${ADD_BTN}`}
+            >
+              <PlusIcon size={11} />
+            </button>
+          ) : null}
+        </div>
         {showTotals
           ? tiles.map((t) => {
               const body = (
@@ -1073,10 +1233,17 @@ function CardHeader({
                 <div key={t.label} className={cls}>{body}</div>
               );
             })
-          : <div className="col-span-6" />}
-        <div className="col-span-4 flex min-w-0 items-center justify-end gap-2">{children}</div>
+          : null}
       </div>
     </>
+  );
+}
+
+function PlusIcon({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
   );
 }
 

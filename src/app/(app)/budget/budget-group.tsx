@@ -1,6 +1,7 @@
 "use client";
 
 import { type CSSProperties, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import {
@@ -11,8 +12,8 @@ import {
   reorderSubcategories,
 } from "./actions";
 import { ModalShell } from "@/components/modal-shell";
-import { ACTUAL_LABEL, actualColorClass, BudgetRow, mismatchPillClass, PILL_BASE, remainingColorClass, remainingText } from "./budget-row";
-import { ACC, ACC_CHIP, AccentEdge, SECTION_CLS, headerWash } from "./category-icons";
+import { ACTUAL_LABEL, actualColorClass, BudgetRow, mismatchPillClass, PILL_BASE, progressLabel, remainingColorClass, remainingText } from "./budget-row";
+import { ACC, ACC_CHIP, ADD_BTN, AccentEdge, SECTION_CLS, TAP_AREA, headerWash } from "./category-icons";
 import type { GroupData, RowData } from "./types";
 import { isHiddenPaidOffDebt } from "./types";
 
@@ -30,25 +31,6 @@ type Props = {
   /** Overspent view: just the item rows — no group header or subtotal. */
   rowsOnly?: boolean;
 };
-
-// Phone only: an invisible ~40px tap area around a small button, so the
-// button looks the same but is easy to hit with a thumb.
-const TAP_AREA = "relative before:absolute before:-inset-2.5 before:content-[''] sm:before:hidden";
-
-// Per-kind accent for the "+ Add" pill so users can tell at a glance which
-// group a button belongs to when it's the only thing visible.
-// The "+" add button, tinted with the card's own --acc colour.
-
-const ADD_BTN =
-  "bg-[color-mix(in_srgb,var(--acc)_14%,var(--surface))] text-[color:var(--acc)] hover:bg-[color-mix(in_srgb,var(--acc)_26%,var(--surface))]";
-
-function progressLabel(kind: CategoryKind, spent: number, planned: number): string {
-  if (planned <= 0) return spent > 0 && (kind === "bills" || kind === "expenses") ? "-100%" : "0%";
-  const raw = (spent / planned) * 100;
-  return spent > planned && (kind === "bills" || kind === "expenses")
-    ? `-${Math.floor(raw)}%`
-    : `${Math.min(100, Math.round(raw * 10) / 10)}%`;
-}
 
 function usePointerReorder(_categoryId: string, rows: RowData[]) {
   const dragId = useRef<string | null>(null);
@@ -208,7 +190,12 @@ export function BudgetGroup({
           </span>
         </button>
         <CategoryGroupMenu group={group} className="shrink-0" />
-        <div className="ml-auto flex shrink-0 items-center text-[11px] tabular-nums">
+        <div className="ml-auto flex shrink-0 items-center gap-2 text-[11px] tabular-nums">
+          {/* The desktop "Spent %" tile, folded into the empty space before
+              the "+" — the second line is already full on a 375px phone. */}
+          <span className={`whitespace-nowrap font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+            {progressLabel(group.kind, visibleSpentTotal, visiblePlannedTotal)} {headerActualLabel.toLowerCase()}
+          </span>
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
@@ -241,7 +228,7 @@ export function BudgetGroup({
         onClick={onToggle}
       >
         <span aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={headerWash(open)} />
-        <div className="relative col-span-4 flex min-w-0 items-center">
+        <div className="col-span-4 flex min-w-0 items-center">
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); onToggle(); }}
@@ -265,26 +252,21 @@ export function BudgetGroup({
               <span className="hidden @3xl:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
             </span>
           </button>
-          {/* The hover "+" and menu sit over the right end of the name block
-              instead of in the row: invisible, they still took 59px and
-              pushed the count chip into the PLANNED tile on a laptop. */}
-          <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full pl-1 group-hover/header:bg-[color-mix(in_srgb,var(--acc)_10%,var(--surface))]">
-          <button
-            type="button"
-            onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
-            aria-label={`Add ${group.name} item`}
-            className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover/header:opacity-100 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${ADD_BTN}`}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
-          {/* Fades in with the "+" beside it: both are header-level actions
-              that would otherwise sit there competing with the group name. */}
-          <CategoryGroupMenu
-            group={group}
-            className="opacity-0 transition-opacity group-hover/header:opacity-100 focus:opacity-100 focus-visible:opacity-100"
-          />
+          {/* Always shown, in the row's own flow — they used to fade in on
+              hover inside a translated box, and that transform trapped the
+              "···" popup inside a 51×32px area. */}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-0.5">
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
+              aria-label={`Add ${group.name} item`}
+              className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-xs font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${ADD_BTN}`}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            <CategoryGroupMenu group={group} />
           </div>
         </div>
         {/* Four tiles sitting in the same 12-col grid as the rows below, so
@@ -553,7 +535,9 @@ function CategoryGroupMenu({ group, className = "" }: { group: GroupData; classN
       >
         ···
       </button>
-      {open ? (
+      {/* Portalled: each card is its own stacking context (`isolate`), so a
+          popup rendered inside one sat behind the cards below it. */}
+      {open ? createPortal(
         <ModalShell title={`Manage ${group.name}`} onClose={() => setOpen(false)} mobileAlign="top" className="sm:max-w-md">
           <div className="space-y-4 p-5">
             <form
@@ -640,7 +624,8 @@ function CategoryGroupMenu({ group, className = "" }: { group: GroupData; classN
 
             {error ? <p className="rounded-lg bg-negative/10 px-3 py-2 text-sm text-negative">{error}</p> : null}
           </div>
-        </ModalShell>
+        </ModalShell>,
+        document.body,
       ) : null}
     </>
   );

@@ -19,7 +19,7 @@ export function AddCategoryGroupButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex h-9 sm:h-7 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg bg-brand-soft px-2.5 text-xs font-semibold text-brand ring-1 ring-brand/25 transition hover:ring-brand/50 sm:rounded-full sm:px-3"
+        className="inline-flex h-9 sm:h-7 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg bg-surface px-2.5 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-teal-50 hover:ring-teal-400 dark:hover:bg-teal-950/40 dark:hover:ring-teal-600 sm:rounded-full sm:px-3"
       >
         <span aria-hidden>+</span>
         {/* Full name ran off the edge of the phone toolbar. */}

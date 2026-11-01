@@ -224,6 +224,16 @@ export default async function BudgetPage({
   const actuals = actualsSinceAnchor.filter((a) => a.month === month.firstOfMonth);
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
+  // Roll-in is done once every item that "Roll in" would copy (the same skips
+  // as previousMonthPlanRows: $0, Irregular Bills, Travel Log items, paid-off
+  // debts) already has a plan this month — typed or rolled in.
+  const irregularSubIdSet = new Set((irregularBills ?? []).map((b) => b.subcategory_id).filter(Boolean));
+  const tripSubIdSet = new Set((subs ?? []).filter((s) => (s as { receives_trip_plans?: boolean }).receives_trip_plans).map((s) => s.id));
+  const paidOffDebtSubIdSet = new Set((debts ?? []).filter((d) => (d.current_balance_cents ?? 0) <= 0).map((d) => d.subcategory_id));
+  const planRolledIn = (planRows ?? [])
+    .filter((p) => p.month === prevFirstOfMonth && (p.planned_cents ?? 0) > 0)
+    .filter((p) => !irregularSubIdSet.has(p.subcategory_id) && !tripSubIdSet.has(p.subcategory_id) && !paidOffDebtSubIdSet.has(p.subcategory_id))
+    .every((p) => plannedBySub.has(p.subcategory_id));
   // A future trip's Planned, counted on Restaurant Travel / Traveling/Trips in
   // the month it starts. Added to whatever was typed on the Budget for the
   // item (budget_plans holds only that extra), never replacing it.
@@ -941,6 +951,8 @@ export default async function BudgetPage({
         enabled: rolloverInEnabled,
         deficitCents,
         prevMonthLabel: labelForKey(month.prevKey),
+        // Answered (rolled in or skipped) for this month, or nothing left to copy.
+        rolledIn: planRolledIn || (household.plans_rolled_month ?? "") >= month.firstOfMonth,
       }}
       subOptions={subOptions}
       accountOptions={accountOptions}

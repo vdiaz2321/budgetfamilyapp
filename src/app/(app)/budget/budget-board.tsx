@@ -6,7 +6,7 @@ import { formatMoney } from "@/lib/money";
 import { rollRenewalForward } from "@/lib/subscription-renewal";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { addToPlan, copyPlansFromPreviousMonth, listPayees, matchIrregularPlansToSpent, matchPlansToSpent, restoreIrregularPlansSnapshot, restorePlansSnapshot, setRollover, setRolloverOverride, trimFromPlan } from "./actions";
+import { addToPlan, copyPlansFromPreviousMonth, listPayees, matchIrregularPlansToSpent, matchPlansToSpent, restoreIrregularPlansSnapshot, restorePlansSnapshot, setRollover, setRolloverOverride, skipPlanRollIn, trimFromPlan, undoPlanRollIn } from "./actions";
 import { advanceSubscriptionRenewal, matchSubscriptionPlansToSpent, restoreSubscriptionPlansSnapshot, skipSubscriptionCycle } from "../subscriptions/actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
@@ -56,6 +56,7 @@ type Props = {
     enabled: boolean; // is last month's leftover included in this month?
     deficitCents: number; // ≤ 0: past overspending not yet paid back, always included
     prevMonthLabel: string;
+    rolledIn: boolean; // every item Roll in would copy already has a plan this month
   };
   subOptions: SubOption[];
   accountOptions: AccountOption[];
@@ -629,7 +630,6 @@ export function BudgetBoard({
         {/* Left-to-budget hero card */}
         <div ref={heroRef}>
         <SummaryHeroCard
-          heroSubOptions={subOptions}
           displayLeft={displayLeft}
           incomePlanned={incomePlanned}
           outflowPlanned={outflowPlanned}
@@ -694,7 +694,7 @@ export function BudgetBoard({
             {/* Same order on both widths: [Due this week] [+ Transaction]
                 [+ Cat Group], pushed right on mobile where the toolbar has
                 no card chrome, left-aligned on desktop. */}
-            <div className="ml-auto flex items-center gap-1.5 sm:ml-0">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:ml-0">
               {dueThisWeek.length > 0 && (
                 <button
                   type="button"
@@ -715,10 +715,21 @@ export function BudgetBoard({
               >
                 + Transaction
               </button>
+              {/* Zero-based budgeting: give the unplanned money a job, or take
+                  one away when the month plans more than it has. */}
+              {displayLeft !== 0 && (
+                <AssignLeftover
+                  mode={displayLeft < 0 ? "trim" : "assign"}
+                  leftoverCents={displayLeft}
+                  monthKey={month.firstOfMonth}
+                  currency={currency}
+                  options={subOptions}
+                />
+              )}
               <AddCategoryGroupButton />
             </div>
-            {/* Desktop only: + Bulk add items and the progress switch follow
-                + Transaction on the left, not pushed to the far edge. */}
+            {/* Desktop only: + Bulk add items follows the buttons on the left;
+                the progress switch sits at the far right. */}
             <div className="hidden sm:block">
               <BulkAddSubcategories groups={groups} />
             </div>
@@ -729,15 +740,11 @@ export function BudgetBoard({
               aria-checked={detailsExpanded}
               aria-label={`Progress ${detailsExpanded ? "On" : "Off"}`}
               onClick={() => setRowDetail((current) => ({ ...current, expanded: current.expanded !== true }))}
-              className={`relative hidden h-7 items-center rounded-full p-1 transition sm:flex ${
-                detailsExpanded
-                  ? "bg-brand-soft text-brand ring-1 ring-brand/20"
-                  : "bg-surface text-foreground ring-1 ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
-              }`}
+              className="relative hidden h-7 items-center rounded-full bg-surface p-1 text-foreground ring-1 ring-line transition hover:bg-teal-50 sm:ml-auto sm:flex dark:hover:bg-teal-950/40"
             >
               <span
                 aria-hidden
-                className={`relative h-5 w-9 rounded-full transition ${detailsExpanded ? "bg-brand" : "bg-muted/50"}`}
+                className={`relative h-5 w-9 rounded-full transition ${detailsExpanded ? "bg-(--viz-bills)" : "bg-(--viz-bills)/25"}`}
               >
                 <span
                     className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-[left,right] ${
@@ -1129,15 +1136,15 @@ function AssignLeftover({
       <button
         type="button"
         onClick={() => { setAmount(""); setError(null); setOpen(true); }}
-        className={`inline-flex w-fit cursor-pointer items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition ${
+        className={`inline-flex h-9 w-fit shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg px-2.5 text-xs font-bold ring-1 transition sm:h-7 sm:rounded-full sm:px-3 ${
           trimming
             ? "bg-negative/10 text-negative ring-negative/20 hover:bg-negative/20"
-            : "bg-brand-soft text-brand ring-brand/20 hover:bg-brand/20"
+            : "bg-positive/10 text-positive ring-positive/30 hover:bg-positive/20"
         }`}
       >
         <span aria-hidden>{trimming ? "−" : "+"}</span>
         {trimming ? "Trim" : "Assign"}
-        <span className="@max-[16rem]/stat:hidden">{trimming ? " an item" : " to an item"}</span>
+        <span className="max-sm:hidden">{trimming ? " an item" : " to an item"}</span>
       </button>
 
       {open ? (
@@ -1829,7 +1836,6 @@ function SummaryHeroCard({
   rollover,
   matchCandidates,
   monthFirstOfMonth,
-  heroSubOptions,
   currency,
 }: {
   displayLeft: number;
@@ -1844,7 +1850,6 @@ function SummaryHeroCard({
   rollover: Props["rollover"];
   matchCandidates: MatchCandidate[];
   monthFirstOfMonth: string;
-  heroSubOptions: SubOption[];
   currency: string;
 }) {
   // The top row: Income, Planned, Spent, Left. Left is income plus last
@@ -1875,9 +1880,28 @@ function SummaryHeroCard({
             the left pane, far narrower than the window. */}
         <div className="grid grid-cols-2 gap-2.5 md:gap-3 @3xl:grid-cols-4">
           <HeroStat accentVar="var(--positive)" className="@3xl:text-center">
-            {/* Received, not planned: Left is worked out from this figure. */}
-            <p className={TITLE}>Income Received</p>
-            <p className={`${FIGURE} text-positive`}>{formatMoney(actualIncome, currency)}</p>
+            {/* Expected up top so Planned has a figure to compare against even
+                before payday (end of month); what has come in sits under it.
+                Left still works from the received figure. */}
+            <p className={TITLE}>Income Expected</p>
+            <p className={`${FIGURE} text-positive`}>{formatMoney(incomePlanned, currency)}</p>
+            <p className={`${SUBLINE} flex flex-wrap items-center gap-x-1 @3xl/hero:justify-center`}>
+              <span>Received:</span>
+              <span
+                className={`inline-flex items-center gap-0.5 font-bold tabular-nums ${actualIncome > 0 ? "text-positive" : "text-foreground"}`}
+              >
+                {formatMoney(actualIncome, currency)}
+                {actualIncome > 0 && actualIncome >= incomePlanned && (
+                  <svg aria-label="all received" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 shrink-0">
+                    <path
+                      fillRule="evenodd"
+                      d="M16.7 5.3a1 1 0 0 1 0 1.4l-8 8a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.4L8 12.6l7.3-7.3a1 1 0 0 1 1.4 0Z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                )}
+              </span>
+            </p>
             {/* Last month's money not used yet: the roll-in pill before any is
                 in, then "Left to Rollover" once some is. */}
             <div className="mt-1.5 flex flex-wrap items-center gap-1 empty:hidden @3xl/hero:justify-center">
@@ -1908,7 +1932,7 @@ function SummaryHeroCard({
                 is money with no job yet. Hidden when they match. */}
             {displayLeft !== 0 && (
               <p className={SUBLINE}>
-                {displayLeft < 0 ? "Over by" : "Unplanned"}:{" "}
+                {displayLeft < 0 ? "Over by" : "Left to Budget"}:{" "}
                 <span className={`font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-positive"}`}>
                   {formatMoney(Math.abs(displayLeft), currency)}
                 </span>
@@ -1918,17 +1942,6 @@ function SummaryHeroCard({
                 tile is too narrow for both. */}
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 @3xl/hero:justify-center">
               <RollInPlanControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
-              {/* Zero-based budgeting: give the unplanned money a job, or take
-                  one away when the month plans more than it has. */}
-              {displayLeft !== 0 && (
-                <AssignLeftover
-                  mode={displayLeft < 0 ? "trim" : "assign"}
-                  leftoverCents={displayLeft}
-                  monthKey={monthFirstOfMonth}
-                  currency={currency}
-                  options={heroSubOptions}
-                />
-              )}
             </div>
           </HeroStat>
           <HeroStat accentVar="var(--negative)" className="@3xl:text-center">
@@ -2369,7 +2382,7 @@ function RollInPlanControl({
               onClick={() => {
                 const snap = snapshot;
                 startUndo(async () => {
-                  await restorePlansSnapshot(monthFirstOfMonth, snap);
+                  await undoPlanRollIn(monthFirstOfMonth, snap);
                   setSnapshot(null);
                 });
               }}
@@ -2403,16 +2416,27 @@ function RollInPlanControl({
                   {copyPending ? "Copying…" : "Yes, roll in"}
                 </button>
               </form>
-              <button
-                type="button"
-                disabled={copyPending}
-                onClick={() => setConfirming(false)}
-                className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40 disabled:opacity-60"
+              {/* "No" answers the question for this month: nothing is
+                  copied and the Roll in button goes away. */}
+              <form
+                action={(fd) =>
+                  startCopy(async () => {
+                    await skipPlanRollIn(fd);
+                    setConfirming(false);
+                  })
+                }
               >
-                Cancel
-              </button>
+                <input type="hidden" name="month" value={monthFirstOfMonth} />
+                <button
+                  type="submit"
+                  disabled={copyPending}
+                  className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40 disabled:opacity-60"
+                >
+                  No, skip
+                </button>
+              </form>
             </div>
-          ) : (
+          ) : rollover.rolledIn ? null : (
             <button
               type="button"
               onClick={() => setConfirming(true)}
@@ -2467,7 +2491,7 @@ function StickyFooterBar({
           {formatMoney(Math.abs(displayLeft), currency)}
         </p>
         {/* Same words as the hero's Planned card, so it fits one line. */}
-        <p className="text-[10px] font-bold uppercase tracking-wide text-foreground sm:text-xs">{displayLeft < 0 ? "Over by" : "Unplanned"}</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-foreground sm:text-xs">{displayLeft < 0 ? "Over by" : "Left to Budget"}</p>
       </div>
       <div className="min-w-0 border-l border-line px-1 text-center">
         <p className="truncate text-sm font-bold tabular-nums text-negative sm:text-lg">{formatMoney(actualSpent, currency)}</p>

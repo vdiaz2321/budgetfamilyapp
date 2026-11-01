@@ -23,6 +23,15 @@ const ACTUAL_WORD: Record<CategoryKind, string> = {
 // generic (remaining/planned < 15%) rule only applies to money going out.
 // No amber: a line used up exactly (Left $0.00) is done, so it goes gray, and
 // a nearly-used line drops from green to plain text rather than warning orange.
+export function progressLabel(kind: CategoryKind, spent: number, planned: number): string {
+  if (planned <= 0) return spent > 0 && (kind === "bills" || kind === "expenses") ? "-100%" : "0%";
+  const raw = (spent / planned) * 100;
+  return spent > planned && (kind === "bills" || kind === "expenses")
+    ? `-${Math.floor(raw)}%`
+    : `${Math.min(100, Math.round(raw * 10) / 10)}%`;
+}
+
+
 export function remainingColorClass(kind: CategoryKind, remaining: number, plannedCents: number): string {
   // Income over plan (remaining below zero) is more money in, not an
   // overspend — it stays green like the rest of income (Victor, 2026-09-30).

@@ -9,7 +9,7 @@ import { adjustDebtBalance } from "@/lib/debts";
 import { saveDebt } from "@/lib/save-debt";
 import { adjustAccountLedger, categoryKindOf, ledgerDelta } from "@/lib/account-ledger";
 import { unwrap } from "@/lib/supabase-result";
-import { previousMonthPlanRows } from "@/lib/plan-roll-in";
+import { markRollInAnswered, previousMonthPlanRows, reopenRollIn } from "@/lib/plan-roll-in";
 import { getSessionContext } from "@/lib/auth-context";
 import { canMoveBetweenKinds, type CategoryKind } from "@/lib/categories";
 
@@ -3097,9 +3097,31 @@ export async function copyPlansFromPreviousMonth(
       "budget_plans roll-in",
     );
   }
+  await markRollInAnswered(supabase, householdId, month);
 
   revalidatePath("/budget");
   return { snapshot, touchedSubIds };
+}
+
+// "No" to rolling last month's plan in: nothing is copied, the button just
+// goes away for this month.
+export async function skipPlanRollIn(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const month = String(formData.get("month") ?? "");
+  if (!/^\d{4}-\d{2}-01$/.test(month)) return;
+  await markRollInAnswered(supabase, householdId, month);
+  revalidatePath("/budget");
+}
+
+// Undo of "Roll in": put the plans back and the Roll in button with them.
+export async function undoPlanRollIn(
+  month: string,
+  snapshot: Array<{ subcategory_id: string; planned_cents: number | null }>,
+) {
+  await restorePlansSnapshot(month, snapshot);
+  const { supabase, householdId } = await requireHousehold();
+  await reopenRollIn(supabase, householdId, month);
+  revalidatePath("/budget");
 }
 
 export async function restorePlansSnapshot(
