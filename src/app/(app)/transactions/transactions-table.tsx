@@ -8,6 +8,7 @@ import { deleteTransaction, listPayees, toggleCleared, updateTransactionAmount }
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
 import { ImportCsvModal } from "./import-csv-modal";
+import { MonthRangePicker, rangeLabel } from "./month-range-picker";
 import { LazyMoveMoney } from "../accounts/move-money";
 import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
 import { TransferEditorModal } from "./transfer-editor-modal";
@@ -78,12 +79,8 @@ const pointsLabel = (c: TravelCells | undefined) => {
   const pts = c.points > 0 ? c.points.toLocaleString("en-US") : "";
   return c.freeNight ? (pts ? `${pts} + Free night` : "Free night") : pts;
 };
-const CalendarIcon = (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <rect x="3" y="5" width="18" height="16" rx="2" />
-    <path d="M16 3v4M8 3v4M3 10h18" />
-  </svg>
-);
+// What the All time button asks the page for: earlier than any transaction.
+const ALL_TIME_FROM = "2000-01-01";
 
 type Props = {
   month: { key: string; label: string; firstOfMonth: string };
@@ -139,8 +136,6 @@ export function TransactionsTable({
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const searchToolbarRef = useRef<HTMLDivElement>(null);
-  const [fromDate, setFromDate] = useState(dateRange.from ?? "");
-  const [toDate, setToDate] = useState(dateRange.to ?? "");
   // Date sort — defaults to descending (newest first). Click header to flip.
   const [dateSort, setDateSort] = useState<"asc" | "desc">("desc");
   const cycleDateSort = () => setDateSort((s) => (s === "asc" ? "desc" : "asc"));
@@ -163,6 +158,7 @@ export function TransactionsTable({
     });
   const anyColFilter = Object.keys(colFilters).length > 0;
   const hasRange = Boolean(dateRange.from || dateRange.to);
+  const isAllTime = dateRange.from === ALL_TIME_FROM && !dateRange.to;
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -212,21 +208,23 @@ export function TransactionsTable({
   // Which actions to offer: an all-cleared selection only needs Unclear, an
   // all-uncleared one only needs Clear, and a mixed selection gets both.
   const selectedClearedCount = () => selectedTxs().filter((t) => t.cleared).length;
-  function applyRange(nextFrom: string, nextTo: string) {
-    const params = new URLSearchParams();
-    if (nextFrom) params.set("from", nextFrom);
-    if (nextTo) params.set("to", nextTo);
-    router.push(params.toString() ? `/transactions?${params}` : "/transactions");
+  function showRange(from: string, to: string | null) {
+    router.push(`/transactions?from=${from}${to ? `&to=${to}` : ""}`);
     // The rows are fetched on the server from these search params, and the
     // client router serves this route from its cache — so without the refresh
-    // the URL changes to an all-time range while the table keeps showing the
-    // month it already had.
+    // the URL changes to a new range while the table keeps showing the rows it
+    // already had.
+    router.refresh();
+  }
+
+  function showMonth(key: string) {
+    // Same session cookie as the month picker, so other pages follow.
+    document.cookie = `budget-month=${key}; path=/; SameSite=Lax`;
+    router.push(`/transactions?month=${key}`);
     router.refresh();
   }
 
   function clearRange() {
-    setFromDate("");
-    setToDate("");
     setSearchOpen(false);
     router.push(`/transactions?month=${month.key}`);
     router.refresh();
@@ -292,7 +290,9 @@ export function TransactionsTable({
     // `month` is whatever month is selected in the picker, which a custom
     // range overrides entirely (see the page's hasRange branch) — naming a
     // range export after it labels August's rows as September's file.
-    const scope = hasRange
+    const scope = isAllTime
+      ? "all-time"
+      : hasRange
       ? dateRange.from && dateRange.to
         ? `${dateRange.from}_to_${dateRange.to}`
         : dateRange.from
@@ -398,13 +398,12 @@ export function TransactionsTable({
           clears the status bar / notch when it pins at the viewport top. */}
       <div className="sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 pb-1 pt-[max(env(safe-area-inset-top),0.75rem)] backdrop-blur-sm md:static md:mx-0 md:px-0 md:pt-3">
       <div className="flex flex-wrap items-center justify-between gap-3 pr-8 sm:pr-1">
-        {hasRange ? (
-          <span className="text-2xl font-bold tracking-tight text-foreground">
-            Custom range
-          </span>
-        ) : (
-          <MonthPicker monthKey={month.key} basePath="/transactions" />
-        )}
+        {/* A range still opens the month grid, so any month is one pick away. */}
+        <MonthPicker
+          monthKey={month.key}
+          basePath="/transactions"
+          label={isAllTime ? "All time" : hasRange ? rangeLabel(dateRange.from, dateRange.to) : undefined}
+        />
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -423,7 +422,7 @@ export function TransactionsTable({
         </div>
       </div>
 
-      {/* Search popover + date range controls */}
+      {/* Search popover + filters */}
       <div className="relative flex flex-wrap items-center gap-1.5 text-sm sm:gap-2">
         <div ref={searchToolbarRef} className="relative contents">
           <button
@@ -465,62 +464,6 @@ export function TransactionsTable({
           ) : null}
         </div>
 
-      {/* Date range — searches across months instead of just the one selected above */}
-        <div className="order-4 grid w-full grid-cols-[1fr_1fr_auto] items-center gap-1 rounded-xl bg-surface px-1.5 py-1 shadow-sm ring-1 ring-line sm:order-3 sm:flex sm:w-auto sm:gap-1.5">
-        <div className="relative min-w-0 sm:w-40 sm:flex-none">
-          {!fromDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-foreground">From</span> : null}
-          <input
-            type="date"
-            aria-label="From date"
-            value={fromDate}
-            onClick={(event) => {
-              try {
-                event.currentTarget.showPicker?.();
-              } catch {
-                // Some browsers only expose their native picker through focus.
-              }
-            }}
-            onChange={(e) => {
-              setFromDate(e.target.value);
-              applyRange(e.target.value, toDate);
-            }}
-            className={`w-full cursor-pointer appearance-none rounded-lg bg-surface py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${fromDate ? "pl-2" : "pl-12 [&::-webkit-datetime-edit]:text-transparent"}`}
-          />
-          <span className="pointer-events-none absolute inset-y-0 right-2 z-10 flex items-center text-foreground">{CalendarIcon}</span>
-        </div>
-        <div className="relative min-w-0 sm:w-40 sm:flex-none">
-          {!toDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-foreground">To</span> : null}
-          <input
-            type="date"
-            aria-label="To date"
-            value={toDate}
-            onClick={(event) => {
-              try {
-                event.currentTarget.showPicker?.();
-              } catch {
-                // Some browsers only expose their native picker through focus.
-              }
-            }}
-            onChange={(e) => {
-              setToDate(e.target.value);
-              applyRange(fromDate, e.target.value);
-            }}
-            className={`w-full cursor-pointer appearance-none rounded-lg bg-surface py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${toDate ? "pl-2" : "pl-7 [&::-webkit-datetime-edit]:text-transparent"}`}
-          />
-          <span className="pointer-events-none absolute inset-y-0 right-2 z-10 flex items-center text-foreground">{CalendarIcon}</span>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            setFromDate("2000-01-01");
-            setToDate("");
-            applyRange("2000-01-01", "");
-          }}
-          className="shrink-0 rounded-lg bg-sky-200 px-2 py-1.5 font-medium text-foreground ring-1 ring-black/10 transition hover:bg-black/20 sm:px-3 dark:bg-sky-900/50 dark:ring-white/15 dark:hover:bg-white/25"
-        >
-          All time
-        </button>
-        </div>
         <button
           type="button"
           onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
@@ -552,11 +495,22 @@ export function TransactionsTable({
           </svg>
           Move Money
         </button>
+        <MonthRangePicker
+          monthKey={month.key}
+          monthLabel={month.label}
+          from={dateRange.from}
+          to={dateRange.to}
+          isAllTime={isAllTime}
+          onRange={showRange}
+          onMonth={showMonth}
+          onAllTime={() => showRange(ALL_TIME_FROM, null)}
+          onClear={clearRange}
+        />
         {/* Filter chip: show only rows still un-reconciled (cleared=false).
             Uses viz-savings blue when active so it never reads as
             purple/brand. On mobile it sits between Select and +Transaction
             (order-2), shrunk to fit one row; on desktop it moves to the right of
-            the date pill (order-4). */}
+            Date Range (order-4). */}
         <button
           type="button"
           aria-pressed={uncleredOnly}
@@ -620,15 +574,6 @@ export function TransactionsTable({
             className="rounded-xl px-2 py-1.5 font-medium text-muted transition hover:bg-brand-soft hover:text-foreground sm:px-3"
           >
             Clear search
-          </button>
-        ) : null}
-        {hasRange ? (
-          <button
-            type="button"
-            onClick={clearRange}
-            className="rounded-xl px-3 py-1.5 font-medium text-muted hover:bg-brand-soft hover:text-foreground"
-          >
-            Clear — back to {month.label}
           </button>
         ) : null}
       </div>

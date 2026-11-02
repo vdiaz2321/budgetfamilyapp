@@ -12,7 +12,10 @@
     "test:ssa-statement": "node --test tests/ssa-statement.test.mjs",
     "test:ssa": "node --test tests/ssa.test.mjs",
     "test:inflation": "node --test tests/inflation.test.mjs",
-    "test:fers": "node --test tests/fers.test.mjs"
+    "test:fers": "node --test tests/fers.test.mjs",
+    "test:transactions-import": "node --test tests/transactions-import.test.mjs",
+    "test:close-adjustments": "node --test tests/close-adjustments.test.mjs",
+    "test:fund-contributions": "node --test tests/fund-contributions.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

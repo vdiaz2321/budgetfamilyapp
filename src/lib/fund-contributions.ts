@@ -192,3 +192,29 @@ export function savingsGoalProgress(input: {
     requiredMonthlyCents,
   };
 }
+
+/**
+ * Which investment slot one transaction counts toward as a contribution, or
+ * null when it doesn't count. This is `v_investment_contributions_monthly` for
+ * a single row, so a list of transactions adds up to the view's figure; if one
+ * changes, change both.
+ */
+export function contributionSlotOf(
+  tx: {
+    account_id: string | null;
+    bucket_id: string | null;
+    movement_type: string | null;
+    linked_bucket_id: string | null;
+    linked_account_id: string | null;
+  },
+  isFundAccount: (accountId: string) => boolean,
+  accountIdByBucket: Map<string, string>,
+): FundSlot | null {
+  if (tx.movement_type) return null;
+  const bucketId = tx.bucket_id ?? tx.linked_bucket_id;
+  const bucketAccount = bucketId ? accountIdByBucket.get(bucketId) ?? null : null;
+  const accountId = [tx.account_id, bucketAccount, tx.linked_account_id].find(
+    (id): id is string => id != null && isFundAccount(id),
+  );
+  return accountId ? { accountId, bucketId } : null;
+}

@@ -6,6 +6,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { centsToGroupedDisplay, displayToCents } from "@/lib/money";
 import type { AccountData } from "./types";
 import { clearMonthEndCheck, saveMonthEndValue } from "./month-end-actions";
+import { CloseChangesNotice, type CloseChangesData } from "./close-changes";
 
 // Month-end update: one list of every balance Victor checks against a
 // statement (Investments, Banking, Kids Funding), with last month beside the
@@ -93,12 +94,16 @@ export function MonthEndUpdateModal({
   currentMonth,
   checks,
   moves = [],
+  closeChanges = null,
+  onReviewCloseChanges,
   onClose,
 }: {
   accounts: AccountData[];
   currentMonth: string;
   checks: MonthEndCheck[];
   moves?: MonthEndMove[];
+  closeChanges?: CloseChangesData | null;
+  onReviewCloseChanges?: () => void;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -263,6 +268,11 @@ export function MonthEndUpdateModal({
       }
     >
       <div className="px-4 pb-4 pt-3 sm:px-5">
+        {closeChanges && onReviewCloseChanges ? (
+          <div className="mb-3">
+            <CloseChangesNotice data={closeChanges} onReview={onReviewCloseChanges} />
+          </div>
+        ) : null}
         {/* Progress */}
         <div className="mb-3">
           <div className="flex items-baseline justify-between text-sm">

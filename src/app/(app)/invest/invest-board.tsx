@@ -17,6 +17,8 @@ import { AllHoldingsTable } from "./holdings-rollup";
 import { describeUpdate } from "@/lib/updated-ago";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { SavingsPanel, type SavingsPanelProps } from "./savings-panel";
+import { ContributionsModal, type ContributionsTarget } from "./contributions-modal";
+import type { ContributionLine } from "@/lib/contribution-lines";
 
 export type YearCell = {
   year: number;
@@ -175,6 +177,8 @@ type Props = {
   years: number[]; // newest first
   currency: string;
   imports: InvestmentImportView[];
+  /** The transactions behind the Contrib figures. */
+  contributionLines: ContributionLine[];
   /** Net contributions logged into investment accounts this calendar month. */
   contributedThisMonthCents: number;
   currentMonthLabel: string;
@@ -318,6 +322,7 @@ export function InvestBoard({
   accounts,
   years,
   currency,
+  contributionLines,
   imports,
   contributedThisMonthCents,
   currentMonthLabel,
@@ -993,13 +998,13 @@ export function InvestBoard({
             />
           )}
           <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-            <PerfTable title="Investments" accounts={mine} year={tableYear} years={years} onYearChange={setTableYear} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
+            <PerfTable title="Investments" contributionLines={contributionLines} accounts={mine} year={tableYear} years={years} onYearChange={setTableYear} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
             {/* The kids' accounts, kept apart from the household's: they're
                 not in net worth, so they never mix into the totals above. */}
             {kidsAccounts.length > 0 ? (
               <>
                 <div className="border-t border-foreground/10" />
-                <PerfTable title="Kids Funding" accounts={kidsAccounts} year={tableYear} years={years} onYearChange={setTableYear} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
+                <PerfTable title="Kids Funding" contributionLines={contributionLines} accounts={kidsAccounts} year={tableYear} years={years} onYearChange={setTableYear} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
               </>
             ) : null}
             <div className="border-t border-foreground/10" />
@@ -1027,11 +1032,10 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
   const [view, setView] = useState<View>("holdings");
   const [addingHoldings, setAddingHoldings] = useState(false);
   const [addingMonth, setAddingMonth] = useState(false);
-  // Starts folded: it holds only the positions imported or typed in (a slice
-  // of the portfolio), so open by default it read like the whole picture.
-  // An import or Add holdings opens it so the result is in view.
-  const [expanded, setExpanded] = useState(false);
-  const open = expanded || addingHoldings || !!importNote;
+  // Starts open (Victor, 2026-11-02), like the tables above it. Folding it holds
+  // for the session; an import or Add holdings reopens it so the result is in view.
+  const [expandState, setExpandState] = useSessionCollapse("invest-holdings-open", () => ({ open: true }));
+  const open = expandState.open || addingHoldings || !!importNote;
 
   // Only accounts/buckets with something on file (holdings or months, imported
   // or typed) are listed. A brand-new one is started from Add month, whose own
@@ -1059,7 +1063,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
       <div className="flex flex-col items-start gap-3 border-b border-line bg-brand-soft/35 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => setExpandState((s) => ({ ...s, open: !s.open }))}
           aria-expanded={open}
           className="flex min-w-0 items-center gap-2 text-left"
         >
@@ -1094,7 +1098,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2">
         <div className="flex flex-wrap items-center gap-1">
           {(["holdings", "performance"] as const).map((option) => (
             <button
@@ -1112,38 +1116,42 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
           ))}
         </div>
 
-        {view === "performance" ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {destinations.length > 0 ? (
-              <select
-                value={destination?.key ?? ""}
-                onChange={(event) => { setDestKey(event.target.value); setAddingMonth(false); }}
-                className="rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-xs sm:text-sm lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                {destinationGroups.map((group) => (
-                  <optgroup key={group} label={group}>
-                    {destinations.filter((d) => d.group === group).map((d) => (
-                      <option key={d.key} value={d.key}>{d.label}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => setAddingMonth((current) => !current)}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs sm:text-sm lg:text-sm font-semibold text-white transition hover:bg-brand/90"
-            >
-              {addingMonth ? "Close" : "Add month"}
-            </button>
-          </div>
-        ) : null}
       </div>
 
       {view === "holdings" ? (
         <AllHoldingsTable imports={imports} accounts={accounts} currency={currency} />
       ) : (
         <>
+          {/* Laid out like the Holdings toolbar: the controls, then the figures
+              beside them. */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              {destinations.length > 0 ? <span className="text-xs sm:text-sm lg:text-sm text-muted">Select an account</span> : null}
+              {destinations.length > 0 ? (
+                <select
+                  value={destination?.key ?? ""}
+                  onChange={(event) => { setDestKey(event.target.value); setAddingMonth(false); }}
+                  className="rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-xs sm:text-sm lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  {destinationGroups.map((group) => (
+                    <optgroup key={group} label={group}>
+                      {destinations.filter((d) => d.group === group).map((d) => (
+                        <option key={d.key} value={d.key}>{d.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setAddingMonth((current) => !current)}
+                className="rounded-md bg-brand px-3 py-1.5 text-xs sm:text-sm lg:text-sm font-semibold text-white transition hover:bg-brand/90"
+              >
+                {addingMonth ? "Close" : "Add month"}
+              </button>
+            </div>
+            {ledger ? <PerformanceSummary rows={ledger.performance} currency={currency} /> : null}
+          </div>
           {addingMonth ? (
             <div className="border-b border-line bg-background/40 px-4 py-3">
               <AddMonthForm
@@ -1158,15 +1166,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
             </div>
           ) : null}
           {ledger ? (
-            <>
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-4 py-2.5">
-                <span className="text-xs sm:text-sm lg:text-sm text-muted">
-                  {ledgerLabel(ledger.accountName, ledger.bucketName)} · {ledger.performance.length} month{ledger.performance.length === 1 ? "" : "s"}
-                </span>
-                <PerformanceFreshness rows={ledger.performance} />
-              </div>
-              <ImportedPerformanceTable rows={ledger.performance} currency={currency} />
-            </>
+            <ImportedPerformanceTable rows={ledger.performance} currency={currency} />
           ) : (
             <p className="px-4 py-5 text-sm lg:text-base text-muted">
               No monthly history for {destination?.label ?? "this account"} yet. Use <span className="font-medium text-foreground">Add month</span>{" "}to record an account&apos;s month-end balance.
@@ -1179,23 +1179,33 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
   );
 }
 
-/** Same "updated … days ago" line as Holdings, for one account's months. */
-function PerformanceFreshness({ rows }: { rows: InvestmentPerformanceImportRow[] }) {
+/** Same two lines as the Holdings summary, for one account's months. */
+function PerformanceSummary({ rows, currency }: { rows: InvestmentPerformanceImportRow[]; currency: string }) {
   const latest = rows.reduce<string | null>((max, row) => (max && max > row.updatedAt ? max : row.updatedAt), null);
-  if (!latest) return null;
-  const { label, stale } = describeUpdate(latest);
+  const newest = rows.reduce<InvestmentPerformanceImportRow | null>((top, row) => (top && top.asOfDate > row.asOfDate ? top : row), null);
+  const freshness = latest ? describeUpdate(latest) : null;
   return (
-    <span className={`text-xs sm:text-[15px] ${stale ? "font-semibold text-negative" : "text-muted"}`}>
-      updated {label}
-    </span>
+    <div className="flex flex-col items-start text-left">
+      <span className="text-base lg:text-lg font-bold tabular-nums">
+        {rows.length} month{rows.length === 1 ? "" : "s"}
+        {newest ? ` · ${formatMoney(newest.endingBalanceCents, currency)}` : ""}
+      </span>
+      {freshness ? (
+        <span className={`text-xs font-semibold sm:text-sm ${freshness.stale ? "text-negative" : "text-foreground"}`}>
+          updated {freshness.label}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
 function ImportedPerformanceTable({ rows, currency }: { rows: InvestmentPerformanceImportRow[]; currency: string }) {
   return (
-    <div className="max-h-80 overflow-auto rounded-lg ring-1 ring-line">
+    <div className="max-h-80 overflow-auto">
       <table className="min-w-full text-xs sm:text-sm lg:text-sm">
-        <thead className="sticky top-0 bg-surface text-left max-sm:text-[11px] sm:text-sm lg:text-sm uppercase tracking-wide text-muted">
+        {/* Holdings' header tint, mixed solid: this one stays pinned while the
+            months scroll under it. */}
+        <thead className="sticky top-0 bg-[color-mix(in_srgb,var(--background)_50%,var(--surface))] text-left max-sm:text-[11px] sm:text-sm lg:text-sm uppercase tracking-wide text-muted">
           <tr><th className="px-3 py-2 text-center">Month</th><th className="px-3 py-2 text-center">Beginning balance</th><th className="px-3 py-2 text-center">Market change</th><th className="px-3 py-2 text-center">Dividends</th><th className="px-3 py-2 text-center">Withdrawal</th><th className="px-3 py-2 text-center">Ending balance</th><th className="px-3 py-2 text-center">% Growth</th></tr>
         </thead>
         <tbody className="divide-y divide-line">
@@ -1680,6 +1690,7 @@ const PCT = "mx-auto block w-fit min-w-[6ch] text-right";
 
 function PerfTable({
   title,
+  contributionLines,
   accounts,
   year,
   years,
@@ -1690,6 +1701,7 @@ function PerfTable({
   noCard,
 }: {
   title: string;
+  contributionLines: ContributionLine[];
   accounts: InvestAccount[];
   year: number;
   /** Years the picker offers, newest first. */
@@ -1712,6 +1724,13 @@ function PerfTable({
   // actually render a chevron, but the map is keyed uniformly.
   const [bucketsOpen, setBucketsOpen] = useSessionCollapse("invest-buckets-open", () => ({}));
   const toggleBuckets = (id: string) => setBucketsOpen((s) => ({ ...s, [id]: !s[id] }));
+
+  // The Contrib figure whose transactions are showing in the popup.
+  const [contribTarget, setContribTarget] = useState<ContributionsTarget | null>(null);
+  const accountSlots = (a: InvestAccount) => [
+    { accountId: a.id, bucketId: null },
+    ...a.buckets.map((b) => ({ accountId: a.id, bucketId: b.id })),
+  ];
 
   // Rows sort by the clicked column instead of being dragged into order:
   // first click sorts high to low (A–Z for Account), the next flips it.
@@ -2034,13 +2053,15 @@ function PerfTable({
                     </td>
                     ) : null}
                     <td className="px-1 py-1">
-                      {hasBuckets ? (
-                        <span className={`${FIG} text-[13px] sm:text-sm tabular-nums font-semibold`}>
-                          {eff.contributedCents ? formatMoney(eff.contributedCents, currency) : null}
-                        </span>
-                      ) : (
-                        <LedgerCell compact cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
-                      )}
+                      {/* Same figure either way: a row without buckets has only
+                          its own slot. Clicking it lists what's behind it. */}
+                      <LedgerCell
+                        compact
+                        cents={eff.contributedCents}
+                        currency={currency}
+                        tone={eff.contributedCents === 0 ? zeroCls : "font-semibold"}
+                        onClick={() => setContribTarget({ title: a.name, cents: eff.contributedCents, slots: accountSlots(a) })}
+                      />
                     </td>
                     <td className="relative px-1 py-1">
                       {eff.accruedManual ? <PinnedMark /> : null}
@@ -2090,7 +2111,13 @@ function PerfTable({
                           </td>
                           ) : null}
                           <td className="px-1 py-1">
-                            <LedgerCell compact cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                            <LedgerCell
+                              compact
+                              cents={parentCell?.contributedCents ?? 0}
+                              currency={currency}
+                              tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""}
+                              onClick={() => setContribTarget({ title: a.name, cents: parentCell?.contributedCents ?? 0, slots: [{ accountId: a.id, bucketId: null }] })}
+                            />
                           </td>
                           <td className="px-1 py-1">
                             <EditCell compact accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
@@ -2130,7 +2157,13 @@ function PerfTable({
                             </td>
                             ) : null}
                             <td className="px-1 py-1">
-                              <LedgerCell compact cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                              <LedgerCell
+                                compact
+                                cents={bc?.contributedCents ?? 0}
+                                currency={currency}
+                                tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""}
+                                onClick={() => setContribTarget({ title: b.name, cents: bc?.contributedCents ?? 0, slots: [{ accountId: a.id, bucketId: b.id }] })}
+                              />
                             </td>
                             <td className="relative px-1 py-1">
                               {bc?.accruedManual ? <PinnedMark /> : null}
@@ -2169,7 +2202,14 @@ function PerfTable({
                 <span className={FIG}>{endAny ? formatMoney(endSum, currency) : null}</span>
               </td>
               ) : null}
-              <td className="px-2 py-2 text-center tabular-nums"><span className={FIG}>{contribSum ? formatMoney(contribSum, currency) : null}</span></td>
+              <td className="px-2 py-2 text-center tabular-nums">
+                <LedgerCell
+                  compact
+                  cents={contribSum}
+                  currency={currency}
+                  onClick={() => setContribTarget({ title, cents: contribSum, slots: accounts.flatMap(accountSlots) })}
+                />
+              </td>
               <td
                 className={`px-2 py-2 text-center tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
                 style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}
@@ -2192,6 +2232,9 @@ function PerfTable({
         </table>
       </div>
       </>}
+      {contribTarget ? (
+        <ContributionsModal target={contribTarget} allLines={contributionLines} year={year} currency={currency} onClose={() => setContribTarget(null)} />
+      ) : null}
     </section>
   );
 }
@@ -2211,20 +2254,35 @@ function LedgerCell({
   currency,
   tone,
   compact,
+  onClick,
 }: {
   cents: number;
   currency: string;
   tone?: string;
   // 13px instead of 14px — the Investments table uses it to fit its card.
   compact?: boolean;
+  // Makes the figure a link to the transactions behind it. A row's own click
+  // opens its buckets, so this one stops there.
+  onClick?: () => void;
 }) {
+  const className = `flex items-center gap-1 tabular-nums ${compact ? "mx-auto w-fit min-w-[10.5ch] justify-end text-[13px] sm:text-sm" : "justify-center px-1 text-center text-sm lg:text-base"} ${tone ?? ""}`;
+  if (cents && onClick) {
+    return (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+        className={`${className} rounded underline decoration-dotted underline-offset-4 transition hover:bg-sky-100 dark:hover:bg-sky-900/50`}
+      >
+        {formatMoney(cents, currency)}
+      </button>
+    );
+  }
   // A zero contribution prints nothing: "$0.00" on most rows buried the few
   // accounts that actually received money this year.
-  return (
-    <span className={`flex items-center gap-1 tabular-nums ${compact ? "mx-auto w-fit min-w-[10.5ch] justify-end text-[13px] sm:text-sm" : "justify-center px-1 text-center text-sm lg:text-base"} ${tone ?? ""}`}>
-      {cents ? formatMoney(cents, currency) : null}
-    </span>
-  );
+  return <span className={className}>{cents ? formatMoney(cents, currency) : null}</span>;
 }
 
 // Editable contributed / gain cell — reads like text, saves on blur. Editing a

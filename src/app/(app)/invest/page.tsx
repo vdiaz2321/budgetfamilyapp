@@ -10,6 +10,7 @@ import {
 import type { SavingsCardData } from "./savings-panel";
 import type { CashReserveRow, CashReservesData } from "./cash-reserves";
 import { getSessionContext } from "@/lib/auth-context";
+import { loadContributionLines } from "@/lib/contribution-lines";
 import { ensureCategories } from "@/lib/categories";
 import { capsForYear, latestCapYear, pendingCapYear } from "@/lib/contribution-limits";
 import {
@@ -39,6 +40,8 @@ export default async function InvestPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   const { supabase, household } = await getSessionContext();
+  // Started now, alongside the page's other reads, so it adds no trip of its own.
+  const contributionLinesPromise = loadContributionLines(supabase, household.id);
   // Resolved server-side so a deep link (/savings redirects here) opens on the
   // right tab without a client-side flash.
   const initialTab: BoardTab = (await searchParams).tab === "savings" ? "savings" : "portfolio";
@@ -1097,6 +1100,7 @@ export default async function InvestPage({
       accounts={data}
       years={years}
       currency={household.currency}
+      contributionLines={await contributionLinesPromise}
       imports={imports}
       contributedThisMonthCents={contributedThisMonthCents}
       currentMonthLabel={currentMonthLabel}

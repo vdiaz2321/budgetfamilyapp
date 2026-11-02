@@ -1,6 +1,7 @@
 "use client";
 
 import { type CSSProperties, useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoney, centsToDisplay, currencySymbol } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
@@ -406,7 +407,9 @@ export function SubscriptionsSummaryCard({
         </div>
       ) : null}
 
-      {editorTarget ? (
+      {/* Portalled: the card is its own stacking context (`isolate`), so a popup
+          left in here sits under the Summary rail wherever the two overlap. */}
+      {editorTarget ? createPortal(
         <ModalShell
           title={editorTarget === "new" ? "Add subscription" : "Edit subscription"}
           onClose={() => setEditorTarget(null)}
@@ -443,7 +446,8 @@ export function SubscriptionsSummaryCard({
               onDone={() => setEditorTarget(null)}
             />
           </div>
-        </ModalShell>
+        </ModalShell>,
+        document.body,
       ) : null}
     </section>
   );
@@ -825,7 +829,8 @@ export function IrregularBillsSummaryCard({
         </div>
       ) : null}
 
-      {paymentsBill ? (
+      {/* Portalled for the same reason as the subscription editor. */}
+      {paymentsBill ? createPortal(
         <ModalShell
           title={paymentsBill.name}
           onClose={() => setPaymentsFor(null)}
@@ -856,7 +861,8 @@ export function IrregularBillsSummaryCard({
               }
             />
           </div>
-        </ModalShell>
+        </ModalShell>,
+        document.body,
       ) : null}
     </section>
   );
@@ -1297,11 +1303,9 @@ export function MonthPayments({
   // (an annual sub in a quiet month) is neither paid nor unpaid — it just has
   // whatever charges landed.
   const status =
-    txs.length === 0
-      ? { label: "Not paid yet", className: "text-negative" }
-      : plannedCents > 0 && spent < plannedCents
-        ? { label: "Partly paid", className: "text-negative" }
-        : { label: "Paid", className: "text-positive" };
+    plannedCents > 0 && spent < plannedCents
+      ? { label: "Partly paid", className: "text-negative" }
+      : { label: "Paid", className: "text-positive" };
   const dateLabel = (iso: string) => {
     const [, m, d] = iso.split("-").map(Number);
     const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -1311,10 +1315,7 @@ export function MonthPayments({
   return (
     <div className="rounded-xl bg-background/60 p-3 ring-1 ring-line">
       {txs.length === 0 ? (
-        <div className="flex items-center justify-between gap-2 px-1 text-xs text-muted">
-          <span>No charge logged for this month yet.</span>
-          <span className={`shrink-0 font-semibold ${status.className}`}>{status.label}</span>
-        </div>
+        <p className="px-1 text-xs text-foreground">No charge logged for this month yet.</p>
       ) : (
         <ul className="space-y-1">
           {txs.map((t, i) => {

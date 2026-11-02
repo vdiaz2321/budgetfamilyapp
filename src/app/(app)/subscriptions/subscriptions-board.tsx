@@ -771,25 +771,29 @@ function RenewalDatePicker({ defaultValue, cycle }: { defaultValue?: string; cyc
     return p.length === 3 ? `${p[1]}/${p[2]}` : "";
   };
 
-  // For monthly: compute next occurrence of `day` in current or next month.
+  // For monthly: that day in the saved date's month (a new row: this month),
+  // like the Due chip on the Budget card. A day already gone stays in this month
+  // on purpose: it's due and unpaid until Pay moves it on. Jumping to next month
+  // here dropped the row from Due this week with its charge never logged.
   const monthlyToHidden = (day: string) => {
     const d = parseInt(day);
     if (isNaN(d) || d < 1 || d > 31) return "";
-    const now = new Date(); now.setHours(0, 0, 0, 0);
-    const yr = now.getFullYear(), mo = now.getMonth();
-    const cand = new Date(yr, mo, d); cand.setHours(0, 0, 0, 0);
-    const use = cand < now ? new Date(yr, mo + 1, d) : cand;
-    return `${use.getFullYear()}-${String(use.getMonth() + 1).padStart(2, "0")}-${String(use.getDate()).padStart(2, "0")}`;
+    const now = new Date();
+    const saved = defaultValue?.split("-").map(Number);
+    const yr = saved?.length === 3 ? saved[0] : now.getFullYear();
+    const mo = saved?.length === 3 ? saved[1] - 1 : now.getMonth();
+    const use = Math.min(d, new Date(yr, mo + 1, 0).getDate());
+    return `${yr}-${String(mo + 1).padStart(2, "0")}-${String(use).padStart(2, "0")}`;
   };
   // For non-monthly: compute next occurrence of MM/DD.
   const fullToHidden = (d: string) => {
     const [mm, dd] = d.split("/");
     const m = parseInt(mm), dy = parseInt(dd);
     if (isNaN(m) || m < 1 || m > 12 || isNaN(dy) || dy < 1 || dy > 31) return "";
-    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const now = new Date();
     const yr = now.getFullYear();
-    const cand = new Date(yr, m - 1, dy); cand.setHours(0, 0, 0, 0);
-    const year = cand < now ? yr + 1 : yr;
+    // Earlier this month still counts as this year's: due, not skipped.
+    const year = new Date(yr, m - 1, dy) < new Date(yr, now.getMonth(), 1) ? yr + 1 : yr;
     return `${year}-${String(m).padStart(2, "0")}-${String(dy).padStart(2, "0")}`;
   };
 

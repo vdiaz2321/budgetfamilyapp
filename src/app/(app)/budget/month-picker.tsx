@@ -19,9 +19,13 @@ function pad2(n: number) {
 export function MonthPicker({
   monthKey,
   basePath = "/budget",
+  label,
 }: {
   monthKey: string;
   basePath?: string;
+  // Shown in place of the month when the page isn't on a single month (All
+  // time). The arrows go, since there's no month to step from; the grid stays.
+  label?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -76,6 +80,7 @@ export function MonthPicker({
   // While a month is loading the trigger shows where you're going, not where
   // you were.
   const [shownYear, shownMonth1] = (pending && target ? target : monthKey).split("-").map(Number);
+  const shownLabel = pending && target ? undefined : label;
 
   // `select-none` on the trigger and the panel is load-bearing on touch: the
   // month labels are plain text, so a tap that drifts a pixel starts a text
@@ -84,11 +89,13 @@ export function MonthPicker({
   // double-tap-zoom delay on the same taps.
   return (
     <div className="relative flex items-center gap-1 sm:gap-1.5">
-      <button type="button" onClick={() => goTo(shiftKey(-1))} disabled={pending} aria-label="Previous month" className={arrow}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
-      </button>
+      {label ? null : (
+        <button type="button" onClick={() => goTo(shiftKey(-1))} disabled={pending} aria-label="Previous month" className={arrow}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+      )}
       <button
         type="button"
         onClick={toggle}
@@ -96,11 +103,17 @@ export function MonthPicker({
         className={`flex touch-manipulation select-none items-center gap-1.5 text-2xl tracking-tight transition-opacity ${pending ? "opacity-50" : ""}`}
       >
         {/* Short name on a phone so the ‹ › arrows and Summary fit beside it. */}
-        <span className="font-bold text-foreground">
-          <span className="sm:hidden">{MONTHS_SHORT[shownMonth1 - 1]}</span>
-          <span className="max-sm:hidden">{MONTHS_FULL[shownMonth1 - 1]}</span>
-        </span>
-        <span className="font-normal text-muted">{shownYear}</span>
+        {shownLabel ? (
+          <span className="font-bold text-foreground">{shownLabel}</span>
+        ) : (
+          <>
+            <span className="font-bold text-foreground">
+              <span className="sm:hidden">{MONTHS_SHORT[shownMonth1 - 1]}</span>
+              <span className="max-sm:hidden">{MONTHS_FULL[shownMonth1 - 1]}</span>
+            </span>
+            <span className="font-normal text-muted">{shownYear}</span>
+          </>
+        )}
         <svg
           width="18"
           height="18"
@@ -116,11 +129,13 @@ export function MonthPicker({
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
-      <button type="button" onClick={() => goTo(shiftKey(1))} disabled={pending} aria-label="Next month" className={arrow}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M9 18l6-6-6-6" />
-        </svg>
-      </button>
+      {label ? null : (
+        <button type="button" onClick={() => goTo(shiftKey(1))} disabled={pending} aria-label="Next month" className={arrow}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+      )}
 
       {open ? (
         <>
@@ -161,7 +176,7 @@ export function MonthPicker({
             <div className="grid grid-cols-4 gap-2">
               {MONTHS_SHORT.map((name, i) => {
                 const key = `${viewYear}-${pad2(i + 1)}`;
-                const isSelected = key === monthKey;
+                const isSelected = !label && key === monthKey;
                 const isThisMonth = key === currentKey;
                 return (
                   <button
@@ -184,7 +199,7 @@ export function MonthPicker({
 
             {/* Footer */}
             <div className="mt-3 border-t border-line pt-3 text-center text-sm">
-              {isCurrent ? (
+              {isCurrent && !label ? (
                 <span className="text-muted">You&apos;re on the current month</span>
               ) : (
                 <button

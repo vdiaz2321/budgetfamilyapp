@@ -2,161 +2,47 @@
 
 import { createHash } from "crypto";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionContext } from "@/lib/auth-context";
 import { payeeKey, resolvePayeeIds } from "@/lib/payees";
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
-
-async function requireHousehold() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  // A failed read is not "this user has no household" — redirecting on it
-  // would drop a signed-in user into onboarding and invite a second household.
-  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
-  if (!profile) redirect("/onboarding");
-  return { supabase, householdId: profile.household_id as string };
-}
-
-const SKIP_SET = new Set([
-  "Savings|Crypto debt",
-  "Savings|Fidelity (Taxable) debt",
-  "Income|Johana Income",
-  "Income|Side Income",
-]);
-
-const ALIAS_MAP: Record<string, string> = {
-  "Expenses|Children's Clothing": "Expenses|Boy's Clothing",
-  "Income|Military Pay Deduc.": "Income|Military Pay Deductions",
-  "Debt|Venture3191J (Jan27)": "Debt|Venture J (Jan27)",
-  "Savings|Roth IRA (Vic)": "Savings|Fidelity Roth Vic",
-};
-
-const AUTO_CREATE_SUBCATS: { category: string; name: string; asPaidOffDebt?: boolean }[] = [
-  { category: "Bills", name: "Irregular Bills" },
-  { category: "Income", name: "Income Taxes" },
-  { category: "Debt", name: "QuickSil7906V (Jun26)", asPaidOffDebt: true },
-  { category: "Debt", name: "Sante Fe 2020 (APR26)", asPaidOffDebt: true },
-  { category: "Debt", name: "Savor2946J (Mar26)", asPaidOffDebt: true },
-  { category: "Debt", name: "Venture1 1163V(Feb27)", asPaidOffDebt: true },
-];
-
-const CARD_TOKENS: { token: string; accountName: string }[] = [
-  { token: "venture v", accountName: "Venture V" },
-  { token: "venturej", accountName: "Venture J" },
-  { token: "venture j", accountName: "Venture J" },
-  { token: "sapphire", accountName: "Sapphire" },
-  { token: "ihg chase j", accountName: "IHG Rewards Club J" },
-  { token: "hilton aspire", accountName: "Hilton Aspire" },
-  { token: "plat amex", accountName: "Platinum Card" },
-  { token: "1004plat", accountName: "Platinum Card" },
-];
-
-const MONTH_MAP: Record<string, string> = {
-  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
-  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
-};
-
-export type ParsedCsvRow = {
-  rowIndex: number; // 1-based (CSV line number, excluding header)
-  date: string;
-  category: string;
-  subcategory: string;
-  payee: string;
-  card: string;
-  memo: string;
-  amountCents: number;
-};
+import { parseCsv } from "../invest/import-utils";
+import {
+  mappingProblem,
+  planImport,
+  SHEET_AUTO_CREATE,
+  type ColumnMapping,
+  type DateOrder,
+  type ImportPlan,
+  type ImportSub,
+} from "./import-utils";
 
 export type PreviewResult = {
   totalRows: number;
   toImport: number;
-  toSkip: { rowIndex: number; reason: string }[];
-  toAutoCreateSubs: string[]; // "Category|Subcategory" that will be created
-  cardSummary: { csvValue: string; matchedAccount: string | null; rowCount: number }[];
-  unmappedSubs: { key: string; rowCount: number }[]; // unexpected subs — surface before commit
+  toSkip: ImportPlan["skipped"];
+  toAutoCreateSubs: string[]; // "Type|Category" that will be created
+  cardSummary: ImportPlan["cards"];
+  unmappedSubs: ImportPlan["unknown"]; // rows whose Category isn't in the budget
+  bothSigns: boolean;
+  firstRows: {
+    rowIndex: number;
+    date: string;
+    amountCents: number;
+    type: string;
+    category: string;
+    payee: string;
+    account: string;
+    remarks: string;
+  }[];
 };
 
 export type ImportResult = {
   imported: number;
   skippedAlreadyExists: number;
-  skippedByRule: number;
+  skipped: number;
   autoCreated: string[];
   errors: string[];
 };
-
-function parseDate(s: string): string | null {
-  // Tolerate any non-alphanumeric separators (dashes, spaces, mixes) and both
-  // 3-letter and full month names ("Jun", "June", "JUN", "june").
-  const m = s.trim().toLowerCase().match(/^(\d{1,2})[^a-z0-9]+([a-z]+)[^a-z0-9]+(\d{2,4})$/);
-  if (!m) return null;
-  const day = m[1].padStart(2, "0");
-  const mo = MONTH_MAP[m[2].slice(0, 3)];
-  if (!mo) return null;
-  const yr = m[3].length === 2 ? `20${m[3]}` : m[3];
-  return `${yr}-${mo}-${day}`;
-}
-
-function parseAmountCents(s: string): number {
-  const cleaned = s.replace(/[$,\s]/g, "");
-  const n = Number(cleaned);
-  if (!Number.isFinite(n)) return NaN;
-  return Math.round(n * 100);
-}
-
-function normalizeCard(s: string): string {
-  return s.trim().toLowerCase();
-}
-
-function matchAccount(cardValue: string, accountByName: Map<string, string>): string | null {
-  const norm = normalizeCard(cardValue);
-  if (!norm) return null;
-  for (const { token, accountName } of CARD_TOKENS) {
-    if (norm.includes(token)) {
-      const id = accountByName.get(accountName);
-      if (id) return id;
-    }
-  }
-  return null;
-}
-
-// CSV has no quoted-comma cells (verified). Simple split is safe.
-function parseCsvLines(csv: string): ParsedCsvRow[] {
-  const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length < 2) return [];
-  const rows: ParsedCsvRow[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(",");
-    // Columns: Date, $, Debted $, Category, Subcategory, Payee, Credit Card, Memo_Remarks
-    const date = cols[0]?.trim() ?? "";
-    const amountStr = cols[2]?.trim() ?? "";
-    const category = cols[3]?.trim() ?? "";
-    const subcategory = cols[4]?.trim() ?? "";
-    const payee = cols[5]?.trim() ?? "";
-    const card = cols[6]?.trim() ?? "";
-    const memo = (cols.slice(7).join(",") ?? "").trim();
-    const amountCents = parseAmountCents(amountStr);
-    rows.push({
-      rowIndex: i,
-      date, category, subcategory, payee, card, memo, amountCents,
-    });
-  }
-  return rows;
-}
-
-function subKey(category: string, subcategory: string): string {
-  return `${category}|${subcategory}`;
-}
-
-function resolveKey(category: string, subcategory: string): string {
-  const raw = subKey(category, subcategory);
-  return ALIAS_MAP[raw] ?? raw;
-}
 
 function hashRow(
   householdId: string,
@@ -171,16 +57,22 @@ function hashRow(
   return createHash("sha1").update(s).digest("hex");
 }
 
-export async function previewImport(csvText: string): Promise<PreviewResult> {
-  const { supabase, householdId } = await requireHousehold();
-  const rows = parseCsvLines(csvText);
+// Reads the file, checks the mapping and works out what every row becomes.
+// Preview and commit both come through here so they can't disagree.
+async function buildPlan(csvText: string, mapping: ColumnMapping, dateOrder: DateOrder | null) {
+  const { supabase, household } = await getSessionContext();
+  const householdId = household.id;
+
+  const { headers, rows } = parseCsv(csvText);
+  const problem = mappingProblem(mapping, headers);
+  if (problem) throw new Error(problem);
 
   // These three build the name -> id maps the whole import matches against.
   // A swallowed error would leave them empty, and every row would then look
   // unmapped — an import that silently skips everything.
   const [
     { data: cats, error: catsError },
-    { data: subs, error: subsError },
+    { data: subRows, error: subsError },
     { data: accts, error: acctsError },
   ] = await Promise.all([
     supabase.from("categories").select("id, name").eq("household_id", householdId),
@@ -192,105 +84,68 @@ export async function previewImport(csvText: string): Promise<PreviewResult> {
   ]);
   throwIfAny({ categories: catsError, subcategories: subsError, accounts: acctsError });
 
-  const catByName = new Map((cats ?? []).map((c) => [c.name as string, c.id as string]));
-  const subByKey = new Map<string, string>();
-  for (const s of (subs ?? []) as { id: string; name: string; categories: { name: string } | { name: string }[] }[]) {
-    const catName = Array.isArray(s.categories) ? s.categories[0]?.name : s.categories?.name;
-    if (catName) subByKey.set(`${catName}|${s.name}`, s.id);
-  }
-  const acctByName = new Map((accts ?? []).map((a) => [a.name as string, a.id as string]));
-  const autoCreateKeys = new Set(AUTO_CREATE_SUBCATS.map((a) => `${a.category}|${a.name}`));
-
-  const toSkip: { rowIndex: number; reason: string }[] = [];
-  const cardCounts = new Map<string, { matched: string | null; count: number }>();
-  const unmappedCounts = new Map<string, number>();
-  let toImport = 0;
-
-  for (const r of rows) {
-    const rawKey = subKey(r.category, r.subcategory);
-    if (SKIP_SET.has(rawKey)) {
-      toSkip.push({ rowIndex: r.rowIndex, reason: `skip rule: ${rawKey}` });
-      continue;
-    }
-    const key = resolveKey(r.category, r.subcategory);
-    const isKnown = subByKey.has(key) || autoCreateKeys.has(key);
-    if (!isKnown) {
-      unmappedCounts.set(key, (unmappedCounts.get(key) ?? 0) + 1);
-      continue;
-    }
-    if (!parseDate(r.date) || !Number.isFinite(r.amountCents) || r.amountCents <= 0) {
-      toSkip.push({ rowIndex: r.rowIndex, reason: `bad date/amount: "${r.date}" / "${r.amountCents}"` });
-      continue;
-    }
-    toImport++;
-    const cv = r.card || "(none)";
-    const existing = cardCounts.get(cv);
-    if (existing) existing.count++;
-    else {
-      const matchedId = r.card ? matchAccount(r.card, acctByName) : null;
-      let matchedName: string | null = null;
-      if (matchedId) {
-        for (const [n, id] of acctByName) if (id === matchedId) { matchedName = n; break; }
-      }
-      cardCounts.set(cv, { matched: matchedName, count: 1 });
-    }
+  const subs: ImportSub[] = [];
+  for (const s of (subRows ?? []) as { id: string; name: string; category_id: string; categories: { name: string } | { name: string }[] }[]) {
+    const categoryName = Array.isArray(s.categories) ? s.categories[0]?.name : s.categories?.name;
+    if (categoryName) subs.push({ id: s.id, name: s.name, categoryId: s.category_id, categoryName });
   }
 
-  const toAutoCreateSubs = AUTO_CREATE_SUBCATS
-    .map((a) => `${a.category}|${a.name}`)
-    .filter((k) => !subByKey.has(k) && catByName.has(k.split("|")[0]));
+  const plan = planImport({
+    headers,
+    rows,
+    mapping,
+    dateOrder,
+    subs,
+    categories: (cats ?? []) as { id: string; name: string }[],
+    accounts: (accts ?? []) as { id: string; name: string }[],
+  });
+  return { supabase, household, plan, totalRows: rows.length };
+}
 
+export async function previewImport(
+  csvText: string,
+  mapping: ColumnMapping,
+  dateOrder: DateOrder | null,
+): Promise<PreviewResult> {
+  const { plan, totalRows } = await buildPlan(csvText, mapping, dateOrder);
   return {
-    totalRows: rows.length,
-    toImport,
-    toSkip,
-    toAutoCreateSubs,
-    cardSummary: [...cardCounts.entries()]
-      .map(([csvValue, { matched, count }]) => ({ csvValue, matchedAccount: matched, rowCount: count }))
-      .sort((a, b) => b.rowCount - a.rowCount),
-    unmappedSubs: [...unmappedCounts.entries()]
-      .map(([key, rowCount]) => ({ key, rowCount }))
-      .sort((a, b) => b.rowCount - a.rowCount),
+    totalRows,
+    toImport: plan.rows.length,
+    toSkip: plan.skipped,
+    toAutoCreateSubs: plan.autoCreate,
+    cardSummary: plan.cards,
+    unmappedSubs: plan.unknown,
+    bothSigns: plan.bothSigns,
+    firstRows: plan.rows.slice(0, 5).map((r) => ({
+      rowIndex: r.rowIndex,
+      date: r.occurredOn,
+      amountCents: r.amountCents,
+      type: r.typeName,
+      category: r.categoryName,
+      payee: r.payee,
+      account: r.account?.name ?? "",
+      remarks: r.memo,
+    })),
   };
 }
 
-export async function commitImport(csvText: string): Promise<ImportResult> {
-  const { supabase, householdId } = await requireHousehold();
-  const rows = parseCsvLines(csvText);
-
-  // These three build the name -> id maps the whole import matches against.
-  // A swallowed error would leave them empty, and every row would then look
-  // unmapped — an import that silently skips everything.
-  const [
-    { data: cats, error: catsError },
-    { data: subs, error: subsError },
-    { data: accts, error: acctsError },
-  ] = await Promise.all([
-    supabase.from("categories").select("id, name, kind").eq("household_id", householdId),
-    supabase
-      .from("subcategories")
-      .select("id, name, category_id, categories!inner(name)")
-      .eq("household_id", householdId),
-    supabase.from("accounts").select("id, name").eq("household_id", householdId).eq("active", true),
-  ]);
-  throwIfAny({ categories: catsError, subcategories: subsError, accounts: acctsError });
-
-  const catByName = new Map((cats ?? []).map((c) => [c.name as string, c.id as string]));
-  const subByKey = new Map<string, string>();
-  for (const s of (subs ?? []) as { id: string; name: string; categories: { name: string } | { name: string }[] }[]) {
-    const catName = Array.isArray(s.categories) ? s.categories[0]?.name : s.categories?.name;
-    if (catName) subByKey.set(`${catName}|${s.name}`, s.id);
-  }
-  const acctByName = new Map((accts ?? []).map((a) => [a.name as string, a.id as string]));
+export async function commitImport(
+  csvText: string,
+  mapping: ColumnMapping,
+  dateOrder: DateOrder | null,
+): Promise<ImportResult> {
+  const { supabase, household, plan } = await buildPlan(csvText, mapping, dateOrder);
+  const householdId = household.id;
 
   const autoCreated: string[] = [];
+  const createdSubIds = new Map<string, string>();
+  const errors: string[] = [];
 
-  // Auto-create missing subcategories + paid-off debt rows.
-  for (const spec of AUTO_CREATE_SUBCATS) {
-    const key = `${spec.category}|${spec.name}`;
-    if (subByKey.has(key)) continue;
-    const categoryId = catByName.get(spec.category);
-    if (!categoryId) continue;
+  // Create only the subcategories + paid-off debt rows this file's rows need.
+  for (const key of plan.autoCreate) {
+    const spec = SHEET_AUTO_CREATE.find((a) => `${a.category}|${a.name}` === key);
+    const categoryId = plan.rows.find((r) => r.autoCreateKey === key)?.categoryId;
+    if (!spec || !categoryId) continue;
     const siblings = unwrap(
       await supabase
         .from("subcategories")
@@ -312,8 +167,11 @@ export async function commitImport(csvText: string): Promise<ImportResult> {
       })
       .select("id")
       .single();
-    if (error || !created) continue;
-    subByKey.set(key, created.id);
+    if (error || !created) {
+      errors.push(`could not create ${key}: ${error?.message ?? "no row returned"}`);
+      continue;
+    }
+    createdSubIds.set(key, created.id);
     autoCreated.push(key);
     if (spec.asPaidOffDebt) {
       await supabase.from("debts").insert({
@@ -328,52 +186,33 @@ export async function commitImport(csvText: string): Promise<ImportResult> {
     }
   }
 
-  // Upsert every unique payee once.
-  const uniquePayees = new Set<string>();
-  for (const r of rows) if (r.payee) uniquePayees.add(r.payee);
   // Keyed by lower-cased name: an import spelling "kaufland" has to land on the
   // existing "Kaufland" instead of forking the payee.
-  const payeeByName = await resolvePayeeIds(supabase, householdId, [...uniquePayees]);
+  const payeeByName = await resolvePayeeIds(
+    supabase,
+    householdId,
+    [...new Set(plan.rows.map((r) => r.payee).filter(Boolean))],
+  );
 
   const toInsert: Record<string, unknown>[] = [];
-  const seenHashes = new Set<string>();
-  let skippedByRule = 0;
-  const errors: string[] = [];
-
-  for (const r of rows) {
-    const rawKey = subKey(r.category, r.subcategory);
-    if (SKIP_SET.has(rawKey)) { skippedByRule++; continue; }
-    const key = resolveKey(r.category, r.subcategory);
-    const subcategoryId = subByKey.get(key);
-    if (!subcategoryId) { skippedByRule++; continue; }
-    const categoryName = key.split("|")[0];
-    const categoryId = catByName.get(categoryName);
-    if (!categoryId) { skippedByRule++; continue; }
-    const occurredOn = parseDate(r.date);
-    if (!occurredOn) { errors.push(`row ${r.rowIndex}: bad date "${r.date}"`); continue; }
-    if (!Number.isFinite(r.amountCents) || r.amountCents <= 0) {
-      errors.push(`row ${r.rowIndex}: bad amount`);
+  for (const r of plan.rows) {
+    const subcategoryId = r.subcategoryId ?? (r.autoCreateKey ? createdSubIds.get(r.autoCreateKey) : null);
+    if (!subcategoryId) {
+      errors.push(`row ${r.rowIndex}: its category could not be created`);
       continue;
     }
-    const accountId = r.card ? matchAccount(r.card, acctByName) : null;
-    const payeeId = r.payee ? payeeByName.get(payeeKey(r.payee)) ?? null : null;
-
-    const hash = hashRow(householdId, occurredOn, r.amountCents, subcategoryId, r.payee, r.memo, r.card);
-    if (seenHashes.has(hash)) continue; // duplicate within CSV
-    seenHashes.add(hash);
-
     toInsert.push({
       household_id: householdId,
-      occurred_on: occurredOn,
+      occurred_on: r.occurredOn,
       amount_cents: r.amountCents,
-      currency: "USD",
-      category_id: categoryId,
+      currency: household.currency,
+      category_id: r.categoryId,
       subcategory_id: subcategoryId,
-      account_id: accountId,
-      payee_id: payeeId,
+      account_id: r.account?.id ?? null,
+      payee_id: r.payee ? payeeByName.get(payeeKey(r.payee)) ?? null : null,
       memo: r.memo || null,
       source: "import",
-      import_hash: hash,
+      import_hash: hashRow(householdId, r.occurredOn, r.amountCents, subcategoryId, r.payee, r.memo, r.card),
       is_withdrawal: false,
       bucket_id: null,
     });
@@ -406,7 +245,7 @@ export async function commitImport(csvText: string): Promise<ImportResult> {
   return {
     imported: inserted,
     skippedAlreadyExists: alreadyExists,
-    skippedByRule,
+    skipped: plan.skipped.length + plan.unknown.reduce((sum, u) => sum + u.rowCount, 0),
     autoCreated,
     errors,
   };

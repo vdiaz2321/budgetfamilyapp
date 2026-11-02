@@ -46,6 +46,7 @@ import { AddTransactionButton } from "../travel/add-transaction-button";
 import { MoveMoneyModal } from "./move-money";
 import { TransferActivityModal } from "./transfer-activity";
 import type { EditableTransfer } from "../transactions/transfer-editor-modal";
+import { CloseChangesModal, CloseChangesNotice, type CloseChangesData } from "./close-changes";
 import { MonthEndUpdateModal, type MonthEndCheck, type MonthEndMove } from "./month-end-update";
 import { EstateAddFields, EstateGuideModal, estateNames, estateToFillCount, type EstateData } from "./estate-guide";
 import { CardFace, DUE_SOON_DAYS, cardShortName, formatDueDate, nextDueDate, useLocalToday } from "./card-face";
@@ -193,6 +194,7 @@ type Props = {
   // Month-end update checkmarks for this month and last.
   monthEndChecks?: MonthEndCheck[];
   monthEndMoves?: MonthEndMove[];
+  closeChanges?: CloseChangesData | null;
   estate?: EstateData;
   /** Stays using a card's free night — the card Edit form locks their dates. */
   freeNightStays?: FreeNightStayLite[];
@@ -461,6 +463,7 @@ export function AccountsBoard({
   eoyHistoryNetCents = null,
   monthEndChecks = [],
   monthEndMoves = [],
+  closeChanges = null,
   estate = { accounts: {}, guide: { executor: null, willLocation: null, attorney: null, powerOfAttorney: null, instructions: null }, items: [] },
   freeNightStays = [],
 }: Props) {
@@ -481,6 +484,7 @@ export function AccountsBoard({
   const [estateOpen, setEstateOpen] = useState(false);
   const estateToFill = estateToFillCount(accounts, estate);
   const [monthEndOpen, setMonthEndOpen] = useState(false);
+  const [closeChangesOpen, setCloseChangesOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
@@ -904,6 +908,8 @@ export function AccountsBoard({
         </div>
       </div>
 
+      {closeChanges ? <CloseChangesNotice data={closeChanges} onReview={() => setCloseChangesOpen(true)} /> : null}
+
       {/* Net worth + account groups live in one card. Collapsing hides the
           group cards and keeps the Assets / Debts / Net worth tiles, the same
           way Travel & Credit Card Rewards keeps its stat row when closed. */}
@@ -1133,8 +1139,13 @@ export function AccountsBoard({
           currentMonth={historyMonths[0]}
           checks={monthEndChecks}
           moves={monthEndMoves}
+          closeChanges={closeChanges}
+          onReviewCloseChanges={() => setCloseChangesOpen(true)}
           onClose={() => setMonthEndOpen(false)}
         />
+      ) : null}
+      {closeChangesOpen && closeChanges ? (
+        <CloseChangesModal data={closeChanges} currency={currency} onClose={() => setCloseChangesOpen(false)} />
       ) : null}
       {estateOpen ? (
         <EstateGuideModal

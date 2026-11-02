@@ -7,6 +7,7 @@ import { displayToCents } from "@/lib/money";
 import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { syncAccountFromBuckets } from "@/lib/buckets";
 import { unwrap } from "@/lib/supabase-result";
+import { loadClosePlan } from "@/lib/close-adjustments-load";
 
 // Month-end update (Accounts → "Month-end update").
 //
@@ -223,6 +224,54 @@ export async function clearMonthEndCheck(input: {
   let q = supabase.from("month_end_checks").delete().eq("household_id", household.id).eq("month", input.month);
   q = input.bucketId ? q.eq("bucket_id", input.bucketId) : q.eq("account_id", input.accountId);
   const { error } = await q;
+  if (error) return { error: error.message };
+  revalidatePath("/accounts");
+  return { error: null };
+}
+
+// Answering the Accounts offer about a change to a closed month. The ids are the
+// changes the popup showed; the figures are worked out again here rather than
+// trusted from the browser.
+async function resolveCloseChanges(supabase: SupabaseClient, householdId: string, ids: string[]) {
+  return supabase
+    .from("closed_month_changes")
+    .update({ resolved_at: new Date().toISOString() })
+    .eq("household_id", householdId)
+    .in("id", ids);
+}
+
+/** Write the changes into the past closes. Today's balances are not touched. */
+export async function applyCloseChanges(ids: string[]): Promise<{ error: string | null }> {
+  const { supabase, household } = await getSessionContext();
+  const householdId = household.id;
+  const plan = await loadClosePlan(supabase, householdId, currentMonthFirst(), ids);
+  if (!plan) return { error: null };
+  const now = new Date().toISOString();
+
+  const bucketParents = new Map<string, { accountId: string; month: string }>();
+  for (const a of plan.adjustments) {
+    const update = { balance_cents: a.afterCents, updated_at: now };
+    const { error } = a.bucketId
+      ? await supabase.from("bucket_snapshots").update(update).eq("household_id", householdId).eq("month", a.month).eq("bucket_id", a.bucketId)
+      : await supabase.from("account_snapshots").update(update).eq("household_id", householdId).eq("month", a.month).eq("account_id", a.accountId);
+    if (error) return { error: `Could not update ${a.name}: ${error.message}` };
+    if (a.bucketId) bucketParents.set(`${a.accountId}|${a.month}`, { accountId: a.accountId, month: a.month });
+  }
+  for (const { accountId, month } of bucketParents.values()) {
+    const kind = plan.context.accounts.find((account) => account.id === accountId)?.kind ?? "savings_bucket";
+    await resumAccountSnapshot(supabase, householdId, accountId, kind, month);
+  }
+
+  const { error } = await resolveCloseChanges(supabase, householdId, ids);
+  if (error) return { error: error.message };
+  revalidate();
+  return { error: null };
+}
+
+/** Keep the closes as they are and stop offering these changes. */
+export async function leaveCloseChanges(ids: string[]): Promise<{ error: string | null }> {
+  const { supabase, household } = await getSessionContext();
+  const { error } = await resolveCloseChanges(supabase, household.id, ids);
   if (error) return { error: error.message };
   revalidatePath("/accounts");
   return { error: null };

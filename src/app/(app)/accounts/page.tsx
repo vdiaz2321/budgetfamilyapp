@@ -9,6 +9,7 @@ import type { MonthEndMove } from "./month-end-update";
 import { investItemsFrom } from "@/lib/invest-items";
 import { loadDebtMonthPlans } from "@/lib/debt-month-plan";
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
+import { loadClosePlan } from "@/lib/close-adjustments-load";
 
 // N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
 function monthsBefore(firstOfMonth: string, n: number): string {
@@ -36,6 +37,10 @@ export default async function AccountsPage() {
     .eq("household_id", household.id)
     .in("month", [currentMonth, prevMonth])
     .then((r) => r);
+
+  // Changes to already-closed months still waiting on an answer. Started here,
+  // alongside the reads below, so it doesn't cost its own trip.
+  const closePlanPromise = loadClosePlan(supabase, household.id, currentMonth);
 
   // What moved a month-end balance on its own, for the same two months: a
   // Budget contribution to a linked bucket/account, or a Move Money transfer.
@@ -680,8 +685,15 @@ export default async function AccountsPage() {
     })),
   };
 
+  const closePlan = await closePlanPromise;
+
   return (
     <AccountsBoard
+      closeChanges={
+        closePlan && closePlan.adjustments.length > 0
+          ? { ids: closePlan.changeIds, changes: closePlan.changes, adjustments: closePlan.adjustments, months: closePlan.months }
+          : null
+      }
       estate={estate}
       monthEndChecks={monthEndChecks}
       monthEndMoves={monthEndMoves}

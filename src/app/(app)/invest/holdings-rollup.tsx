@@ -316,7 +316,7 @@ export function AllHoldingsTable({
             {visible.length} holding{visible.length === 1 ? "" : "s"} · {formatMoney(totalCents, currency)}
           </span>
           {freshness && stalest ? (
-            <span className={`text-xs sm:text-sm ${freshness.stale ? "font-semibold text-negative" : "text-muted"}`}>
+            <span className={`text-xs font-semibold sm:text-sm ${freshness.stale ? "text-negative" : "text-foreground"}`}>
               {lastUpdateByAccount.size > 1 ? `${stalest[0]} ` : ""}updated {freshness.label}
             </span>
           ) : null}
