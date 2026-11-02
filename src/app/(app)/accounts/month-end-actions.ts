@@ -115,7 +115,7 @@ export async function saveMonthEndValue(input: {
   accountId: string;
   bucketId: string | null;
   balance: string;
-  /** Only the Done circle ticks; typing a figure just saves it. */
+  /** The Done circle and a typed new figure both tick the row. */
   tick?: boolean;
 }): Promise<{ error: string | null }> {
   const { supabase, household } = await getSessionContext();

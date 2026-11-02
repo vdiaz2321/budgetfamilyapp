@@ -238,7 +238,7 @@ async function saveInvestmentTransfer(formData: FormData, transactionId: string 
     //    delete reverses.
     const { error: insertError } = await supabase
       .from("transactions")
-      .insert({ ...row, household_id: householdId, source: "manual" });
+      .insert({ ...row, household_id: householdId, source: "manual", cleared: formData.get("cleared") === "on" });
     if (insertError) return { error: `Couldn't save the transfer — ${insertError.message}` };
   }
 

@@ -400,7 +400,7 @@ export function CardPaymentsLedger({
                       ? columns.map((c) => {
                           const v = r.cells.get(c.key) ?? 0;
                           return (
-                            <td key={c.key} className={`${cell} ${v ? "text-foreground" : ""}`}>
+                            <td key={c.key} className={`${cell} text-negative`}>
                               {v ? money(v) : null}
                             </td>
                           );
@@ -427,7 +427,7 @@ export function CardPaymentsLedger({
                     ? columns.map((c) => {
                         const v = columnTotal(c.key);
                         return (
-                          <td key={c.key} className={cell}>
+                          <td key={c.key} className={`${cell} text-negative`}>
                             {v ? money(v) : null}
                           </td>
                         );
@@ -651,7 +651,7 @@ function PaymentRow({
       <li className="py-2">
         <div className={`gap-y-1 ${PAYMENT_GRID}`}>
           <span className="text-center text-sm font-semibold tabular-nums">{shown}</span>
-          <span className="text-center text-sm font-bold tabular-nums">{formatMoney(payment.amountCents + payment.reimbursedCents, currency)}</span>
+          <span className="text-center text-sm font-bold tabular-nums text-negative">{formatMoney(payment.amountCents + payment.reimbursedCents, currency)}</span>
           <span className="text-center text-sm font-semibold tabular-nums">{payment.reimbursedCents > 0 ? formatMoney(payment.reimbursedCents, currency) : ""}</span>
           <div className="col-span-3 min-w-0 text-xs font-semibold sm:col-span-2 sm:text-sm">
             {fromName || laterEdit(payment) ? (

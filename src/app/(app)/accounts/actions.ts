@@ -1573,7 +1573,7 @@ async function saveAccountTransfer(formData: FormData, action: "create" | "updat
   if (fromAccountId === toAccountId) return { error: "Pick two different accounts." };
   if (amountCents <= 0) return { error: "Enter an amount." };
 
-  const { error } = await supabase.rpc("mutate_account_transfer", {
+  const { data: savedId, error } = await supabase.rpc("mutate_account_transfer", {
     p_action: action,
     p_transaction_id: transactionId,
     p_occurred_on: dateStr,
@@ -1586,11 +1586,23 @@ async function saveAccountTransfer(formData: FormData, action: "create" | "updat
   });
   if (error) return { error: error.message || "Couldn't save the transfer — please try again." };
 
+  // Move Money's Clear button. The transfer is already saved by here, so a
+  // failure says so rather than inviting a second try that would double it.
+  let clearError: string | null = null;
+  if (formData.get("cleared") === "on") {
+    const { error: clearFailed } = await supabase
+      .from("transactions")
+      .update({ cleared: true })
+      .eq("id", savedId as string)
+      .eq("household_id", householdId);
+    if (clearFailed) clearError = "Transfer saved, but it couldn't be marked cleared — clear it on Transactions.";
+  }
+
   await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
   revalidatePath("/transactions");
   revalidatePath("/networth");
-  return { error: null };
+  return { error: clearError };
 }
 
 // Edit a card or debt payment from the Accounts payment popups: its date, the

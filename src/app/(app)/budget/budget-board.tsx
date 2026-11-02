@@ -635,6 +635,7 @@ export function BudgetBoard({
           outflowPlanned={outflowPlanned}
           actualIncome={actualIncome}
           actualSpent={actualSpent}
+          monthFinished={month.key < currentMonthKey}
           billsExpenses={billsExpenses}
           savings={savings}
           debt={debt}
@@ -1829,6 +1830,7 @@ function SummaryHeroCard({
   outflowPlanned,
   actualIncome,
   actualSpent,
+  monthFinished,
   billsExpenses,
   savings,
   debt,
@@ -1843,6 +1845,7 @@ function SummaryHeroCard({
   outflowPlanned: number;
   actualIncome: number;
   actualSpent: number;
+  monthFinished: boolean;
   billsExpenses: { planned: number; spent: number };
   savings: { planned: number; spent: number };
   debt: { planned: number; spent: number };
@@ -1855,8 +1858,15 @@ function SummaryHeroCard({
   // The top row: Income, Planned, Spent, Left. Left is income plus last
   // month's rollover minus Spent; a carried-over deficit (<= 0) comes off it,
   // the same way it comes off displayLeft. "used from Sep" sits under Left,
-  // "Left to Rollover" under Income.
-  const leftCents = actualIncome + rolloverCents + rollover.deficitCents - actualSpent;
+  // "Left to Rollover" under Income. Payday is the end of the month, so until
+  // the month is over Left counts the income expected (or what came in, if
+  // that's more); a finished month counts only what was received.
+  const leftIncome = monthFinished ? actualIncome : Math.max(incomePlanned, actualIncome);
+  const leftIncomeWord = leftIncome > actualIncome ? "Expected" : "Income";
+  const leftCents = leftIncome + rolloverCents + rollover.deficitCents - actualSpent;
+  // The same sum on only what has come in, for the pill under Left while the
+  // figure above it still leans on expected income.
+  const receivedLeftCents = actualIncome + rolloverCents + rollover.deficitCents - actualSpent;
   const leftClass = leftCents < 0 ? "text-negative" : "text-positive";
   const leftAccent = leftCents < 0 ? "var(--negative)" : "var(--positive)";
   const prevMonth = shortMonth(rollover.prevMonthLabel);
@@ -1869,7 +1879,7 @@ function SummaryHeroCard({
   // Thin spaces (\u2009) round the signs + tight tracking keep the
   // "Rollover" version on one line in the narrow tile, phone included.
   const leftSub =
-    rolloverCents > 0 ? "Income\u2009+\u2009Rollover\u2009−\u2009Spent" : rollover.deficitCents < 0 ? "Income\u2009−\u2009Rollover\u2009−\u2009Spent" : "Income − Spent";
+    rolloverCents > 0 ? `${leftIncomeWord}\u2009+\u2009Rollover\u2009−\u2009Spent` : rollover.deficitCents < 0 ? `${leftIncomeWord}\u2009−\u2009Rollover\u2009−\u2009Spent` : `${leftIncomeWord} − Spent`;
 
   return (
     <div className="@container/hero -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
@@ -1881,8 +1891,7 @@ function SummaryHeroCard({
         <div className="grid grid-cols-2 gap-2.5 md:gap-3 @3xl:grid-cols-4">
           <HeroStat accentVar="var(--positive)" className="@3xl:text-center">
             {/* Expected up top so Planned has a figure to compare against even
-                before payday (end of month); what has come in sits under it.
-                Left still works from the received figure. */}
+                before payday (end of month); what has come in sits under it. */}
             <p className={TITLE}>Income Expected</p>
             <p className={`${FIGURE} text-positive`}>{formatMoney(incomePlanned, currency)}</p>
             <p className={`${SUBLINE} flex flex-wrap items-center gap-x-1 @3xl/hero:justify-center`}>
@@ -2001,6 +2010,21 @@ function SummaryHeroCard({
                 <span className="inline-flex items-center gap-x-1 max-w-full flex-wrap whitespace-nowrap rounded-xl @3xl/hero:rounded-full border border-negative/25 bg-negative/10 px-2 py-1 text-[11px] text-negative">
                   <span className="font-bold tabular-nums">{formatMoney(rollover.deficitCents, currency)}</span>
                   <span className="font-semibold opacity-80">from {prevMonth}</span>
+                </span>
+              )}
+              {leftIncome > actualIncome && (
+                <span
+                  className={`inline-flex max-w-full flex-wrap items-center gap-x-1 whitespace-nowrap rounded-xl border px-2 py-1 text-[11px] @3xl/hero:rounded-full sm:gap-1.5 sm:px-2.5 ${receivedLeftCents < 0 ? "border-negative/25 bg-negative/10 text-negative" : "text-foreground"}`}
+                  style={receivedLeftCents < 0 ? undefined : {
+                    borderColor: "color-mix(in srgb, var(--viz-bills) 25%, transparent)",
+                    backgroundColor: "color-mix(in srgb, var(--viz-bills) 10%, transparent)",
+                  }}
+                >
+                  <span className="font-bold tabular-nums">
+                    {receivedLeftCents > 0 ? "+" : ""}
+                    {formatMoney(receivedLeftCents, currency)}
+                  </span>
+                  <span className="font-semibold">from Received</span>
                 </span>
               )}
             </div>

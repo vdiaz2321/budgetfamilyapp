@@ -192,17 +192,22 @@ export function StatTile({
 // The From dropdown's value for paying with points rather than a bank.
 const POINTS_SOURCE = "points";
 
+/** A card's most recent payment, shown under its Pay popup. */
+export type LastCardPayment = { date: string; paidCents: number; from: string | null };
+
 export function PayCardModal({
   card,
   currency,
   nonCardAccounts,
   allBuckets,
+  lastPayment = null,
   onClose,
 }: {
   card: AccountData;
   currency: string;
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
+  lastPayment?: LastCardPayment | null;
   onClose: () => void;
 }) {
   useScrollLock();
@@ -452,6 +457,18 @@ export function PayCardModal({
         </form>
         {debtBalanceCents === 0 && !details?.isRevolvingDebt && !transfer ? (
           <MatchStatement cardId={card.id} onDone={onClose} />
+        ) : null}
+        {/* Just the latest one; the full history is Credit Card Payments below. */}
+        {lastPayment ? (
+          <div className="border-t border-line pt-2.5">
+            <p className="text-center text-[10px] font-semibold uppercase tracking-wide text-foreground">Last payment</p>
+            <p className="mt-1 text-center text-xs text-foreground">
+              {new Date(`${lastPayment.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              {" · "}
+              <span className="font-bold tabular-nums text-negative">{formatMoney(lastPayment.paidCents, currency)}</span>
+              {lastPayment.from ? ` · ${lastPayment.from}` : null}
+            </p>
+          </div>
         ) : null}
       </div>
     </div>

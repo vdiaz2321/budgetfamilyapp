@@ -11,7 +11,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { BalanceTransferModal } from "@/components/balance-transfer-modal";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
-import { FreeNightCapField, GripHandle, LabeledInput, PayCardModal, usePointerReorder } from "./shared-ui";
+import { FreeNightCapField, GripHandle, LabeledInput, PayCardModal, usePointerReorder, type LastCardPayment } from "./shared-ui";
 import {
   addAccount,
   addCreditCardWithDetails,
@@ -484,13 +484,28 @@ export function AccountsBoard({
   const [transferOpen, setTransferOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
-  // Each card's latest payment, for the tile's "Paid Oct 31" strip.
-  const lastPaidByCard = new Map<string, string>();
-  for (const p of cardPayments) {
-    if (p.amountCents <= 0) continue;
-    const prev = lastPaidByCard.get(p.cardId);
-    if (!prev || p.date > prev) lastPaidByCard.set(p.cardId, p.date);
-  }
+  // Each card's latest payment, for the tile's "Paid Oct 31" strip and the
+  // line at the bottom of its Pay popup.
+  const latestByKey = (payments: CardPayment[]) => {
+    const latest = new Map<string, LastCardPayment>();
+    for (const p of payments) {
+      if (p.amountCents <= 0) continue;
+      const prev = latest.get(p.cardId);
+      if (!prev || p.date > prev.date) {
+        latest.set(p.cardId, {
+          date: p.date,
+          paidCents: p.amountCents + p.reimbursedCents,
+          // CSV-imported rows carry no account, so they name no source.
+          from: p.fromPoints ? "Points" : p.fromAccountId ? accounts.find((a) => a.id === p.fromAccountId)?.name ?? "Closed account" : null,
+        });
+      }
+    }
+    return latest;
+  };
+  const lastPaymentByCard = latestByKey(cardPayments);
+  // A card carried as a debt has its payments under Debt Payments, keyed by the
+  // debt's subcategory, so its Pay popup looks there too.
+  const lastDebtPaymentBySub = latestByKey(debtPayments);
   // Period picker on the Accounts header — same control as Insights. Local
   // state (no URL sync) since the state is UI-only here. The picker's
   // filtering DOES NOT extend to the Credit Card Rewards section below —
@@ -1061,7 +1076,8 @@ export function AccountsBoard({
               allBuckets={accounts.flatMap((a) => a.buckets)}
               allCards={creditCards}
               freeNightStays={freeNightStays}
-              lastPaidByCard={lastPaidByCard}
+              lastPaymentByCard={lastPaymentByCard}
+              lastDebtPaymentBySub={lastDebtPaymentBySub}
               open={!collapsed[section.key]}
               onToggle={() => toggleSection(section.key)}
             />
@@ -1351,7 +1367,8 @@ function CreditCardListSection({
   allBuckets,
   allCards,
   freeNightStays,
-  lastPaidByCard,
+  lastPaymentByCard,
+  lastDebtPaymentBySub,
   open,
   onToggle,
 }: {
@@ -1363,12 +1380,22 @@ function CreditCardListSection({
   /** Every credit card, closed ones too — the Edit form's Bank list. */
   allCards: AccountData[];
   freeNightStays: FreeNightStayLite[];
-  /** card id -> date of its latest payment (YYYY-MM-DD). */
-  lastPaidByCard: Map<string, string>;
+  /** card id -> its latest payment. */
+  lastPaymentByCard: Map<string, LastCardPayment>;
+  /** debt subcategory id -> its latest payment. */
+  lastDebtPaymentBySub: Map<string, LastCardPayment>;
   open: boolean;
   onToggle: () => void;
 }) {
   const [payCardFor, setPayCardFor] = useState<AccountData | null>(null);
+  // Latest of the card's own payments, its debt's, and any balance transfer on
+  // it, since the Pay popup pays all three.
+  const latestPaymentOf = (card: AccountData) =>
+    [
+      lastPaymentByCard.get(card.id),
+      lastDebtPaymentBySub.get(card.cardDetails?.debtSubcategoryId ?? ""),
+      ...(card.transfers ?? []).map((t) => lastDebtPaymentBySub.get(t.subId)),
+    ].reduce<LastCardPayment | null>((latest, p) => (p && (!latest || p.date > latest.date) ? p : latest), null);
   // The card whose Edit form is open (desktop tiles' Edit button).
   const [editCardFor, setEditCardFor] = useState<AccountData | null>(null);
   // The header's Card Payment button: choose a card first, then Pay opens.
@@ -1381,16 +1408,6 @@ function CreditCardListSection({
   const todayIso = useLocalToday();
   const dueOf = (a: AccountData) =>
     todayIso && a.paymentDueDay && !a.dateClosed && ((a.owedCents ?? 0) > 0 || (a.transferCents ?? 0) > 0) ? nextDueDate(a.paymentDueDay, todayIso) : null;
-  // Named, soonest first, so the header says WHICH card (Victor,
-  // 2026-11-01: "which card is due?").
-  const dueSoonCards = accounts
-    .map((a) => ({ a, due: dueOf(a) }))
-    .filter((x): x is { a: AccountData; due: { iso: string; daysLeft: number } } => x.due != null && x.due.daysLeft <= DUE_SOON_DAYS)
-    .sort((x, y) => x.due.daysLeft - y.due.daysLeft);
-  // Clicking the due pill shows only those cards; clicking again shows all.
-  const [dueOnly, setDueOnly] = useState(false);
-  const dueIds = new Set(dueSoonCards.map((x) => x.a.id));
-  const showDueOnly = dueOnly && dueIds.size > 0;
 
   // Drag a tile by its grip onto another to SWAP the two. Inserting (as the
   // account lists do) shifted every later tile one slot and reflowed the
@@ -1499,31 +1516,6 @@ function CreditCardListSection({
           </span>
           <span className="whitespace-nowrap border-teal-300 text-xs font-semibold uppercase tracking-wide text-teal-800 sm:border-l sm:pl-2 dark:border-teal-700 dark:text-teal-300">Not in net worth</span>
         </span>
-        {/* Cards owing money whose due date is DUE_SOON_DAYS away or less —
-            said once here so it isn't missed among the tiles. Clicking it
-            shows just those cards (opening the section if it's closed);
-            the ✕ shows it's on. Desktop only. */}
-        {dueSoonCards.length > 0 ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!showDueOnly && !open) onToggle();
-              setDueOnly(!showDueOnly);
-            }}
-            aria-pressed={showDueOnly}
-            className={`hidden cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-bold ring-1 transition sm:inline-flex ${
-              showDueOnly
-                ? "bg-negative text-white ring-negative"
-                : "bg-negative/10 text-negative ring-negative/25 hover:bg-negative/20"
-            }`}
-          >
-            {dueSoonCards
-              .map(({ a, due }) => `${cardShortName(a.name)} due ${formatDueDate(due.iso)}`)
-              .join(" · ")}
-            {showDueOnly ? <span aria-hidden>✕</span> : null}
-          </button>
-        ) : null}
         </div>
         <button
           type="button"
@@ -1558,7 +1550,7 @@ function CreditCardListSection({
           // (27"/34" screens). No fifth: at the page's 110rem cap five-wide
           // tiles (333px) ran the amount into the grip.
           <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 @[40rem]:grid-cols-2 sm:gap-3 sm:px-6 @[70rem]:grid-cols-3 @[92rem]:grid-cols-4">
-            {(showDueOnly ? localCards.filter((a) => dueIds.has(a.id)) : localCards).map((a) => (
+            {localCards.map((a) => (
               <li key={a.id} data-drop-key={`card:${a.id}`} className={`rounded-lg ${dragOverId === a.id ? "ring-2 ring-sky-400" : ""}`}>
                 {/* Desktop: a tile like the Amex dashboard — the card drawn
                     in its brand's look, what it owes, its name, and when the
@@ -1567,7 +1559,7 @@ function CreditCardListSection({
                   card={a}
                   currency={currency}
                   due={dueOf(a)}
-                  lastPaid={lastPaidByCard.get(a.id) ?? null}
+                  lastPaid={latestPaymentOf(a)?.date ?? null}
                   ready={todayIso != null}
                   grip={grip(a.id)}
                   onPay={() => setPayCardFor(a)}
@@ -1675,6 +1667,7 @@ function CreditCardListSection({
           currency={currency}
           nonCardAccounts={nonCardAccounts}
           allBuckets={allBuckets}
+          lastPayment={latestPaymentOf(payCardFor)}
           onClose={() => setPayCardFor(null)}
         />
       ) : null}

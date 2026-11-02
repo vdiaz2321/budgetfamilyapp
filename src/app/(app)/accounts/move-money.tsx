@@ -28,12 +28,6 @@ const KINDS: { kind: MoveKind; name: string; flow: string; budget: string; icon:
   { kind: "withdraw", name: "Withdraw", flow: "Investment → bank", budget: "Budget: not counted", icon: "M12 5v14m0 0-5-5m5 5 5-5" },
 ];
 
-const SAVE_LABEL: Record<MoveKind, string> = {
-  transfer: "Save transfer",
-  invest: "Save investment",
-  withdraw: "Save withdrawal",
-};
-
 // One popup for every move between your own accounts: bank → bank (a
 // transfer), bank → investment (the Budget's Invest/Savings entry, so it
 // counts as saved), and investment → bank (a withdrawal). Each still saves
@@ -156,6 +150,9 @@ export function MoveMoneyModal({
                 fd.set("amount", amount);
                 fd.set("date", date);
                 fd.set("memo", memo);
+                // One button: every move saves already cleared, so it needn't
+                // be cleared on Transactions, same as a card payment.
+                fd.set("cleared", "on");
                 let error: string | null = null;
                 try {
                   if (kind === "withdraw" && toAcct) {
@@ -296,11 +293,11 @@ export function MoveMoneyModal({
           </form>
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-line bg-surface px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+        <div className="flex items-center gap-2 border-t border-line bg-surface px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-1.5 py-1 text-xs font-bold text-foreground transition hover:bg-sky-50 sm:px-2 sm:py-1.5 sm:text-sm dark:hover:bg-sky-950/40"
+            className="mr-auto rounded-lg px-1.5 py-1 text-xs font-bold text-foreground transition hover:bg-sky-50 sm:px-2 sm:py-1.5 sm:text-sm dark:hover:bg-sky-950/40"
           >
             Cancel
           </button>
@@ -310,7 +307,7 @@ export function MoveMoneyModal({
             disabled={pending || !kind}
             className="rounded-xl bg-brand px-2.5 py-1 text-xs font-bold text-white transition-colors hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-60 sm:px-3.5 sm:py-1.5 sm:text-sm"
           >
-            {pending ? "Saving…" : kind ? SAVE_LABEL[kind] : "Pick From and To"}
+            {pending ? "Saving…" : kind ? "Save & Clear" : "Pick From and To"}
           </button>
         </div>
       </div>

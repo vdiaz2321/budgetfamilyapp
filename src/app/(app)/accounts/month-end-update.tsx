@@ -7,11 +7,10 @@ import { centsToGroupedDisplay, displayToCents } from "@/lib/money";
 import type { AccountData } from "./types";
 import { clearMonthEndCheck, saveMonthEndValue } from "./month-end-actions";
 
-// Month-end update: one list of every balance Victor keys in by hand from a
-// statement (Investments, Kids Funding, Savings), with last month beside the
+// Month-end update: one list of every balance Victor checks against a
+// statement (Investments, Banking, Kids Funding), with last month beside the
 // new value, the change between them, and a checkmark so he can stop partway
-// and pick up where he left off. Banking checking and cards are left out —
-// transactions drive those.
+// and pick up where he left off. Cards are left out — transactions drive those.
 
 export type MonthEndCheck = { month: string; accountId: string | null; bucketId: string | null };
 /** A logged transaction or Move Money transfer that moved a row's balance. */
@@ -82,7 +81,7 @@ function itemsOf(a: AccountData): Item[] {
 
 const SECTIONS: { label: string; match: (a: AccountData) => boolean }[] = [
   { label: "Investments", match: (a) => !a.isKidsAccount && a.kind === "investment" },
-  { label: "Savings", match: (a) => !a.isKidsAccount && a.kind === "savings_bucket" },
+  { label: "Banking", match: (a) => !a.isKidsAccount && (a.kind === "checking" || a.kind === "savings_bucket" || a.kind === "cash") },
   { label: "Kids Funding", match: (a) => a.isKidsAccount },
 ];
 
@@ -200,7 +199,7 @@ export function MonthEndUpdateModal({
     const t = typed[`${month}|${i.key}`];
     if (t == null || t.trim() === "") return;
     if (displayToCents(t) === baseCents(i)) return;
-    save(i, t);
+    save(i, t, true);
   };
 
   // Closing with Escape (or the X) can unmount a box before its blur save
@@ -211,7 +210,7 @@ export function MonthEndUpdateModal({
       const t = typed[rowKey];
       if (t == null || t.trim() === "" || saving.has(rowKey)) continue;
       if (displayToCents(t) === baseCents(i)) continue;
-      void saveMonthEndValue({ month, accountId: i.accountId, bucketId: i.bucketId, balance: t }).then(() =>
+      void saveMonthEndValue({ month, accountId: i.accountId, bucketId: i.bucketId, balance: t, tick: true }).then(() =>
         router.refresh(),
       );
     }
@@ -367,15 +366,19 @@ export function MonthEndUpdateModal({
                               <div key={i.key} className={`${GRID} gap-y-1 py-2 ${bucketed || idx > 0 ? "border-t border-line/70" : ""}`}>
                                 <div className={`col-span-4 min-w-0 sm:col-span-1 ${bucketed ? "pl-7" : "pl-2.5"}`}>
                                   <span className="block truncate text-sm font-semibold">{i.name}</span>
-                                  {movesOf(i).map((m, n) => (
-                                    <span key={n} className="block truncate text-xs">
-                                      {m.source}:{" "}
-                                      <span className={`font-semibold tabular-nums ${m.cents < 0 ? "text-negative" : "text-positive"}`}>
-                                        {m.cents < 0 ? "−" : "+"}${centsToGroupedDisplay(Math.abs(m.cents))}
-                                      </span>{" "}
-                                      · {monthName(m.date.slice(0, 7) + "-01")} {Number(m.date.slice(8, 10))}
-                                    </span>
-                                  ))}
+                                  {/* Banking accounts move all month as normal, so only the
+                                      other sections explain a change with their moves. */}
+                                  {sec.label === "Banking"
+                                    ? null
+                                    : movesOf(i).map((m, n) => (
+                                        <span key={n} className="block truncate text-xs">
+                                          {m.source}:{" "}
+                                          <span className={`font-semibold tabular-nums ${m.cents < 0 ? "text-negative" : "text-positive"}`}>
+                                            {m.cents < 0 ? "−" : "+"}${centsToGroupedDisplay(Math.abs(m.cents))}
+                                          </span>{" "}
+                                          · {monthName(m.date.slice(0, 7) + "-01")} {Number(m.date.slice(8, 10))}
+                                        </span>
+                                      ))}
                                 </div>
                                 <span className="text-center text-sm tabular-nums">{prev == null ? "—" : `$${money(prev)}`}</span>
                                 <input
