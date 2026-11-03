@@ -12,7 +12,7 @@ const shortDate = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${Num
 
 // Four columns from sm up; on a phone the holding and amount share a line and
 // the date and bank go under them.
-const ROW = "grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 px-3 py-2 sm:grid-cols-[4.5rem_minmax(0,1.3fr)_minmax(0,1fr)_7rem]";
+const ROW = "grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 px-3 py-2 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1.5fr)_6rem]";
 
 export function ContributionsModal({
   target,
@@ -48,15 +48,15 @@ export function ContributionsModal({
               <div key={line.id} className={ROW}>
                 <span className="order-3 text-[13.5px] sm:order-none sm:text-center sm:text-sm">{shortDate(line.date)}</span>
                 <span className="order-1 min-w-0 truncate font-semibold sm:order-none sm:text-center sm:font-normal">{line.holding}</span>
-                <span className="order-4 min-w-0 truncate text-right text-[13.5px] sm:order-none sm:text-center sm:text-sm">{line.from ?? line.payee ?? ""}</span>
+                <span className="order-4 min-w-0 truncate text-right text-[13.5px] sm:order-none sm:whitespace-normal sm:text-center sm:text-sm">{line.from ?? line.payee ?? ""}</span>
                 <span className={`order-2 text-right font-semibold tabular-nums sm:order-none sm:text-center ${line.cents < 0 ? "text-negative" : ""}`}>
                   {formatMoney(line.cents, currency)}
                 </span>
               </div>
             ))}
-            <div className="flex items-baseline justify-between gap-3 px-3 py-2 font-bold">
-              <span>{lines.length} {lines.length === 1 ? "transaction" : "transactions"}</span>
-              <span className="tabular-nums">{formatMoney(total, currency)}</span>
+            <div className={`${ROW} font-bold`}>
+              <span className="sm:col-span-3">{lines.length} {lines.length === 1 ? "transaction" : "transactions"}</span>
+              <span className="text-right tabular-nums sm:text-center">{formatMoney(total, currency)}</span>
             </div>
           </div>
         ) : null}

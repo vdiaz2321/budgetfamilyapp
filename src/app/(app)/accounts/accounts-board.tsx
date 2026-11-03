@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import React, { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
-import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
+import { TAX_LABEL_PICKER, TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
+import { ACCOUNT_TYPE_DEFAULTS, RETIREMENT_KINDS, RETIREMENT_LABEL, TRUMP_ACCOUNT_RULES_URL, taxForRetirementKind } from "@/lib/retirement-kind";
 import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments-ledger";
 import { ModalShell } from "@/components/modal-shell";
@@ -215,16 +215,28 @@ function RetirementKindSelect({
   name,
   value,
   className,
+  onPicked,
 }: {
   name: string;
   value: string | null;
   className?: string;
+  onPicked?: (kind: string) => void;
 }) {
   return (
     <select
       name={name}
       defaultValue={value ?? ""}
       aria-label="Retirement type"
+      onChange={(e) => {
+        onPicked?.(e.target.value);
+        // Tax treatment follows, in whichever form this sits in. It stays editable.
+        const fields = e.target.form?.elements;
+        const tax = fields?.namedItem("taxTreatment");
+        const type = fields?.namedItem("subtype");
+        if (tax instanceof HTMLSelectElement) {
+          tax.value = taxForRetirementKind(e.target.value, type instanceof HTMLSelectElement ? type.value : "");
+        }
+      }}
       className={`rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${className ?? ""}`}
     >
       <option value="">Not a retirement account</option>
@@ -392,10 +404,12 @@ function SubtypeSelect({
   value,
   className,
   emptyLabel = "Type…",
+  onPicked,
 }: {
   name: string;
   value: string | null;
   className?: string;
+  onPicked?: (type: string) => void;
   /** The blank choice. A bucket's reads "Same as account (…)", since blank
    *  there means it follows the account's Type. */
   emptyLabel?: string;
@@ -433,7 +447,26 @@ function SubtypeSelect({
       defaultValue={current}
       aria-label="Account type"
       onChange={(e) => {
-        if (e.target.value === "__add") setCustom(true);
+        if (e.target.value === "__add") {
+          setCustom(true);
+          return;
+        }
+        onPicked?.(e.target.value);
+        // Fill in the same form's tax and retirement fields from the Type.
+        // They stay editable, and a custom or blank Type leaves them alone.
+        const defaults = ACCOUNT_TYPE_DEFAULTS[e.target.value];
+        if (!defaults) return;
+        const fields = e.target.form?.elements;
+        const tax = fields?.namedItem("taxTreatment");
+        const kind = fields?.namedItem("retirementKind");
+        if (tax instanceof HTMLSelectElement) tax.value = defaults.tax;
+        if (kind instanceof HTMLSelectElement) kind.value = defaults.kind ?? "";
+        // Every Type with defaults is an investment. Kids Funding also offers
+        // Checking and Savings, so its Account type has to follow.
+        const accountType = fields?.namedItem("kind");
+        if (accountType instanceof HTMLSelectElement && accountType.querySelector('option[value="investment"]')) {
+          accountType.value = "investment";
+        }
       }}
       className={`${base} ${className ?? ""}`}
     >
@@ -3288,6 +3321,7 @@ function AddAccountForm({
     });
   const [error, setError] = useState<string | null>(null);
   const [debtSubtype, setDebtSubtype] = useState("");
+  const [retirementKind, setRetirementKind] = useState("");
   const [cardTab, setCardTab] = useState<"key" | "basics" | "debt">("key");
   const kindKeys = Object.keys(section.kindLabels);
   const multiKind = kindKeys.length > 1;
@@ -3477,7 +3511,15 @@ function AddAccountForm({
             ) : usesSubtypeList(section.key) ? (
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
                 Type
-                <SubtypeSelect name="subtype" value={null} className="mt-1 w-full font-normal normal-case tracking-normal text-foreground" />
+                <SubtypeSelect
+                  name="subtype"
+                  value={null}
+                  onPicked={(type) => {
+                    const defaults = ACCOUNT_TYPE_DEFAULTS[type];
+                    if (defaults) setRetirementKind(defaults.kind ?? "");
+                  }}
+                  className="mt-1 w-full font-normal normal-case tracking-normal text-foreground"
+                />
               </label>
             ) : (
               <LabeledInput label="Type" name="subtype" placeholder="e.g. AMEX, Chase" />
@@ -3486,6 +3528,32 @@ function AddAccountForm({
                 a house has neither. */}
             {section.key === "property" ? null : (
             <>
+            {/* Asked at creation so the contribution-cap card never has to
+                guess. Traditional and Roth are both offered because that is
+                what the user knows about the account — they happen to share
+                one annual limit, which the hint says rather than hiding. */}
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Retirement type
+              <RetirementKindSelect
+                name="retirementKind"
+                value={null}
+                onPicked={setRetirementKind}
+                className="mt-1 w-full font-normal normal-case tracking-normal text-foreground"
+              />
+              {retirementKind === "trump_account" ? (
+                <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">
+                  Traditional IRA, not Roth. Growth taxed at withdrawal.{" "}
+                  <a
+                    href={TRUMP_ACCOUNT_RULES_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold underline"
+                  >
+                    Limits: trumpaccounts.gov
+                  </a>
+                </span>
+              ) : null}
+            </label>
             {/* Set at creation rather than guessed from the name later — this
                 is the value "How it's taxed" on /invest bands the account by. */}
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -3497,26 +3565,10 @@ function AddAccountForm({
               >
                 {TAX_TREATMENTS.map((t) => (
                   <option key={t} value={t}>
-                    {TAX_LABEL_SHORT[t]}
+                    {TAX_LABEL_PICKER[t]}
                   </option>
                 ))}
               </select>
-            </label>
-            {/* Asked at creation so the contribution-cap card never has to
-                guess. Traditional and Roth are both offered because that is
-                what the user knows about the account — they happen to share
-                one annual limit, which the hint says rather than hiding. */}
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
-              Retirement type
-              <RetirementKindSelect
-                name="retirementKind"
-                value={null}
-                className="mt-1 w-full font-normal normal-case tracking-normal text-foreground"
-              />
-              <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">
-                Sets which IRS contribution limit applies. Traditional and Roth IRAs share one
-                limit per person.
-              </span>
             </label>
             </>
             )}
@@ -3787,12 +3839,12 @@ function EditAccountForm({
           ) : null}
           {(section.key === "investments" || section.key === "kids") ? (
             <>
+              <RetirementKindSelect name="retirementKind" value={account.retirementKind} />
               <TaxTreatmentSelect
                 name="taxTreatment"
                 value={account.taxTreatment}
                 className="!w-auto !py-1.5 !text-sm !text-foreground"
               />
-              <RetirementKindSelect name="retirementKind" value={account.retirementKind} />
             </>
           ) : null}
           {account.kind === "debt_loan" && account.subtype === "real_estate_loan" ? (

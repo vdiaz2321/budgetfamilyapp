@@ -31,6 +31,14 @@ export const TAX_LABEL_SHORT: Record<TaxTreatment, string> = {
   education: "Education",
 };
 
+/** The roomy Add account picker has space to say what each one means. */
+export const TAX_LABEL_PICKER: Record<TaxTreatment, string> = {
+  taxable: "Taxable",
+  deferred: "Deferred: taxed at withdrawal",
+  free: "Tax-free: Roth",
+  education: "Education: 529",
+};
+
 // What each band actually means, in plain English. Shown when a band is
 // opened, because "tax-deferred" vs "tax-free" is the exact pair people mix up
 // — and the answer decides which account the next dollar should go to.
@@ -68,7 +76,7 @@ export function classifyTax(label: string | null | undefined): TaxTreatment | nu
   const s = label.toLowerCase();
   if (/\b529\b|coverdell/.test(s)) return "education";
   if (/roth/.test(s)) return "free";
-  if (/401|403b|tsp|traditional|sep|simple|\bira\b|pension/.test(s)) return "deferred";
+  if (/401|403b|tsp|traditional|sep|simple|\bira\b|pension|\btrump\b/.test(s)) return "deferred";
   // UTMA/UGMA are custodial brokerage accounts — taxed like any other
   // (kiddie tax), not education accounts, whatever they're saved for.
   if (/taxable|brokerage|reit|crypto|individual|utma|ugma/.test(s)) return "taxable";

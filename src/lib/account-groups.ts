@@ -93,7 +93,7 @@ export function inferGroup(input: {
   }
   if (rk === "roth_ira" || /\broth\b/.test(names)) return "roth";
   if (input.accountTax === "free") return "roth";
-  if (rk === "traditional_ira" || rk === "elective_deferral" || input.accountTax === "deferred") return "pretax";
+  if (rk === "traditional_ira" || rk === "trump_account" || rk === "elective_deferral" || input.accountTax === "deferred") return "pretax";
   return "brokerage";
 }
 

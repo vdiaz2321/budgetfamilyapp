@@ -928,6 +928,7 @@ export default async function InvestPage({
         });
         if (!kind) continue;
         const capKind = capKindFor(kind);
+        if (!capKind) continue;
         // Without a holder the slot can't be attributed to a person. Grouping
         // every such slot together is the conservative read: it can understate
         // room, never overstate it, and the card says a holder is missing.
