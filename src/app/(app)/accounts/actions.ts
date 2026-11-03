@@ -13,6 +13,7 @@ import { resolvePayeeId } from "@/lib/payees";
 import { adjustDebtBalance } from "@/lib/debts";
 import { unwrap } from "@/lib/supabase-result";
 import { isRetirementKind } from "@/lib/retirement-kind";
+import { kidMoveBlockFor } from "@/lib/kids-funding-load";
 import { deleteTransaction, updateTransactionAmount } from "@/app/(app)/budget/actions";
 
 // Every account type presented in the Accounts add flow. Rewards cards remain
@@ -250,6 +251,20 @@ export async function addAccount(formData: FormData) {
   const isCreditCard = kind === "credit_card";
   const isDebtAccount = kind === "debt_loan";
 
+  // Kids Funding: who it's for, and the IRS's one-per-child limit on Trump
+  // Accounts, checked across buckets as well as accounts.
+  const kidId = isKidsAccount ? String(formData.get("kidId") ?? "").trim() || null : null;
+  if (kidId && formData.get("retirementKind") === "trump_account") {
+    const [{ count: accountCount, error: accountError }, { count: bucketCount, error: bucketError }] = await Promise.all([
+      supabase.from("accounts").select("id", { count: "exact", head: true }).eq("household_id", householdId).eq("kid_id", kidId).eq("retirement_kind", "trump_account").is("date_closed", null),
+      supabase.from("buckets").select("id", { count: "exact", head: true }).eq("household_id", householdId).eq("kid_id", kidId).eq("retirement_kind", "trump_account").is("date_closed", null),
+    ]);
+    if (accountError || bucketError) return { error: "Couldn't save that account — please try again.", id: null };
+    if ((accountCount ?? 0) + (bucketCount ?? 0) > 0) {
+      return { error: `${holder ?? "This child"} already has a Trump Account. The IRS allows one per child.`, id: null };
+    }
+  }
+
   const row: Record<string, unknown> = {
     household_id: householdId,
     name,
@@ -268,6 +283,11 @@ export async function addAccount(formData: FormData) {
     sort_order: sortOrder,
     bank_group: bankGroup,
   };
+  if (isKidsAccount) {
+    row.kid_id = kidId;
+    row.controlled_by = String(formData.get("controlledBy") ?? "").trim() || null;
+    row.successor_owner = String(formData.get("successorOwner") ?? "").trim() || null;
+  }
   // Estate guide fields, when "+ Add estate details" was opened.
   const estateTransfer = String(formData.get("estateTransfer") ?? "").trim();
   if (["beneficiary", "pod", "tod", "joint", "will", "close"].includes(estateTransfer)) row.estate_transfer = estateTransfer;
@@ -360,9 +380,56 @@ export async function addAccount(formData: FormData) {
     if (linkError) return { error: `The loan was saved, but ${linkError}`, id: inserted.id };
   }
 
+  // Money reaches a fund through its Budget Invest/Savings item ("Leo 529"), so
+  // a new kids' fund gets one, or Move Money would have nowhere to send it.
+  if (isKidsAccount && kind === "investment" && inserted?.id) {
+    const linkError = await addFundBudgetItem(supabase, householdId, inserted.id, name);
+    if (linkError) {
+      await captureSnapshots(supabase, householdId, { force: true });
+      revalidate();
+      return { error: `The account was saved, but its Budget item wasn't — ${linkError}`, id: inserted.id };
+    }
+  }
+
   await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
   return { error: null, id: inserted?.id ?? null };
+}
+
+async function addFundBudgetItem(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  householdId: string,
+  accountId: string,
+  name: string,
+): Promise<string | null> {
+  const { data: category, error: categoryError } = await supabase
+    .from("categories")
+    .select("id")
+    .eq("household_id", householdId)
+    .eq("kind", "savings")
+    .order("sort_order")
+    .limit(1)
+    .maybeSingle();
+  if (categoryError) return categoryError.message;
+  if (!category) return "there's no Invest/Savings group on Budget.";
+  const { data: last, error: lastError } = await supabase
+    .from("subcategories")
+    .select("sort_order")
+    .eq("household_id", householdId)
+    .eq("category_id", category.id)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (lastError) return lastError.message;
+  const { error } = await supabase.from("subcategories").insert({
+    household_id: householdId,
+    category_id: category.id,
+    name,
+    linked_account_id: accountId,
+    sort_order: (last?.sort_order ?? -1) + 1,
+  });
+  if (error) return error.code === "23505" ? `Budget already has an item named "${name}".` : error.message;
+  return null;
 }
 
 // Which property a mortgage is for — stored on its debt row, the one liability
@@ -1570,8 +1637,19 @@ async function saveAccountTransfer(formData: FormData, action: "create" | "updat
 
   if (action === "update" && !transactionId) return { error: "Transfer not found." };
   if (!fromAccountId || !toAccountId) return { error: "Pick both accounts." };
-  if (fromAccountId === toAccountId) return { error: "Pick two different accounts." };
+  // One account only between two of its own buckets (529 Ben → 529 Leo, both
+  // under the kids' Fidelity).
+  if (fromAccountId === toAccountId && (!fromBucketId || !toBucketId || fromBucketId === toBucketId)) {
+    return { error: "Pick two different accounts." };
+  }
   if (amountCents <= 0) return { error: "Enter an amount." };
+  const kidBlock = await kidMoveBlockFor(
+    supabase,
+    householdId,
+    { accountId: fromAccountId, bucketId: fromBucketId },
+    { accountId: toAccountId, bucketId: toBucketId },
+  );
+  if (kidBlock) return { error: kidBlock };
 
   const { data: savedId, error } = await supabase.rpc("mutate_account_transfer", {
     p_action: action,

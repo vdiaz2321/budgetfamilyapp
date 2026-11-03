@@ -49,7 +49,7 @@ export async function loadTxFormData(supabase: SupabaseClient, householdId: stri
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, sort_order")
+      .select("id, account_id, name, sort_order, date_closed")
       .eq("household_id", householdId)
       .order("sort_order")
       .order("name"),
@@ -126,7 +126,7 @@ export async function loadTxFormData(supabase: SupabaseClient, householdId: stri
   const bucketsByAccount: Record<string, { id: string; name: string }[]> = {};
   for (const b of buckets ?? []) {
     if (!investmentAccountIds.has(b.account_id)) continue;
-    (bucketsByAccount[b.account_id] ??= []).push({ id: b.id, name: b.name });
+    (bucketsByAccount[b.account_id] ??= []).push({ id: b.id, name: b.date_closed ? `${b.name} (closed)` : b.name });
   }
 
   const payeeLineItems: PayeeLineItem[] = [

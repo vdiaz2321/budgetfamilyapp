@@ -59,7 +59,7 @@ function inputValue(cents: number): string {
 
 function itemsOf(a: AccountData): Item[] {
   if (a.buckets.length > 0) {
-    return a.buckets.map((b) => ({
+    return a.buckets.filter((b) => !b.dateClosed).map((b) => ({
       key: `b:${b.id}`,
       accountId: a.id,
       bucketId: b.id,

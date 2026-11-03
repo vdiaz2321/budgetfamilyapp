@@ -1,5 +1,6 @@
 "use server";
 
+import { kidMoveBlockFor } from "@/lib/kids-funding-load";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -156,6 +157,13 @@ async function saveInvestmentTransfer(formData: FormData, transactionId: string 
   const memo = String(formData.get("memo") ?? "").trim() || null;
   if (!sourceAccountId || !destAccountId) return { error: "Pick both accounts." };
   if (amountCents <= 0) return { error: "Enter an amount." };
+  const kidBlock = await kidMoveBlockFor(
+    supabase,
+    householdId,
+    { accountId: sourceAccountId, bucketId: sourceBucketId },
+    { accountId: destAccountId, bucketId: destBucketId },
+  );
+  if (kidBlock) return { error: kidBlock };
 
   const [srcAcct, destAcct, buckets] = await Promise.all([
     supabase

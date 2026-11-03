@@ -14,7 +14,7 @@ import { useScrollLock } from "@/lib/use-scroll-lock";
 // Inputs are 44px tall on a phone so they're easy to tap. `compact` sizes the
 // box to a short value (due day, ¢ per pt, APR) — a w-28 box, value centered —
 // instead of stretching it across the column.
-const LABEL_CLS = "mb-0.5 block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground";
+export const LABEL_CLS = "mb-0.5 block max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-foreground";
 const PAD = "py-1.5 max-sm:py-2.5";
 
 export function LabeledInput({

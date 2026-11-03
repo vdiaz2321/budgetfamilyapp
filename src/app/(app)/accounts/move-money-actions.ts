@@ -17,13 +17,13 @@ export async function loadMoveMoneyOptions() {
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, kind, active, is_kids_account, current_balance_cents")
+      .select("id, name, kind, active, is_kids_account, retirement_kind, current_balance_cents")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, balance_cents")
+      .select("id, account_id, name, balance_cents, date_closed")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -41,14 +41,20 @@ export async function loadMoveMoneyOptions() {
     kind: a.kind,
     active: a.active !== false,
     isKidsAccount: a.is_kids_account ?? false,
+    retirementKind: a.retirement_kind ?? null,
     balanceCents: a.current_balance_cents ?? 0,
     buckets: (bucketRows ?? [])
       .filter((b) => b.account_id === a.id)
+      .filter((b) => !b.date_closed)
       .map((b) => ({ id: b.id, name: b.name, balanceCents: b.balance_cents ?? 0 })),
   }));
   return {
     accounts,
-    investItems: investItemsFrom(subRows ?? [], bucketRows ?? []),
+    investItems: investItemsFrom(
+      subRows ?? [],
+      bucketRows ?? [],
+      new Set((accountRows ?? []).filter((a) => a.active === false).map((a) => a.id)),
+    ),
     currency: household.currency,
   };
 }

@@ -13,7 +13,8 @@ import type { AccountData, InvestItem } from "./types";
 // What the popup reads of an account. The Accounts page passes its full
 // AccountData; Transactions loads just this (move-money-actions).
 export type MoveAccount = Pick<AccountData, "id" | "name" | "kind" | "active" | "isKidsAccount" | "balanceCents"> & {
-  buckets: { id: string; name: string; balanceCents: number }[];
+  retirementKind?: string | null;
+  buckets: { id: string; name: string; balanceCents: number; dateClosed?: string | null }[];
 };
 
 type MoveKind = "transfer" | "invest" | "withdraw";
@@ -33,7 +34,7 @@ const KINDS: { kind: MoveKind; name: string; flow: string; budget: string; icon:
 // counts as saved), and investment → bank (a withdrawal). Each still saves
 // through the same action it always did.
 export function MoveMoneyModal({
-  accounts,
+  accounts: allAccounts,
   investItems,
   currency,
   onClose,
@@ -47,6 +48,13 @@ export function MoveMoneyModal({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // The disabled button only takes effect on the next render, so taps in the
+  // same instant all get through it and each one moves the money. One save at a
+  // time, and a save that worked stays locked until the popup closes.
+  const saving = useRef(false);
+
+  // A closed or handed-over bucket has nothing to move and takes nothing more.
+  const accounts = allAccounts.map((a) => ({ ...a, buckets: a.buckets.filter((b) => !b.dateClosed) }));
 
   // Cards and loans have their own payment flows; Kids Funding cash moves
   // like a bank account (in or out of Net Worth).
@@ -55,6 +63,10 @@ export function MoveMoneyModal({
   const banks = live.filter((a) => !a.isKidsAccount && isBank(a));
   const kidsCash = live.filter((a) => a.isKidsAccount && isBank(a));
   const investments = live.filter((a) => !a.isKidsAccount && a.kind === "investment");
+  // A kids' fund can be withdrawn like any other, except a Trump Account, which
+  // the law locks until the year its child turns 18. Money goes INTO them
+  // through their Budget items, listed under To.
+  const kidsFunds = live.filter((a) => a.isKidsAccount && a.kind === "investment" && a.retirementKind !== "trump_account");
 
   // Both start blank: a preselected account is one missed glance from the
   // wrong move.
@@ -139,7 +151,8 @@ export function MoveMoneyModal({
             id="move-money-form"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!kind || !from) return;
+              if (!kind || !from || saving.current) return;
+              saving.current = true;
               const typed = new FormData(e.currentTarget);
               const amount = String(typed.get("amount") ?? "");
               const date = String(typed.get("date") ?? "");
@@ -178,10 +191,16 @@ export function MoveMoneyModal({
                     await addTransaction(fd);
                   }
                 } catch (err) {
-                  error = `Couldn't save — ${err instanceof Error ? err.message : String(err)}`;
+                  // A failed fetch can't say whether the server finished, and a
+                  // blind retry would move the money twice.
+                  error = err instanceof TypeError
+                    ? "Connection lost. The move may have saved. Reload the page and check the balances before trying again."
+                    : `Couldn't save — ${err instanceof Error ? err.message : String(err)}`;
                 }
-                if (error) setErrorMsg(error);
-                else {
+                if (error) {
+                  setErrorMsg(error);
+                  saving.current = false;
+                } else {
                   // The totals behind didn't move until a reload, which read
                   // as "it didn't work".
                   router.refresh();
@@ -213,9 +232,9 @@ export function MoveMoneyModal({
                 <optgroup label="Banks">
                   {banks.map((a) => <option key={a.id} value={a.id}>{withBalance(a)}</option>)}
                 </optgroup>
-                {kidsCash.length > 0 ? (
+                {kidsCash.length + kidsFunds.length > 0 ? (
                   <optgroup label="Kids Funding">
-                    {kidsCash.map((a) => <option key={a.id} value={a.id}>{withBalance(a)}</option>)}
+                    {[...kidsCash, ...kidsFunds].map((a) => <option key={a.id} value={a.id}>{withBalance(a)}</option>)}
                   </optgroup>
                 ) : null}
                 <optgroup label="Investments">

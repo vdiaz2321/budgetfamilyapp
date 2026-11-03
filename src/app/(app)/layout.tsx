@@ -37,7 +37,7 @@ export default async function AppLayout({
         .order("name"),
       supabase
         .from("buckets")
-        .select("id, account_id, name, balance_cents")
+        .select("id, account_id, name, balance_cents, date_closed")
         .eq("household_id", profile.household_id),
       supabase
         .from("debts")
@@ -75,6 +75,8 @@ export default async function AppLayout({
   // out for their individual buckets in the sidebar list.
   const bucketsByAccount = new Map<string, { id: string; name: string; balance_cents: number }[]>();
   for (const b of buckets ?? []) {
+    // A closed or handed-over kids' account has left, so the sidebar drops it.
+    if (b.date_closed) continue;
     const list = bucketsByAccount.get(b.account_id) ?? [];
     list.push(b);
     bucketsByAccount.set(b.account_id, list);

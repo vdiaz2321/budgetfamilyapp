@@ -36,6 +36,7 @@ import {
   type BucketData,
   type BudgetDebt,
   type InvestItem,
+  type KidsFundingData,
   type CardDetails,
   type NonCardAccount,
   type RewardActivity,
@@ -48,6 +49,8 @@ import { TransferActivityModal } from "./transfer-activity";
 import type { EditableTransfer } from "../transactions/transfer-editor-modal";
 import { CloseChangesModal, CloseChangesNotice, type CloseChangesData } from "./close-changes";
 import { MonthEndUpdateModal, type MonthEndCheck, type MonthEndMove } from "./month-end-update";
+import { KidsAddForm, KidsFundingBody, type KidItem } from "./kids-funding";
+import { MONTH_COLUMNS, monthAbbr, monthHeadTier, monthTier } from "./month-columns";
 import { EstateAddFields, EstateGuideModal, estateNames, estateToFillCount, type EstateData } from "./estate-guide";
 import { CardFace, DUE_SOON_DAYS, cardShortName, formatDueDate, nextDueDate, useLocalToday } from "./card-face";
 import { EditCardModal, type FreeNightStayLite } from "../travel/credit-card-rewards";
@@ -79,37 +82,11 @@ function periodSnapshotMonthFor(
   return null; // weekly (not offered on Accounts) or unknown
 }
 
-const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-// "2026-07-01" -> "Jul"
-function monthAbbr(firstOfMonth: string): string {
-  return MONTH_ABBR[parseInt(firstOfMonth.slice(5, 7), 10) - 1] ?? "";
-}
-
 function maskAccountNumber(accountNumber: string | null): string | null {
   const lastFour = accountNumber?.replace(/\s/g, "").slice(-4);
   return lastFour ? `•••• ${lastFour}` : null;
 }
 
-// How many months the popup shows, newest first. Columns past the first
-// appear only as the popup gets wide enough for them — see MONTH_GRID below.
-const MONTH_COLUMNS = 7;
-// Column visibility, by index: month 0 always, 1-2 once the panel clears
-// 560px, 3-4 once it clears 860px, 5-6 once it clears 1180px (all 7rem — a 6-figure
-// amount like $127,000.00 overflows a 6rem column). Kept as literal class strings because
-// Tailwind only generates the arbitrary values it can see in the source.
-// Written out in full rather than built by string surgery: Tailwind only
-// emits the arbitrary variants it can literally see in the source, so a class
-// assembled at runtime silently never gets any CSS.
-const MONTH_TIER = ["", "hidden @[560px]:contents", "hidden @[860px]:contents", "hidden @[1180px]:contents"] as const;
-const MONTH_HEAD_TIER = ["", "hidden @[560px]:block", "hidden @[860px]:block", "hidden @[1180px]:block"] as const;
-// Both take the column's DISTANCE FROM THE ANCHOR (the selected period), not
-// its raw index. Months read newest -> oldest (Victor wants the current month
-// first), so the anchor is column 0 and a narrow popup keeps the columns
-// nearest it.
-const monthTier = (distance: number) =>
-  distance === 0 ? MONTH_TIER[0] : distance <= 2 ? MONTH_TIER[1] : distance <= 4 ? MONTH_TIER[2] : MONTH_TIER[3];
-const monthHeadTier = (distance: number) =>
-  distance === 0 ? MONTH_HEAD_TIER[0] : distance <= 2 ? MONTH_HEAD_TIER[1] : distance <= 4 ? MONTH_HEAD_TIER[2] : MONTH_HEAD_TIER[3];
 // The anchor is the newest column, i.e. the first one.
 // A column's index is therefore also its distance from the anchor.
 const ANCHOR_IDX = 0;
@@ -198,6 +175,7 @@ type Props = {
   estate?: EstateData;
   /** Stays using a card's free night — the card Edit form locks their dates. */
   freeNightStays?: FreeNightStayLite[];
+  kidsFunding?: KidsFundingData;
 };
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
@@ -499,6 +477,7 @@ export function AccountsBoard({
   closeChanges = null,
   estate = { accounts: {}, guide: { executor: null, willLocation: null, attorney: null, powerOfAttorney: null, instructions: null }, items: [] },
   freeNightStays = [],
+  kidsFunding = { kids: [], events: [], linkedItems: {}, contributedThisYear: {}, controllers: [] },
 }: Props) {
   // Net Worth's Rental properties "+ Add property" lands here with
   // ?add=rental: open Add account on a Rental property (Victor, 2026-10-25),
@@ -1076,7 +1055,13 @@ export function AccountsBoard({
             isBucketsOpen={isBucketsOpen}
             onToggleBuckets={toggleBuckets}
             headerBadge={section.kidsGroup ? "Not in Net Worth" : undefined}
-            onAddAccount={() => setAddOpen(true)}
+            kidsFunding={section.kidsGroup ? kidsFunding : undefined}
+            estateAccounts={estate.accounts}
+            onAddAccount={() => {
+              // Already in Kids Funding, so it doesn't ask where this belongs.
+              if (section.kidsGroup) setAddPreset({ section: "kids", subtype: "" });
+              setAddOpen(true);
+            }}
             onTransfer={() => setTransferOpen(true)}
           />
           </div>
@@ -1159,6 +1144,7 @@ export function AccountsBoard({
       {addOpen ? (
         <AddAccountModal
           estateNames={estateNames(accounts, estate)}
+          kidsFunding={kidsFunding}
           preset={addPreset}
           onClose={() => {
             setAddOpen(false);
@@ -1972,6 +1958,8 @@ function AccountSection({
   legacy = false,
   extraDebts = [],
   headerBadge,
+  kidsFunding,
+  estateAccounts = {},
   onAddAccount,
   onTransfer,
 }: {
@@ -1989,6 +1977,9 @@ function AccountSection({
   legacy?: boolean;
   extraDebts?: BudgetDebt[];
   headerBadge?: string;
+  /** Set for Kids Funding, whose popup is organised by child. */
+  kidsFunding?: KidsFundingData;
+  estateAccounts?: EstateData["accounts"];
   // The page header's two actions, repeated in the popup so a transfer or a
   // new account doesn't mean closing the section first. They open above it.
   onAddAccount?: () => void;
@@ -2076,6 +2067,34 @@ function AccountSection({
   const { dragOverId, startDrag } = usePointerReorder("account", reorder);
   const whole = section.key === "investments" || section.key === "kids";
   const money = (cents: number) => whole ? formatMoney(Math.round(cents / 100) * 100, currency).replace(/\.00$/, "") : formatMoney(cents, currency);
+
+  // One month's balance on a Kids Funding row: the same inputs and the same
+  // rule as BucketRow and AccountRow, because the column is headed with that
+  // month and an edit has to land on it.
+  const renderKidCell = (item: KidItem, column: number) => {
+    const month = historyMonths[column];
+    const value = item.balancesByMonth[month] ?? null;
+    const live = column === ANCHOR_IDX && periodSnapshotMonth == null;
+    // Heavier figures here only; these inputs are shared with every other group.
+    // The hidden sizer span takes the same weight, or the input would clip.
+    return (
+      <div className="contents [&_input]:font-medium [&_span]:font-medium">
+      <SumCell pickKey={`${item.key}:${month}`} cents={live ? item.balanceCents : value}>
+        {item.bucketId ? (
+          live ? (
+            <BucketBalanceInput id={item.bucketId} balanceCents={item.balanceCents} currency={currency} />
+          ) : (
+            <HistoricBucketBalanceInput bucketId={item.bucketId} month={month} balanceCents={value} currency={currency} />
+          )
+        ) : live ? (
+          <BalanceInput id={item.accountId} balanceCents={item.balanceCents} currency={currency} liability={false} />
+        ) : (
+          <HistoricBalanceInput accountId={item.accountId} month={month} balanceCents={value} currency={currency} liability={false} />
+        )}
+      </SumCell>
+      </div>
+    );
+  };
 
   return (
     <WholeDollarsContext.Provider value={whole}>
@@ -2216,10 +2235,21 @@ function AccountSection({
         {reorderError ? (
           <p className="px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
         ) : null}
+        {kidsFunding ? (
+          <KidsFundingBody
+            accounts={localAccounts}
+            data={kidsFunding}
+            estate={estateAccounts}
+            historyMonths={historyMonths}
+            isPastPeriod={periodSnapshotMonth != null}
+            money={money}
+            renderCell={renderKidCell}
+          />
+        ) : (
         <div>
           {localAccounts.length > 0 || extraDebts.length > 0 ? (
             localAccounts.length === 0 && extraDebts.length > 0 ? (
-              <div className={`grid ${DEBT_ROW_GRID} items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted`}>
+              <div className={`sticky top-0 z-10 grid ${DEBT_ROW_GRID} items-center gap-1.5 border-b border-line/60 bg-background px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted`}>
                 <span />
                 {historyMonths.map((m, i) => (
                   <span key={m} className={`text-center ${monthHeadTier(i)}`}>
@@ -2228,7 +2258,7 @@ function AccountSection({
                 ))}
               </div>
             ) : (
-              <div className={`grid ${ROW_GRID} items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted`}>
+              <div className={`sticky top-0 z-10 grid ${ROW_GRID} items-center gap-1.5 border-b border-line/60 bg-background px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted`}>
                 {headerBadge ? (
                   <span className="col-span-3 truncate text-[10px] font-medium uppercase tracking-wide text-muted">{headerBadge}</span>
                 ) : (
@@ -2338,6 +2368,7 @@ function AccountSection({
             </p>
           ) : null}
         </div>
+        )}
         </div>
         </SumSelectContext.Provider>
         </ModalShell>
@@ -3302,10 +3333,12 @@ function AddAccountForm({
   onDone,
   estateNames: names = [],
   subtype = null,
+  kidsFunding,
 }: {
   section: Section;
   onDone: (newId?: string | null) => void;
   estateNames?: string[];
+  kidsFunding?: KidsFundingData;
   /** The Type to start on. */
   subtype?: string | null;
 }) {
@@ -3325,6 +3358,10 @@ function AddAccountForm({
   const [cardTab, setCardTab] = useState<"key" | "basics" | "debt">("key");
   const kindKeys = Object.keys(section.kindLabels);
   const multiKind = kindKeys.length > 1;
+
+  if (section.kidsGroup && kidsFunding) {
+    return <KidsAddForm data={kidsFunding} onDone={() => onDone()} />;
+  }
 
   // Credit cards are created with their basics and rewards/benefits together,
   // avoiding a second save and a trip back to find the new card in the list.
@@ -3662,9 +3699,11 @@ function AddAccountModal({
   onClose,
   estateNames = [],
   preset = null,
+  kidsFunding,
 }: {
   onClose: () => void;
   estateNames?: string[];
+  kidsFunding?: KidsFundingData;
   /** Opens straight on a section with its Type picked (a Rental property). */
   preset?: { section: string; subtype: string } | null;
 }) {
@@ -3723,9 +3762,10 @@ function AddAccountModal({
               section={section}
               estateNames={estateNames}
               subtype={preset?.section === section.key ? preset.subtype : null}
+              kidsFunding={kidsFunding}
               onDone={() => onClose()}
             />
-            {section.key !== "credit" && section.key !== "loans" ? (
+            {section.key !== "credit" && section.key !== "loans" && section.key !== "kids" ? (
               <p className="px-5 pb-5 text-xs leading-relaxed text-muted">
                 You can add buckets after the account is created. Account totals will always be calculated from their buckets.
               </p>

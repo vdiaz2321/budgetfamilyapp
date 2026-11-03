@@ -7,6 +7,7 @@ import { getSessionContext } from "@/lib/auth-context";
 import type { EstateData } from "./estate-guide";
 import type { MonthEndMove } from "./month-end-update";
 import { investItemsFrom } from "@/lib/invest-items";
+import type { KidsFundingData } from "./types";
 import { loadDebtMonthPlans } from "@/lib/debt-month-plan";
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
 import { loadClosePlan } from "@/lib/close-adjustments-load";
@@ -84,6 +85,25 @@ export default async function AccountsPage() {
     .not("account_id", "is", null)
     .then((r) => r);
 
+  // Kids Funding: the children, what's happened to each item, and this year's
+  // contributions, which are what a Trump Account's annual limit counts.
+  const kidsPromise = Promise.all([
+    supabase.from("kids").select("id, name, birth_month, utma_handover_age").eq("household_id", household.id).order("birth_month").then((r) => r),
+    supabase
+      .from("kids_account_events")
+      .select("id, event, account_id, bucket_id, from_kid_id, to_kid_id, amount_cents, detail, note, occurred_on")
+      .eq("household_id", household.id)
+      .order("occurred_on", { ascending: false })
+      .order("created_at", { ascending: false })
+      .then((r) => r),
+    supabase
+      .from("v_investment_contributions_monthly")
+      .select("account_id, bucket_id, net_contribution_cents")
+      .eq("household_id", household.id)
+      .eq("year", new Date().getFullYear())
+      .then((r) => r),
+  ]);
+
   // Per-card owed and this month's spend, summed in Postgres by
   // v_card_balances / v_card_month_spend (migration 20260826183000) rather
   // than by adding up every charge here — one row per card, so it can't be
@@ -118,13 +138,13 @@ export default async function AccountsPage() {
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, payment_due_day, tax_treatment, retirement_kind, balance_updated_at")
+      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, kid_id, controlled_by, successor_owner, closed_reason, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, payment_due_day, tax_treatment, retirement_kind, balance_updated_at")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, balance_cents, bank_group, subtype, tax_treatment, retirement_kind, holder, balance_updated_at")
+      .select("id, account_id, name, balance_cents, bank_group, subtype, tax_treatment, retirement_kind, holder, balance_updated_at, kid_id, institution, account_number, controlled_by, successor_owner, date_closed, closed_reason")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -309,7 +329,11 @@ export default async function AccountsPage() {
   }
 
   const subName = new Map((subRows ?? []).map((s) => [s.id, s.name]));
-  const investItems = investItemsFrom(subRows ?? [], bucketRows ?? []);
+  const investItems = investItemsFrom(
+    subRows ?? [],
+    bucketRows ?? [],
+    new Set((rows ?? []).filter((a) => a.active === false).map((a) => a.id)),
+  );
   const debtHistory = new Map<string, number>();
   for (const s of debtSnapshotRows ?? []) {
     debtHistory.set(`${s.subcategory_id}:${s.month}`, s.balance_cents ?? 0);
@@ -415,6 +439,42 @@ export default async function AccountsPage() {
     }
   }
 
+  const [
+    { data: kidRows, error: kidsError },
+    { data: kidEventRows, error: kidEventsError },
+    { data: kidContribRows, error: kidContribError },
+  ] = await kidsPromise;
+  throwIfAny({ kids: kidsError, kidEvents: kidEventsError, kidContributions: kidContribError });
+  const contributedThisYear: Record<string, number> = {};
+  for (const r of kidContribRows ?? []) {
+    const key = (r.bucket_id ?? r.account_id) as string | null;
+    if (key) contributedThisYear[key] = (contributedThisYear[key] ?? 0) + (r.net_contribution_cents ?? 0);
+  }
+  const linkedItems: Record<string, string> = {};
+  for (const s of subRows ?? []) {
+    const key = s.linked_bucket_id ?? s.linked_account_id;
+    if (key && s.active !== false) linkedItems[key] = s.name;
+  }
+  const kidsFunding: KidsFundingData = {
+    kids: (kidRows ?? []).map((k) => ({ id: k.id, name: k.name, birthMonth: k.birth_month, utmaHandoverAge: k.utma_handover_age })),
+    events: (kidEventRows ?? []).map((e) => ({
+      id: e.id,
+      event: e.event,
+      accountId: e.account_id,
+      bucketId: e.bucket_id,
+      fromKidId: e.from_kid_id,
+      toKidId: e.to_kid_id,
+      amountCents: e.amount_cents,
+      detail: e.detail,
+      note: e.note,
+      occurredOn: e.occurred_on,
+    })),
+    linkedItems,
+    contributedThisYear,
+    // The adults' own holders: never the "Kids" placeholder or a child's name.
+    controllers: [...new Set((rows ?? []).filter((a) => !a.is_kids_account).map((a) => a.holder?.trim()).filter((h): h is string => !!h && h !== "Joint"))],
+  };
+
   const accounts: AccountData[] = (rows ?? []).map((a) => ({
     id: a.id,
     name: a.name,
@@ -427,6 +487,10 @@ export default async function AccountsPage() {
     debtTrackingMode: a.debt_tracking_mode === "account" ? "account" : "budget",
     active: a.active,
     isKidsAccount: a.is_kids_account ?? false,
+    kidId: (a.kid_id as string | null) ?? null,
+    controlledBy: (a.controlled_by as string | null) ?? null,
+    successorOwner: (a.successor_owner as string | null) ?? null,
+    closedReason: (a.closed_reason as string | null) ?? null,
     bankGroup: (a.bank_group as "savings" | "spending" | null) ?? null,
     taxTreatment: (a.tax_treatment as string | null) ?? null,
     retirementKind: (a.retirement_kind as string | null) ?? null,
@@ -480,6 +544,13 @@ export default async function AccountsPage() {
         retirementKind: (b.retirement_kind as string | null) ?? null,
         holder: (b.holder as string | null) ?? null,
         balanceUpdatedAt: b.balance_updated_at,
+        kidId: (b.kid_id as string | null) ?? null,
+        institution: (b.institution as string | null) ?? null,
+        accountNumber: (b.account_number as string | null) ?? null,
+        controlledBy: (b.controlled_by as string | null) ?? null,
+        successorOwner: (b.successor_owner as string | null) ?? null,
+        dateClosed: (b.date_closed as string | null) ?? null,
+        closedReason: (b.closed_reason as string | null) ?? null,
         // Keyed "YYYY-MM-01", so a bucket row can show (and write) the month
         // the period picker is pointing at rather than only the last three.
         balancesByMonth: (() => {
@@ -698,6 +769,7 @@ export default async function AccountsPage() {
       monthEndChecks={monthEndChecks}
       monthEndMoves={monthEndMoves}
       accounts={accounts}
+      kidsFunding={kidsFunding}
       budgetDebts={budgetDebts}
       investItems={investItems}
       currency={household.currency}

@@ -16,13 +16,18 @@ type SubRow = {
  */
 export function investItemsFrom(
   subs: SubRow[],
-  buckets: { id: string; account_id: string }[],
+  buckets: { id: string; account_id: string; date_closed?: string | null }[],
+  closedAccountIds: ReadonlySet<string> = new Set(),
 ): InvestItem[] {
-  const bucketAccount = new Map(buckets.map((b) => [b.id, b.account_id]));
+  // A closed bucket or account takes no more money, so its item isn't offered.
+  const open = buckets.filter((b) => !b.date_closed);
+  const closedBucket = new Set(buckets.filter((b) => b.date_closed).map((b) => b.id));
+  const bucketAccount = new Map(open.map((b) => [b.id, b.account_id]));
   return subs.flatMap((s) => {
     const cat = Array.isArray(s.categories) ? s.categories[0] : s.categories;
     if (cat?.kind !== "savings" || s.active === false) return [];
+    if (s.linked_bucket_id && closedBucket.has(s.linked_bucket_id)) return [];
     const accountId = (s.linked_bucket_id ? bucketAccount.get(s.linked_bucket_id) : null) ?? s.linked_account_id;
-    return accountId ? [{ subId: s.id, name: s.name, accountId }] : [];
+    return accountId && !closedAccountIds.has(accountId) ? [{ subId: s.id, name: s.name, accountId }] : [];
   });
 }
