@@ -14,6 +14,7 @@ import { adjustDebtBalance } from "@/lib/debts";
 import { unwrap } from "@/lib/supabase-result";
 import { isRetirementKind } from "@/lib/retirement-kind";
 import { kidMoveBlockFor } from "@/lib/kids-funding-load";
+import { parseUtma } from "@/lib/kids-funding";
 import { deleteTransaction, updateTransactionAmount } from "@/app/(app)/budget/actions";
 
 // Every account type presented in the Accounts add flow. Rewards cards remain
@@ -287,6 +288,12 @@ export async function addAccount(formData: FormData) {
     row.kid_id = kidId;
     row.controlled_by = String(formData.get("controlledBy") ?? "").trim() || null;
     row.successor_owner = String(formData.get("successorOwner") ?? "").trim() || null;
+    if (subtype === "UTMA") {
+      const utma = parseUtma(String(formData.get("utmaState") ?? ""), String(formData.get("utmaAge") ?? ""));
+      if (utma.error) return { error: utma.error, id: null };
+      row.utma_state = utma.state;
+      row.utma_handover_age = utma.age;
+    }
   }
   // Estate guide fields, when "+ Add estate details" was opened.
   const estateTransfer = String(formData.get("estateTransfer") ?? "").trim();

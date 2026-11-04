@@ -6,7 +6,8 @@
 // hand-over by a day.
 //
 // Sources: IRS Notice 2025-68 (Trump Accounts), Fidelity's 529 and UTMA pages,
-// Fla. Stat. 710.123 (UTMA). The Trump Account rules are still being finalised.
+// Fla. Stat. 710.123 and 710.103 (UTMA). The Trump Account rules are still being
+// finalised.
 
 export type KidAccountType = "529" | "UTMA" | "Trump Account" | "Checking" | "Savings";
 
@@ -15,14 +16,12 @@ export const KID_ACCOUNT_TYPES: {
   kind: "investment" | "checking" | "savings_bucket";
   tax: "education" | "taxable" | "deferred";
   retirementKind: "trump_account" | null;
-  /** What the person running the account is called, for this type. */
-  controllerLabel: string;
 }[] = [
-  { type: "529", kind: "investment", tax: "education", retirementKind: null, controllerLabel: "Owner" },
-  { type: "UTMA", kind: "investment", tax: "taxable", retirementKind: null, controllerLabel: "Custodian" },
-  { type: "Trump Account", kind: "investment", tax: "deferred", retirementKind: "trump_account", controllerLabel: "Responsible party" },
-  { type: "Checking", kind: "checking", tax: "taxable", retirementKind: null, controllerLabel: "Parent" },
-  { type: "Savings", kind: "savings_bucket", tax: "taxable", retirementKind: null, controllerLabel: "Parent" },
+  { type: "529", kind: "investment", tax: "education", retirementKind: null },
+  { type: "UTMA", kind: "investment", tax: "taxable", retirementKind: null },
+  { type: "Trump Account", kind: "investment", tax: "deferred", retirementKind: "trump_account" },
+  { type: "Checking", kind: "checking", tax: "taxable", retirementKind: null },
+  { type: "Savings", kind: "savings_bucket", tax: "taxable", retirementKind: null },
 ];
 
 // Per child, per year, from everyone except the government and charities.
@@ -42,16 +41,9 @@ export function kidTypeOf(subtype: string | null, retirementKind: string | null)
   return subtype?.trim() || null;
 }
 
-export function controllerLabelFor(type: string | null): string {
-  return KID_ACCOUNT_TYPES.find((t) => t.type === type)?.controllerLabel ?? "Controlled by";
-}
-
 /** The backup for whoever runs it, for the types that have one. */
 export function successorLabelFor(type: string | null): string | null {
-  if (type === "529") return "Successor owner";
-  if (type === "UTMA") return "Successor custodian";
-  if (type === "Trump Account") return "Successor";
-  return null;
+  return type === "529" || type === "UTMA" || type === "Trump Account" ? "Takes over if you can't" : null;
 }
 
 /**
@@ -86,7 +78,7 @@ export function kidSaveLabel(input: {
     return restCents > 0 ? `Transfer ${amount}${to}, stop tracking ${money(restCents)}` : `Transfer ${amount}${to} and stop tracking`;
   }
   if (tracking === "closed") return `Save and stop tracking${restCents !== 0 ? ` ${money(restCents)}` : ""}`;
-  if (tracking === "handed_over") return `Save and hand over${restCents !== 0 ? ` ${money(restCents)}` : ""} to ${kidName}`;
+  if (tracking === "handed_over") return `Save and transfer${restCents !== 0 ? ` ${money(restCents)}` : ""} to ${kidName}`;
   return "Save changes";
 }
 
@@ -116,9 +108,71 @@ export function monthAtAge(birthMonth: string, age: number): string {
   return `${Number(birthMonth.slice(0, 4)) + age}${birthMonth.slice(4, 7)}-01`;
 }
 
-/** The UTMA ages to pick from: the three the law uses, plus whatever is set now. */
-export function utmaAgeOptions(current: number): number[] {
-  return [...new Set([18, 21, 25, current])].sort((x, y) => x - y);
+/** The UTMA ages to pick from. States differ, and some let the account set its own. */
+export function utmaAgeOptions(): number[] {
+  return [18, 19, 20, 21, 22, 23, 24, 25];
+}
+
+export const US_STATES: { code: string; name: string }[] = [
+  ["AL", "Alabama"], ["AK", "Alaska"], ["AZ", "Arizona"], ["AR", "Arkansas"], ["CA", "California"],
+  ["CO", "Colorado"], ["CT", "Connecticut"], ["DE", "Delaware"], ["DC", "District of Columbia"], ["FL", "Florida"],
+  ["GA", "Georgia"], ["HI", "Hawaii"], ["ID", "Idaho"], ["IL", "Illinois"], ["IN", "Indiana"],
+  ["IA", "Iowa"], ["KS", "Kansas"], ["KY", "Kentucky"], ["LA", "Louisiana"], ["ME", "Maine"],
+  ["MD", "Maryland"], ["MA", "Massachusetts"], ["MI", "Michigan"], ["MN", "Minnesota"], ["MS", "Mississippi"],
+  ["MO", "Missouri"], ["MT", "Montana"], ["NE", "Nebraska"], ["NV", "Nevada"], ["NH", "New Hampshire"],
+  ["NJ", "New Jersey"], ["NM", "New Mexico"], ["NY", "New York"], ["NC", "North Carolina"], ["ND", "North Dakota"],
+  ["OH", "Ohio"], ["OK", "Oklahoma"], ["OR", "Oregon"], ["PA", "Pennsylvania"], ["RI", "Rhode Island"],
+  ["SC", "South Carolina"], ["SD", "South Dakota"], ["TN", "Tennessee"], ["TX", "Texas"], ["UT", "Utah"],
+  ["VT", "Vermont"], ["VA", "Virginia"], ["WA", "Washington"], ["WV", "West Virginia"], ["WI", "Wisconsin"],
+  ["WY", "Wyoming"],
+].map(([code, name]) => ({ code, name }));
+
+// The age for money given directly, only for states whose law was read: Fla. Stat.
+// 710.123, Tex. Prop. Code 141.021, Cal. Prob. Code 3920.5, O.C.G.A. 44-5-130,
+// N.Y. EPTL 7-6.20, N.C.G.S. 33A-20, C.R.S. 11-50-121, T.C.A. 35-7-121. Published
+// state tables disagree, so any other state starts with no age, never a guess.
+const UTMA_GIFT_AGE: Record<string, number> = { CA: 18, CO: 21, FL: 21, GA: 21, NC: 21, NY: 21, TN: 21, TX: 21 };
+
+export function utmaGiftAge(state: string | null): number | null {
+  return (state && UTMA_GIFT_AGE[state]) || null;
+}
+
+export function utmaStateName(code: string | null): string | null {
+  return US_STATES.find((s) => s.code === code)?.name ?? null;
+}
+
+/** A UTMA's state and age from a form; blank means not known yet. */
+export function parseUtma(stateRaw: string, ageRaw: string): { state: string | null; age: number | null; error: string | null } {
+  const state = stateRaw.trim() || null;
+  const age = ageRaw.trim() ? Number(ageRaw) : null;
+  if (state && !US_STATES.some((s) => s.code === state)) return { state: null, age: null, error: "Pick a state from the list." };
+  if (age != null && (!Number.isInteger(age) || age < 18 || age > 25)) return { state: null, age: null, error: "The age to transfer must be 18 to 25." };
+  return { state, age, error: null };
+}
+
+/** "Florida · age 21 · Apr 2034", saying what's missing rather than guessing a date. */
+export function utmaLine(state: string | null, age: number | null, birthMonth: string | null): string {
+  const name = utmaStateName(state);
+  if (age == null) return name ? `${name} · Age needed` : "State needed";
+  const date = birthMonth ? ` · ${monthYear(monthAtAge(birthMonth, age))}` : "";
+  return name ? `${name} · age ${age}${date}` : `State needed · age ${age}${date}`;
+}
+
+/** The note under a UTMA's age: what the state's law says and when that lands. */
+export function utmaTransferNote(state: string, age: number, kidName: string, birthMonth: string | null): string {
+  const name = utmaStateName(state) ?? state;
+  const usual = utmaGiftAge(state);
+  const gets = birthMonth ? `${kidName} gets it in ${monthYear(monthAtAge(birthMonth, age))}.` : "";
+  const why = usual == null ? `Set to ${age}.` : usual === age ? `${name}'s age for gifts is ${usual}.` : `${name}'s age for gifts is ${usual}, but this one is set to ${age}.`;
+  return [why, gets, "You start the transfer. Moving doesn't change this."].filter(Boolean).join(" ");
+}
+
+/** Soon means inside the last 12 months before the date. */
+export function handOverStatus(handOver: string | null, today: string): "soon" | "past" | null {
+  if (!handOver) return null;
+  if (handOver <= today) return "past";
+  const yearBefore = `${Number(handOver.slice(0, 4)) - 1}${handOver.slice(4)}`;
+  return yearBefore <= today ? "soon" : null;
 }
 
 /**
@@ -133,9 +187,9 @@ export function trumpOpensOn(birthMonth: string): string {
  * The first day a hand-over can be recorded, or null when there's no legal date
  * (a 529 stays with its owner; a bank account follows the bank's own rules).
  */
-export function handOverFrom(type: string | null, birthMonth: string | null, utmaAge: number): string | null {
+export function handOverFrom(type: string | null, birthMonth: string | null, utmaAge: number | null): string | null {
   if (!birthMonth) return null;
-  if (type === "UTMA") return monthAtAge(birthMonth, utmaAge);
+  if (type === "UTMA") return utmaAge == null ? null : monthAtAge(birthMonth, utmaAge);
   if (type === "Trump Account") return trumpOpensOn(birthMonth);
   return null;
 }
@@ -153,7 +207,7 @@ export function kidActionsFor(input: {
   type: string | null;
   balanceCents: number;
   birthMonth: string | null;
-  utmaAge: number;
+  utmaAge: number | null;
   today: string;
 }): KidActions {
   const { type, balanceCents, birthMonth, utmaAge, today } = input;

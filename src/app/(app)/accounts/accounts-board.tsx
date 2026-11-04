@@ -477,7 +477,7 @@ export function AccountsBoard({
   closeChanges = null,
   estate = { accounts: {}, guide: { executor: null, willLocation: null, attorney: null, powerOfAttorney: null, instructions: null }, items: [] },
   freeNightStays = [],
-  kidsFunding = { kids: [], events: [], linkedItems: {}, contributedThisYear: {}, controllers: [] },
+  kidsFunding = { kids: [], events: [], linkedItems: {}, contributedThisYear: {} },
 }: Props) {
   // Net Worth's Rental properties "+ Add property" lands here with
   // ?add=rental: open Add account on a Rental property (Victor, 2026-10-25),

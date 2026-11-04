@@ -88,7 +88,7 @@ export default async function AccountsPage() {
   // Kids Funding: the children, what's happened to each item, and this year's
   // contributions, which are what a Trump Account's annual limit counts.
   const kidsPromise = Promise.all([
-    supabase.from("kids").select("id, name, birth_month, utma_handover_age").eq("household_id", household.id).order("birth_month").then((r) => r),
+    supabase.from("kids").select("id, name, birth_month").eq("household_id", household.id).order("birth_month").then((r) => r),
     supabase
       .from("kids_account_events")
       .select("id, event, account_id, bucket_id, from_kid_id, to_kid_id, amount_cents, detail, note, occurred_on")
@@ -138,13 +138,13 @@ export default async function AccountsPage() {
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, kid_id, controlled_by, successor_owner, closed_reason, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, payment_due_day, tax_treatment, retirement_kind, balance_updated_at")
+      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, kid_id, controlled_by, successor_owner, utma_state, utma_handover_age, closed_reason, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, payment_due_day, tax_treatment, retirement_kind, balance_updated_at")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, balance_cents, bank_group, subtype, tax_treatment, retirement_kind, holder, balance_updated_at, kid_id, institution, account_number, controlled_by, successor_owner, date_closed, closed_reason")
+      .select("id, account_id, name, balance_cents, bank_group, subtype, tax_treatment, retirement_kind, holder, balance_updated_at, kid_id, institution, account_number, controlled_by, successor_owner, utma_state, utma_handover_age, date_closed, closed_reason")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -456,7 +456,7 @@ export default async function AccountsPage() {
     if (key && s.active !== false) linkedItems[key] = s.name;
   }
   const kidsFunding: KidsFundingData = {
-    kids: (kidRows ?? []).map((k) => ({ id: k.id, name: k.name, birthMonth: k.birth_month, utmaHandoverAge: k.utma_handover_age })),
+    kids: (kidRows ?? []).map((k) => ({ id: k.id, name: k.name, birthMonth: k.birth_month })),
     events: (kidEventRows ?? []).map((e) => ({
       id: e.id,
       event: e.event,
@@ -471,8 +471,6 @@ export default async function AccountsPage() {
     })),
     linkedItems,
     contributedThisYear,
-    // The adults' own holders: never the "Kids" placeholder or a child's name.
-    controllers: [...new Set((rows ?? []).filter((a) => !a.is_kids_account).map((a) => a.holder?.trim()).filter((h): h is string => !!h && h !== "Joint"))],
   };
 
   const accounts: AccountData[] = (rows ?? []).map((a) => ({
@@ -490,6 +488,8 @@ export default async function AccountsPage() {
     kidId: (a.kid_id as string | null) ?? null,
     controlledBy: (a.controlled_by as string | null) ?? null,
     successorOwner: (a.successor_owner as string | null) ?? null,
+    utmaState: (a.utma_state as string | null) ?? null,
+    utmaHandoverAge: (a.utma_handover_age as number | null) ?? null,
     closedReason: (a.closed_reason as string | null) ?? null,
     bankGroup: (a.bank_group as "savings" | "spending" | null) ?? null,
     taxTreatment: (a.tax_treatment as string | null) ?? null,
@@ -549,6 +549,8 @@ export default async function AccountsPage() {
         accountNumber: (b.account_number as string | null) ?? null,
         controlledBy: (b.controlled_by as string | null) ?? null,
         successorOwner: (b.successor_owner as string | null) ?? null,
+        utmaState: (b.utma_state as string | null) ?? null,
+        utmaHandoverAge: (b.utma_handover_age as number | null) ?? null,
         dateClosed: (b.date_closed as string | null) ?? null,
         closedReason: (b.closed_reason as string | null) ?? null,
         // Keyed "YYYY-MM-01", so a bucket row can show (and write) the month

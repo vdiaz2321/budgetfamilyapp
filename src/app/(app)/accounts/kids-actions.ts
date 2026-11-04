@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
-import { KID_ACCOUNT_TYPES, kidActionsFor, kidTypeLocked, kidTypeOf } from "@/lib/kids-funding";
+import { KID_ACCOUNT_TYPES, kidActionsFor, kidTypeLocked, kidTypeOf, parseUtma, utmaStateName } from "@/lib/kids-funding";
 import { addAccount, deleteAccount, deleteBucket, transferBetweenAccounts } from "./actions";
 
 // The Kids Funding popup's own actions. Each one refuses what kids-funding.ts
@@ -45,18 +45,18 @@ function monthFirst(value: string): string | null {
 async function loadItem({ supabase, household }: Session, accountId: string, bucketId: string | null) {
   const { data: account, error } = await supabase
     .from("accounts")
-    .select("id, name, subtype, retirement_kind, kid_id, is_kids_account, current_balance_cents, institution, account_number, controlled_by, successor_owner, date_closed")
+    .select("id, name, subtype, retirement_kind, kid_id, is_kids_account, current_balance_cents, institution, account_number, controlled_by, successor_owner, utma_state, utma_handover_age, date_closed")
     .eq("id", accountId)
     .eq("household_id", household.id)
     .maybeSingle();
   if (error) throw new Error(`Could not read the account: ${error.message}`);
   if (!account?.is_kids_account) return null;
 
-  let bucket: { name: string; subtype: string | null; retirement_kind: string | null; kid_id: string | null; balance_cents: number | null; institution: string | null; account_number: string | null; controlled_by: string | null; successor_owner: string | null; date_closed: string | null } | null = null;
+  let bucket: { name: string; subtype: string | null; retirement_kind: string | null; kid_id: string | null; balance_cents: number | null; institution: string | null; account_number: string | null; controlled_by: string | null; successor_owner: string | null; utma_state: string | null; utma_handover_age: number | null; date_closed: string | null } | null = null;
   if (bucketId) {
     const { data, error: bucketError } = await supabase
       .from("buckets")
-      .select("name, subtype, retirement_kind, kid_id, balance_cents, institution, account_number, controlled_by, successor_owner, date_closed")
+      .select("name, subtype, retirement_kind, kid_id, balance_cents, institution, account_number, controlled_by, successor_owner, utma_state, utma_handover_age, date_closed")
       .eq("id", bucketId)
       .eq("account_id", accountId)
       .eq("household_id", household.id)
@@ -67,11 +67,11 @@ async function loadItem({ supabase, household }: Session, accountId: string, buc
   }
 
   const kidId = bucket ? bucket.kid_id ?? account.kid_id : account.kid_id;
-  let kid: { name: string; birth_month: string; utma_handover_age: number } | null = null;
+  let kid: { name: string; birth_month: string } | null = null;
   if (kidId) {
     const { data, error: kidError } = await supabase
       .from("kids")
-      .select("name, birth_month, utma_handover_age")
+      .select("name, birth_month")
       .eq("id", kidId)
       .eq("household_id", household.id)
       .maybeSingle();
@@ -90,6 +90,8 @@ async function loadItem({ supabase, household }: Session, accountId: string, buc
     accountNumber: bucket ? bucket.account_number : account.account_number,
     controlledBy: bucket?.controlled_by ?? account.controlled_by ?? null,
     successorOwner: bucket?.successor_owner ?? account.successor_owner ?? null,
+    utmaState: bucket ? bucket.utma_state : account.utma_state,
+    utmaAge: bucket ? bucket.utma_handover_age : account.utma_handover_age,
     closed: (bucket ? bucket.date_closed : account.date_closed) != null,
   };
 }
@@ -99,7 +101,7 @@ const actionsOf = (item: NonNullable<Awaited<ReturnType<typeof loadItem>>>) =>
     type: item.type,
     balanceCents: item.balanceCents,
     birthMonth: item.kid?.birth_month ?? null,
-    utmaAge: item.kid?.utma_handover_age ?? 21,
+    utmaAge: item.utmaAge,
     today: today(),
   });
 
@@ -112,8 +114,6 @@ export async function saveKid(formData: FormData): Promise<Result & { id?: strin
   if (!name) return { error: "Enter a name." };
   if (!birthMonth) return { error: "Enter the month and year they were born." };
 
-  // The UTMA age is saved with the UTMA (saveKidItem), so saving a name or birth
-  // month never touches it.
   const row = { name, birth_month: birthMonth };
   const { data, error } = id
     ? await supabase.from("kids").update(row).eq("id", id).eq("household_id", household.id).select("id").single()
@@ -144,8 +144,7 @@ export async function deleteKid(formData: FormData): Promise<Result> {
 const DETAIL_FIELDS = [
   { field: "institution", column: "institution", label: "Institution" },
   { field: "accountNumber", column: "account_number", label: "Last 4" },
-  { field: "controlledBy", column: "controlled_by", label: "Owner" },
-  { field: "successorOwner", column: "successor_owner", label: "Successor" },
+  { field: "successorOwner", column: "successor_owner", label: "Takes over" },
 ] as const;
 
 const lastFour = (n: string | null) => n?.replace(/\s/g, "").slice(-4) ?? null;
@@ -208,7 +207,7 @@ export async function saveKidItem(formData: FormData): Promise<Result & { moved?
   }
 
   const details: string[] = [];
-  const oldDetail = { institution: item.institution, accountNumber: lastFour(item.accountNumber), controlledBy: item.controlledBy, successorOwner: item.successorOwner };
+  const oldDetail = { institution: item.institution, accountNumber: lastFour(item.accountNumber), successorOwner: item.successorOwner };
   for (const { field, column, label } of DETAIL_FIELDS) {
     if (!formData.has(field)) continue;
     const v = orNull(formData, field);
@@ -216,9 +215,21 @@ export async function saveKidItem(formData: FormData): Promise<Result & { moved?
     if (oldDetail[field] && oldDetail[field] !== v) details.push(`${label}: ${oldDetail[field]} to ${v ?? "not set"}`);
   }
 
-  const utmaAge = formData.has("utmaAge") ? Number(text(formData, "utmaAge")) : null;
-  if (utmaAge != null && (!item.kidId || !Number.isInteger(utmaAge) || utmaAge < 18 || utmaAge > 25)) {
-    return { error: "The UTMA age must be 18 to 25." };
+  // Only a UTMA has these, so an account retyped away from one drops them.
+  if ((patch.subtype ?? item.type) === "UTMA") {
+    const utma = parseUtma(text(formData, "utmaState"), text(formData, "utmaAge"));
+    if (utma.error) return { error: utma.error };
+    if (formData.has("utmaState")) {
+      patch.utma_state = utma.state;
+      if (item.utmaState && item.utmaState !== utma.state) details.push(`State: ${utmaStateName(item.utmaState)} to ${utmaStateName(utma.state) ?? "not set"}`);
+    }
+    if (formData.has("utmaAge")) {
+      patch.utma_handover_age = utma.age;
+      if (item.utmaAge != null && item.utmaAge !== utma.age) details.push(`Age to transfer: ${item.utmaAge} to ${utma.age ?? "not set"}`);
+    }
+  } else if (item.type === "UTMA") {
+    patch.utma_state = null;
+    patch.utma_handover_age = null;
   }
 
   const toKid = text(formData, "toKidId");
@@ -248,7 +259,7 @@ export async function saveKidItem(formData: FormData): Promise<Result & { moved?
   if (stopping && !allowed.close) {
     return { error: item.type === "UTMA" || item.type === "Trump Account" ? `This is ${childName}'s money, so it can only stop at $0.` : "This account can't be closed." };
   }
-  if (handingOver && (!allowed.handOver || transferring)) return { error: "It can't be handed over yet." };
+  if (handingOver && (!allowed.handOver || transferring)) return { error: "It can't be transferred yet." };
   if (stopping && !wholeGone && item.balanceCents - amountCents > 0 && !endNote) {
     return { error: part ? "Say where the rest went." : "Say where the money went." };
   }
@@ -274,10 +285,6 @@ export async function saveKidItem(formData: FormData): Promise<Result & { moved?
       );
       if (historyError) console.error("[kids funding history]", historyError.message);
     }
-  }
-  if (utmaAge != null) {
-    const { error } = await supabase.from("kids").update({ utma_handover_age: utmaAge }).eq("id", item.kidId!).eq("household_id", household.id);
-    if (error) return saveFailed(error);
   }
 
   let moved = false;

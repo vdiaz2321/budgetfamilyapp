@@ -5,9 +5,9 @@ import React, { useRef, useState, useTransition } from "react";
 import {
   KID_ACCOUNT_TYPES,
   TRUMP_ANNUAL_LIMIT_CENTS,
-  controllerLabelFor,
   fullDate,
   handOverFrom,
+  handOverStatus,
   kidActionsFor,
   kidDeleteWarning,
   kidSaveLabel,
@@ -18,7 +18,12 @@ import {
   monthYear,
   successorLabelFor,
   trumpOpensOn,
+  US_STATES,
   utmaAgeOptions,
+  utmaGiftAge,
+  utmaLine,
+  utmaStateName,
+  utmaTransferNote,
   type KidAccountType,
 } from "@/lib/kids-funding";
 import { displayToCents } from "@/lib/money";
@@ -29,9 +34,9 @@ import { monthAbbr, monthHeadTier, monthTier } from "./month-columns";
 import { LABEL_CLS } from "./shared-ui";
 import type { AccountData, KidData, KidEvent, KidsFundingData } from "./types";
 
-// Kids Funding, organised the way the money actually works: by child. Who it's
-// for, who runs it and when it hands over are all per child, while the brokerage
-// login it sits under is only a label. Fidelity and Cap One stay as they are
+// Kids Funding, organised the way the money actually works: by child. A UTMA's
+// state and hand-over age are per account, and the brokerage login it sits under
+// is only a label. Fidelity and Cap One stay as they are
 // underneath (their buckets keep every snapshot and Budget link) and every bucket
 // is shown here as the real account it is.
 
@@ -45,8 +50,9 @@ export type KidItem = {
   institution: string | null;
   last4: string | null;
   accountNumber: string | null;
-  controlledBy: string | null;
   successorOwner: string | null;
+  utmaState: string | null;
+  utmaAge: number | null;
   dateClosed: string | null;
   closedReason: string | null;
   balanceCents: number;
@@ -70,8 +76,9 @@ export function kidItemsOf(accounts: AccountData[]): KidItem[] {
         institution: b.institution ?? a.institution ?? a.name,
         last4: lastFour(b.accountNumber),
         accountNumber: b.accountNumber ?? null,
-        controlledBy: b.controlledBy ?? a.controlledBy ?? null,
         successorOwner: b.successorOwner ?? a.successorOwner ?? null,
+        utmaState: b.utmaState ?? null,
+        utmaAge: b.utmaHandoverAge ?? null,
         dateClosed: b.dateClosed ?? null,
         closedReason: b.closedReason ?? null,
         balanceCents: b.balanceCents,
@@ -89,8 +96,9 @@ export function kidItemsOf(accounts: AccountData[]): KidItem[] {
       institution: a.institution,
       last4: lastFour(a.accountNumber),
       accountNumber: a.accountNumber,
-      controlledBy: a.controlledBy ?? null,
       successorOwner: a.successorOwner ?? null,
+      utmaState: a.utmaState ?? null,
+      utmaAge: a.utmaHandoverAge ?? null,
       dateClosed: a.dateClosed,
       closedReason: a.closedReason ?? null,
       balanceCents: a.balanceCents,
@@ -126,25 +134,26 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-// One short statement of who runs it and what happens next, under each name.
-function itemSummary(item: KidItem, kid: KidData | null, contributed: number | undefined, money: (c: number) => string) {
-  const place = item.institution ? `${item.institution} · ` : "";
-  const who = item.controlledBy ?? "You";
-  const child = kid?.name ?? "the child";
-  if (item.type === "529") return { line: `${place}${item.controlledBy ? `${who} owns` : "You own"}` };
+// Under each name: where it is and, if it hands over, when. Whose it is and who
+// runs it are in the title and the open row, so they aren't repeated here.
+function itemSummary(item: KidItem, kid: KidData | null, contributed: number | undefined, money: (c: number) => string): { line: string; limit?: string; overLimit?: boolean } {
+  const parts = (...p: (string | null)[]) => p.filter(Boolean).join(" · ");
   if (item.type === "UTMA") {
-    const when = kid ? ` ${monthYear(monthAtAge(kid.birthMonth, kid.utmaHandoverAge))}` : "";
-    return { line: `${place}${who}, custodian · To ${child}${when}` };
+    const status = handOverStatus(handOverFrom(item.type, kid?.birthMonth ?? null, item.utmaAge), localToday());
+    return {
+      line: parts(item.institution, utmaLine(item.utmaState, item.utmaAge, kid?.birthMonth ?? null)),
+      limit: status === "past" ? "Past transfer date" : status === "soon" ? "Transfer soon" : undefined,
+      overLimit: status === "past",
+    };
   }
   if (item.type === "Trump Account") {
-    const when = kid ? ` ${fullDate(trumpOpensOn(kid.birthMonth))}` : " the year they turn 18";
     return {
-      line: `${place}${who} · To ${child}${when}`,
+      line: parts(item.institution, kid ? `Transfers ${fullDate(trumpOpensOn(kid.birthMonth))}` : null),
       limit: `${money(contributed ?? 0)} of ${money(TRUMP_ANNUAL_LIMIT_CENTS)} this year`,
       overLimit: (contributed ?? 0) > TRUMP_ANNUAL_LIMIT_CENTS,
     };
   }
-  return { line: place.replace(/ · $/, "") };
+  return { line: parts(item.institution) };
 }
 
 function eventText(e: KidEvent, kidName: (id: string | null) => string | null, money: (c: number) => string) {
@@ -153,7 +162,7 @@ function eventText(e: KidEvent, kidName: (id: string | null) => string | null, m
   const amount = e.amountCents ? ` · ${money(e.amountCents)}` : "";
   switch (e.event) {
     case "closed": return `Closed${amount}`;
-    case "handed_over": return `Handed over${from ? ` to ${from}` : ""}${amount}`;
+    case "handed_over": return `Transferred${from ? ` to ${from}` : ""}${amount}`;
     case "reopened": return `Reopened${amount}`;
     case "beneficiary_changed": return `Transferred${from ? ` from ${from}` : ""}${to ? ` to ${to}` : ""}`;
     case "moved_529": return `Transferred ${(e.detail ?? "").toLowerCase().startsWith("from") ? "from" : "to"} ${(e.detail ?? "").replace(/^(to|from) /i, "")}${amount}`;
@@ -288,7 +297,7 @@ function ChildFields({ kid, nameField = "name", bornField = "birthMonth", onName
   );
 }
 
-// For a row entered by mistake. Everything real ends through Tracking instead,
+// For a row entered by mistake. Everything real ends through Status instead,
 // which keeps the row and its past months. The warning names the Budget item too,
 // so it has to ask the server before it can show.
 function DeleteItem({ item }: { item: KidItem }) {
@@ -392,13 +401,35 @@ function Strip({ title, bar, children }: { title: string; bar: string; children:
   );
 }
 
+const UtmaStateOptions = () => (
+  <>
+    <option value="">Not sure yet</option>
+    {US_STATES.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
+  </>
+);
+
+const UtmaAgeOptions = () => (
+  <>
+    <option value="">Not sure yet</option>
+    {utmaAgeOptions().map((n) => <option key={n} value={n}>{n}</option>)}
+  </>
+);
+
+// Where to find what's missing, then what the age means for this child.
+function UtmaNote({ state, age, kidName, birthMonth }: { state: string; age: string; kidName: string; birthMonth: string | null }) {
+  if (!state) return <Footnote label="State">Not where you live or were born. It&apos;s on the account title, e.g. UTMA FL.</Footnote>;
+  if (!age) return <Footnote label="Age to transfer">Ask the institution which age it has on file.</Footnote>;
+  return <Footnote label="Age to transfer">{utmaTransferNote(state, Number(age), kidName, birthMonth)}</Footnote>;
+}
+
 type Tracking = "keep" | "closed" | "handed_over";
+type Status = "open" | "transfer" | "closed" | "handed_over";
 
 type EstateInfo = { beneficiary?: string | null; transfer?: string | null; contact?: string | null; notes?: string | null };
 
-// Everything about one account is here, on one Save: its details, who it's for,
-// and whether it's still tracked. Changing who it's for or stopping tracking opens
-// what that needs, so a transfer can also end the tracking in a single step.
+// Everything about one account is here, on one Save: its details and its Status.
+// Picking a Status opens what that needs, so a transfer can also end the tracking
+// in a single step.
 function KidItemForm({
   item,
   kid,
@@ -429,9 +460,9 @@ function KidItemForm({
     kidId: item.kidId ?? "",
     institution: item.institution ?? "",
     last4: item.last4 ?? "",
-    owner: item.controlledBy ?? "",
     successor: item.successorOwner ?? "",
-    utmaAge: String(kid?.utmaHandoverAge ?? 21),
+    utmaState: item.utmaState ?? "",
+    utmaAge: item.utmaAge == null ? "" : String(item.utmaAge),
   };
   const [f, setF] = useState({
     ...initial,
@@ -444,6 +475,7 @@ function KidItemForm({
     newBorn: "",
     newInstitution: item.institution ?? "",
     newLast4: "",
+    status: "open" as Status,
     tracking: "keep" as Tracking,
     endNote: "",
   });
@@ -455,12 +487,18 @@ function KidItemForm({
     },
   });
   const edited = (key: keyof typeof initial) => f[key].trim() !== initial[key].trim();
+  // Picking a state fills in its age, which can still be changed.
+  const pickState = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const utmaState = e.target.value;
+    setError(null);
+    setF((current) => ({ ...current, utmaState, utmaAge: String(utmaGiftAge(utmaState) ?? "") }));
+  };
 
   const allowed = kidActionsFor({
     type: item.type,
     balanceCents: item.balanceCents,
     birthMonth: kid?.birthMonth ?? null,
-    utmaAge: kid?.utmaHandoverAge ?? 21,
+    utmaAge: item.utmaAge,
     today: localToday(),
   });
   const typeLocked = kidTypeLocked(item.type, hasEvents, Object.keys(item.balancesByMonth).length);
@@ -468,11 +506,10 @@ function KidItemForm({
   const shownType = f.type || null;
   const preset = KID_ACCOUNT_TYPES.find((t) => t.type === shownType);
   const tax = preset ? TAX_LABEL_SHORT[preset.tax] : item.taxTreatment ? TAX_LABEL_SHORT[item.taxTreatment as TaxTreatment] ?? item.taxTreatment : null;
-  const forLabel = shownType === "529" ? "Beneficiary" : "For";
   const successorLabel = successorLabelFor(shownType);
-  const controllerNames = [...new Set([...data.controllers, ...(item.controlledBy ? [item.controlledBy] : [])])];
   const linkedItem = data.linkedItems[item.bucketId ?? item.accountId] ?? null;
-  const handOverDate = handOverFrom(item.type, kid?.birthMonth ?? null, Number(f.utmaAge));
+  const handOverDate = handOverFrom(item.type, kid?.birthMonth ?? null, f.utmaAge ? Number(f.utmaAge) : null);
+  const handOverNow = item.type === "UTMA" ? handOverStatus(handOverDate, localToday()) : null;
 
   // A UTMA or Trump Account legally belongs to its child, so it never moves.
   const childFixed = !!item.kidId && (item.type === "UTMA" || item.type === "Trump Account");
@@ -488,18 +525,36 @@ function KidItemForm({
   const handingOver = f.tracking === "handed_over";
   const wholeGone = transferring && !part && stopping;
   const restCents = item.balanceCents - (partCents ?? 0);
-  const trackingOptions: { value: Tracking; label: string }[] = [
-    { value: "keep", label: "Keep tracking" },
-    ...(allowed.close ? [{ value: "closed" as const, label: "Stop tracking (closed)" }] : []),
-    ...(allowed.handOver ? [{ value: "handed_over" as const, label: "Handed over" }] : []),
+  const statusOptions: { value: Status; label: string }[] = [
+    { value: "open", label: "Open" },
+    ...(canTransfer ? [{ value: "transfer" as const, label: "Transfer to another child" }] : []),
+    ...(allowed.close ? [{ value: "closed" as const, label: "Closed, stop tracking" }] : []),
+    ...(allowed.handOver ? [{ value: "handed_over" as const, label: `Transferred to ${kid?.name ?? "the child"}` }] : []),
   ];
+  const pickStatus = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const status = e.target.value as Status;
+    setError(null);
+    setF((current) => ({
+      ...current,
+      status,
+      tracking: status === "closed" || status === "handed_over" ? status : "keep",
+      kidId: item.kidId ?? "",
+      howMuch: "all",
+    }));
+  };
+  // Back on nobody picked, there's no transfer left to stop tracking after.
+  const pickTransferTo = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const kidId = e.target.value;
+    setError(null);
+    setF((current) => ({ ...current, kidId, tracking: kidId === item.kidId ? "keep" : current.tracking }));
+  };
 
   // On a phone, a field left alone on its row takes the whole row.
-  const halfFields = 3 + (childFixed ? 0 : 1) + (successorLabel ? 1 : 0) + (item.type === "UTMA" && kid ? 1 : 0);
+  const halfFields = 2 + (item.kidId ? 0 : 1) + (successorLabel ? 1 : 0) + (shownType === "UTMA" ? 2 : 0);
   const lastOnItsOwn = halfFields % 2 === 1 ? WIDE_ON_PHONE : "";
   const noteOnItsOwn = part && targets.length <= 1 ? WIDE_ON_PHONE : "";
 
-  const detailsEdited = (["name","institution", "last4", "owner", "successor", "utmaAge"] as const).some(edited) || (!typeLocked && edited("type")) || (!canTransfer && !childFixed && edited("kidId"));
+  const detailsEdited = (["name","institution", "last4", "successor", "utmaState", "utmaAge"] as const).some(edited) || (!typeLocked && edited("type")) || (!canTransfer && !childFixed && edited("kidId"));
   const dirty = detailsEdited || transferring || f.tracking !== "keep";
   const saveLabel = kidSaveLabel({ dirty, transferring, toName, partCents, tracking: f.tracking, restCents, kidName: kid?.name ?? "the child", money });
 
@@ -512,8 +567,8 @@ function KidItemForm({
     if (!canTransfer && !childFixed && edited("kidId")) fd.set("kidId", f.kidId);
     if (edited("institution")) fd.set("institution", f.institution);
     if (edited("last4")) fd.set("accountNumber", f.last4);
-    if (edited("owner")) fd.set("controlledBy", f.owner);
     if (edited("successor")) fd.set("successorOwner", f.successor);
+    if (edited("utmaState")) fd.set("utmaState", f.utmaState);
     if (edited("utmaAge")) fd.set("utmaAge", f.utmaAge);
     if (transferring || f.tracking !== "keep") fd.set("date", f.date);
     if (transferring) {
@@ -551,7 +606,7 @@ function KidItemForm({
               setError(res.error);
               saving.current = false;
               // The money has moved, so a second Save mustn't move it again.
-              if (res.moved) setF((current) => ({ ...current, kidId: item.kidId ?? "", howMuch: "all", amount: "", into: "" }));
+              if (res.moved) setF((current) => ({ ...current, status: "open", tracking: "keep", kidId: item.kidId ?? "", howMuch: "all", amount: "", into: "" }));
             } else {
               router.refresh();
               onSaved();
@@ -567,44 +622,50 @@ function KidItemForm({
       className="space-y-3"
     >
       <div className={FORM_GRID}>
-        <TextField label="Name" center width="col-span-2 @[860px]:w-48" required changed={edited("name")} {...bind("name")} />
+        <TextField label="Name" center width="col-span-2 @[860px]:w-40" required changed={edited("name")} {...bind("name")} />
         {typeLocked ? null : (
           <Select label="Account type" center width="col-span-2 @[860px]:w-36" changed={edited("type")} {...bind("type")}>
             {KID_ACCOUNT_TYPES.some((t) => t.type === item.type) ? null : <option value={item.type ?? ""}>{item.type ?? "Not set"}</option>}
             {KID_ACCOUNT_TYPES.map((t) => <option key={t.type} value={t.type}>{t.type}</option>)}
           </Select>
         )}
-        <TextField label="Institution" center width="@[860px]:w-32" placeholder="Not set" changed={edited("institution")} {...bind("institution")} />
-        <TextField label="Last 4" center width="@[860px]:w-20" inputMode="numeric" placeholder="Not set" changed={edited("last4")} {...bind("last4")} />
-        {childFixed ? null : (
-          <Select label={forLabel} center width="@[860px]:w-32" changed={edited("kidId")} {...bind("kidId")}>
-            {item.kidId ? null : <option value="">Not set</option>}
+        <TextField label="Institution" center width="@[860px]:w-32" placeholder="e.g. Fidelity" changed={edited("institution")} {...bind("institution")} />
+        <TextField label="Last 4" center width="@[860px]:w-20" inputMode="numeric" placeholder="e.g. 1028" changed={edited("last4")} {...bind("last4")} />
+        {item.kidId ? null : (
+          <Select label="For" center width={`${successorLabel ? "" : lastOnItsOwn} @[860px]:w-32`} changed={edited("kidId")} {...bind("kidId")}>
+            <option value="">Not set</option>
             {data.kids.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
-            {canTransfer ? <option value="__new">+ Someone new</option> : null}
           </Select>
         )}
-        <TextField label={preset?.controllerLabel ?? controllerLabelFor(shownType)} center width={`${successorLabel ? "" : lastOnItsOwn} ${item.type === "Trump Account" ? "@[860px]:w-40" : "@[860px]:w-28"}`} list={`people-${item.key}`} placeholder="Not set" changed={edited("owner")} {...bind("owner")} />
-        <datalist id={`people-${item.key}`}>
-          {controllerNames.map((n) => <option key={n} value={n} />)}
-        </datalist>
-        {successorLabel ? <TextField label={successorLabel} center width={`${item.type === "UTMA" && kid ? "" : lastOnItsOwn} @[860px]:w-44`} placeholder="Not set" changed={edited("successor")} {...bind("successor")} /> : null}
-        {item.type === "UTMA" && kid ? (
-          <Select label="Hands over at" center width={`${lastOnItsOwn} @[860px]:w-28`} changed={edited("utmaAge")} {...bind("utmaAge")}>
-            {utmaAgeOptions(kid.utmaHandoverAge).map((n) => <option key={n} value={n}>{n}</option>)}
-          </Select>
+        {successorLabel ? <TextField label={successorLabel} center width={`${shownType === "UTMA" ? "" : lastOnItsOwn} @[860px]:w-56`} placeholder="Person's name" changed={edited("successor")} {...bind("successor")} /> : null}
+        {shownType === "UTMA" ? (
+          <>
+            <Select label="State on account" center width="@[860px]:w-40" changed={edited("utmaState")} value={f.utmaState} onChange={pickState}>
+              <UtmaStateOptions />
+            </Select>
+            <Select label="Age to Transfer" center width={`${lastOnItsOwn} @[860px]:w-36`} changed={edited("utmaAge")} {...bind("utmaAge")}>
+              <UtmaAgeOptions />
+            </Select>
+          </>
         ) : null}
-        {trackingOptions.length > 1 ? (
-          <Select label="Tracking" center width="col-span-2 @[860px]:w-48" changed={f.tracking !== "keep"} {...bind("tracking")}>
-            {trackingOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {statusOptions.length > 1 ? (
+          <Select label="Status" center width="col-span-2 @[860px]:w-56" changed={f.status !== "open"} value={f.status} onChange={pickStatus}>
+            {statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </Select>
         ) : null}
       </div>
+      {shownType === "UTMA" ? <UtmaNote state={f.utmaState} age={f.utmaAge} kidName={kid?.name ?? "The child"} birthMonth={kid?.birthMonth ?? null} /> : null}
 
       {edited("institution") && item.type === "529" ? <Footnote label="Rollover">Once per 12 months, same child</Footnote> : null}
 
-      {transferring ? (
-        <Strip title={`Transfer${toName ? ` to ${toName}` : ""}`} bar="var(--viz-bills)">
+      {f.status === "transfer" ? (
+        <Strip title={`Transfer${transferring && toName ? ` to ${toName}` : ""}`} bar="var(--viz-bills)">
           <div className={FORM_GRID}>
+            <Select label="To" center width="col-span-2 @[860px]:w-44" required value={f.kidId} onChange={pickTransferTo}>
+              <option value={item.kidId ?? ""}>Pick who</option>
+              {data.kids.filter((k) => k.id !== item.kidId).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+              <option value="__new">+ Someone new</option>
+            </Select>
             {isNew ? (
               <>
                 <TextField label="Their name" center width={`${wholeGone ? "col-span-2" : ""} @[860px]:w-44`} required {...bind("newName")} />
@@ -626,12 +687,18 @@ function KidItemForm({
             {part ? <TextField label="Amount" center width="@[860px]:w-28" className="text-center" type="number" step="0.01" min="0.01" inputMode="decimal" placeholder={`${money(item.balanceCents)} max`} required {...bind("amount")} /> : null}
             {part && targets.length === 0 ? (
               <>
-                <TextField label="New 529 institution" center width="@[860px]:w-40" placeholder="Not set" {...bind("newInstitution")} />
-                <TextField label="New 529 last 4" center width="@[860px]:w-32" inputMode="numeric" placeholder="Not set" {...bind("newLast4")} />
+                <TextField label="New 529 institution" center width="@[860px]:w-40" placeholder="e.g. Fidelity" {...bind("newInstitution")} />
+                <TextField label="New 529 last 4" center width="@[860px]:w-32" inputMode="numeric" placeholder="e.g. 1028" {...bind("newLast4")} />
               </>
             ) : null}
             <TextField label="Date" center width="@[860px]:w-40" type="date" required onClick={openPicker} {...bind("date")} />
             <TextField label="Note" center width={`${noteOnItsOwn} @[860px]:w-56`} placeholder="Optional" {...bind("note")} />
+            {transferring ? (
+              <Select label="After this" center width="col-span-2 @[860px]:w-56" {...bind("tracking")}>
+                <option value="keep">Keep tracking it here</option>
+                <option value="closed">Stop tracking it here</option>
+              </Select>
+            ) : null}
           </div>
           <div className="space-y-0.5">
             {isNew ? <Footnote label="New person">{wholeGone ? "Not added, since this stops here" : "Gets their own strip here"}</Footnote> : null}
@@ -643,7 +710,7 @@ function KidItemForm({
       ) : null}
 
       {(stopping || handingOver) && !wholeGone ? (
-        <Strip title={handingOver ? `Hand over to ${kid?.name ?? "the child"}` : "Stop tracking"} bar="var(--negative)">
+        <Strip title={handingOver ? `Transfer to ${kid?.name ?? "the child"}` : "Stop tracking"} bar="var(--negative)">
           <div className={FORM_GRID}>
             {transferring ? null : <TextField label="Date" center width="@[860px]:w-40" type="date" required onClick={openPicker} {...bind("date")} />}
             {handingOver ? (
@@ -657,16 +724,14 @@ function KidItemForm({
       ) : null}
 
       <div className="flex flex-wrap gap-x-6 gap-y-1">
-        {typeLocked ? <Fact label="Type">{item.type}</Fact> : null}
-        {childFixed ? <Fact label={forLabel}>{kid?.name ?? "Not set"}</Fact> : null}
         {tax ? <Fact label="Tax">{tax}</Fact> : null}
         {linkedItem ? <Fact label="Budget item">{linkedItem}</Fact> : null}
-        {handOverDate ? <Fact label="Hands over">{item.type === "UTMA" ? monthYear(handOverDate) : fullDate(handOverDate)}</Fact> : null}
-        {trackingOptions.length === 1 ? <Fact label="Tracking">{handOverDate ? `Until $0 or ${monthYear(handOverDate)}` : "Until $0"}</Fact> : null}
         {estate?.beneficiary ? <Fact label="Estate beneficiary">{estate.beneficiary}</Fact> : null}
         {estate?.contact ? <Fact label="Estate contact">{estate.contact}</Fact> : null}
         {estate?.notes ? <Fact label="Estate notes">{estate.notes}</Fact> : null}
       </div>
+
+      {handOverNow === "past" ? <Footnote label="Past transfer date">Some, like Fidelity, block new money and purchases until it&apos;s done.</Footnote> : null}
 
       {error ? <p className="text-sm font-semibold text-negative">{error}</p> : null}
 
@@ -690,7 +755,7 @@ function KidItemForm({
 }
 
 // A closed row is the record of what it was, with the way back.
-function ClosedItem({ item, kid, data }: { item: KidItem; kid: KidData | null; data: KidsFundingData }) {
+function ClosedItem({ item, data }: { item: KidItem; data: KidsFundingData }) {
   const router = useRouter();
   const [reopening, startReopen] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -700,12 +765,10 @@ function ClosedItem({ item, kid, data }: { item: KidItem; kid: KidData | null; d
   return (
     <>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 @[560px]:flex @[560px]:flex-wrap @[560px]:gap-x-6">
-        <Detail label={item.type === "529" ? "Beneficiary" : "For"}>{kid?.name ?? "Not set"}</Detail>
-        <Detail label="Type">{item.type ?? "Not set"}</Detail>
         <Detail label="Institution">{item.institution ?? "Not set"}</Detail>
         <Detail label="Last 4">{item.last4 ?? "Not set"}</Detail>
-        <Detail label={controllerLabelFor(item.type)}>{item.controlledBy ?? "Not set"}</Detail>
         {successorLabel ? <Detail label={successorLabel}>{item.successorOwner ?? "Not set"}</Detail> : null}
+        {item.type === "UTMA" ? <Detail label="State on account">{utmaStateName(item.utmaState) ?? "Not set"}</Detail> : null}
         {tax ? <Detail label="Tax">{tax}</Detail> : null}
         {linkedItem ? <Detail label="Budget item">{linkedItem}</Detail> : null}
       </dl>
@@ -757,12 +820,12 @@ function KidItemPanel({
   const [resets, setResets] = useState(0);
   const kidName = (id: string | null) => data.kids.find((k) => k.id === id)?.name ?? null;
   const events = data.events.filter((e) => e.accountId === item.accountId && e.bucketId === item.bucketId);
-  const formKey = [resets, item.name, item.type, item.kidId, item.institution, item.last4, item.controlledBy, item.successorOwner, kid?.utmaHandoverAge].join("|");
+  const formKey = [resets, item.name, item.type, item.kidId, item.institution, item.last4, item.successorOwner, item.utmaState, item.utmaAge].join("|");
 
   return (
     <div className="space-y-3 border-t border-line/60 bg-background/60 px-4 py-3">
       {item.dateClosed != null ? (
-        <ClosedItem item={item} kid={kid} data={data} />
+        <ClosedItem item={item} data={data} />
       ) : (
         <KidItemForm key={formKey} item={item} kid={kid} allItems={allItems} data={data} estate={estate} money={money} hasEvents={events.length > 0} onSaved={() => setResets((n) => n + 1)} />
       )}
@@ -805,7 +868,7 @@ function ItemRow({
   const [open, setOpen] = useState(false);
   const closed = item.dateClosed != null;
   const summary = itemSummary(item, kid, data.contributedThisYear[item.bucketId ?? item.accountId], money);
-  const title = item.type ? `${item.type}${item.last4 ? ` ·${item.last4}` : ""}` : item.name;
+  const title = item.type && kid ? `${kid.name}'s ${item.type}` : item.name;
   return (
     <li>
       <div className={`grid ${KID_ROW_GRID} items-center gap-1.5 px-4 py-1.5 hover:bg-sky-50 dark:hover:bg-sky-950/40`}>
@@ -820,7 +883,7 @@ function ItemRow({
             </span>
             <span className="block text-xs font-medium sm:text-[15px]">
               {closed
-                ? `${item.closedReason === "handed_over" ? `Handed over to ${kid?.name ?? "the child"}` : `${kid ? `${kid.name} · ` : ""}Closed`} ${fullDate(item.dateClosed!)}`
+                ? `${item.closedReason === "handed_over" ? `Transferred to ${kid?.name ?? "the child"}` : `${kid ? `${kid.name} · ` : ""}Closed`} ${fullDate(item.dateClosed!)}`
                 : summary.line}
             </span>
           </span>
@@ -1055,6 +1118,8 @@ export function KidsAddForm({
   // instead of adding them twice.
   const [savedNewKidId, setSavedNewKidId] = useState<string | null>(null);
   const [typedName, setTypedName] = useState<string | null>(null);
+  const [utmaState, setUtmaState] = useState("");
+  const [utmaAge, setUtmaAge] = useState("");
   const isNew = kidId === "__new";
   const childName = isNew ? newName.trim() : data.kids.find((k) => k.id === kidId)?.name ?? "";
   const preset = KID_ACCOUNT_TYPES.find((t) => t.type === type)!;
@@ -1111,7 +1176,7 @@ export function KidsAddForm({
       <Select label="Account type" value={type} onChange={(e) => setType(e.target.value as KidAccountType)}>
         {KID_ACCOUNT_TYPES.map((t) => <option key={t.type} value={t.type}>{t.type}</option>)}
       </Select>
-      <Select label={type === "529" ? "Beneficiary" : "For"} name="kidId" required value={kidId} onChange={(e) => setKidId(e.target.value)}>
+      <Select label="For" name="kidId" required value={kidId} onChange={(e) => setKidId(e.target.value)}>
         <option value="">Pick a child</option>
         {data.kids.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
         <option value="__new">+ Someone new</option>
@@ -1126,12 +1191,19 @@ export function KidsAddForm({
       <TextField label="Account name" name="name" required value={typedName ?? suggested} onChange={(e) => { setTypedName(e.target.value); setError(null); }} placeholder="e.g. Trump Account Leo" />
       <TextField label="Institution" name="institution" placeholder="e.g. Fidelity" />
       <TextField label="Last 4" name="accountNumber" inputMode="numeric" placeholder="e.g. 1028" />
-      <TextField label={preset.controllerLabel} name="controlledBy" list="kids-add-people" placeholder="Not set" />
-      <datalist id="kids-add-people">
-        {data.controllers.map((n) => <option key={n} value={n} />)}
-      </datalist>
       <TextField label="Current balance" name="balance" type="number" step="0.01" inputMode="decimal" placeholder="0.00" />
-      {successorLabelFor(type) ? <TextField label={successorLabelFor(type)!} name="successorOwner" /> : null}
+      {successorLabelFor(type) ? <TextField label={successorLabelFor(type)!} name="successorOwner" placeholder="Person's name" /> : null}
+      {type === "UTMA" ? (
+        <>
+          <Select label="State on account" name="utmaState" value={utmaState} onChange={(e) => { setUtmaState(e.target.value); setUtmaAge(String(utmaGiftAge(e.target.value) ?? "")); }}>
+            <UtmaStateOptions />
+          </Select>
+          <Select label="Age to Transfer" name="utmaAge" value={utmaAge} onChange={(e) => setUtmaAge(e.target.value)}>
+            <UtmaAgeOptions />
+          </Select>
+          <div className="sm:col-span-2"><UtmaNote state={utmaState} age={utmaAge} kidName={childName || "The child"} birthMonth={data.kids.find((k) => k.id === kidId)?.birthMonth ?? null} /></div>
+        </>
+      ) : null}
       {error ? <p className="text-sm font-semibold text-negative sm:col-span-2">{error}</p> : null}
       <div className="flex items-center gap-2 sm:col-span-2">
         <button type="submit" disabled={pending} className="rounded-md bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60">

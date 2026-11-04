@@ -32,6 +32,8 @@ export type BucketData = {
   accountNumber?: string | null;
   controlledBy?: string | null;
   successorOwner?: string | null;
+  utmaState?: string | null;
+  utmaHandoverAge?: number | null;
   dateClosed?: string | null;
   closedReason?: string | null;
   // Every recorded month of bucket_snapshots, keyed "YYYY-MM-01" (a missing
@@ -133,6 +135,8 @@ export type AccountData = {
   kidId?: string | null;
   controlledBy?: string | null;
   successorOwner?: string | null;
+  utmaState?: string | null;
+  utmaHandoverAge?: number | null;
   closedReason?: string | null;
   bankGroup: "savings" | "spending" | null;
   taxTreatment: string | null;
@@ -174,7 +178,6 @@ export type KidData = {
   name: string;
   /** First of the birth month, "YYYY-MM-01". */
   birthMonth: string;
-  utmaHandoverAge: number;
 };
 
 export type KidEvent = {
@@ -197,8 +200,6 @@ export type KidsFundingData = {
   linkedItems: Record<string, string>;
   /** Contributed this calendar year, by bucket or account id. */
   contributedThisYear: Record<string, number>;
-  /** Who can run an account: the household's own holders. */
-  controllers: string[];
 };
 
 // Non-CC accounts, passed in for the Pay Card modal's "From" dropdown.
