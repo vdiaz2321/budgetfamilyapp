@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
-import { KID_ACCOUNT_TYPES, kidActionsFor, kidTypeOf } from "@/lib/kids-funding";
-import { transferBetweenAccounts } from "./actions";
+import { KID_ACCOUNT_TYPES, kidActionsFor, kidTypeLocked, kidTypeOf } from "@/lib/kids-funding";
+import { addAccount, deleteAccount, deleteBucket, transferBetweenAccounts } from "./actions";
 
 // The Kids Funding popup's own actions. Each one refuses what kids-funding.ts
 // says the law doesn't allow, so the rule holds even if the popup is out of
@@ -45,18 +45,18 @@ function monthFirst(value: string): string | null {
 async function loadItem({ supabase, household }: Session, accountId: string, bucketId: string | null) {
   const { data: account, error } = await supabase
     .from("accounts")
-    .select("id, name, subtype, retirement_kind, kid_id, is_kids_account, current_balance_cents")
+    .select("id, name, subtype, retirement_kind, kid_id, is_kids_account, current_balance_cents, institution, account_number, controlled_by, successor_owner, date_closed")
     .eq("id", accountId)
     .eq("household_id", household.id)
     .maybeSingle();
   if (error) throw new Error(`Could not read the account: ${error.message}`);
   if (!account?.is_kids_account) return null;
 
-  let bucket: { name: string; subtype: string | null; retirement_kind: string | null; kid_id: string | null; balance_cents: number | null } | null = null;
+  let bucket: { name: string; subtype: string | null; retirement_kind: string | null; kid_id: string | null; balance_cents: number | null; institution: string | null; account_number: string | null; controlled_by: string | null; successor_owner: string | null; date_closed: string | null } | null = null;
   if (bucketId) {
     const { data, error: bucketError } = await supabase
       .from("buckets")
-      .select("name, subtype, retirement_kind, kid_id, balance_cents")
+      .select("name, subtype, retirement_kind, kid_id, balance_cents, institution, account_number, controlled_by, successor_owner, date_closed")
       .eq("id", bucketId)
       .eq("account_id", accountId)
       .eq("household_id", household.id)
@@ -85,6 +85,12 @@ async function loadItem({ supabase, household }: Session, accountId: string, buc
     kidId,
     kid,
     balanceCents: (bucket ? bucket.balance_cents : account.current_balance_cents) ?? 0,
+    // A bucket's institution falls back as the popup shows it, so history reads the same.
+    institution: bucket ? bucket.institution ?? account.institution ?? account.name : account.institution,
+    accountNumber: bucket ? bucket.account_number : account.account_number,
+    controlledBy: bucket?.controlled_by ?? account.controlled_by ?? null,
+    successorOwner: bucket?.successor_owner ?? account.successor_owner ?? null,
+    closed: (bucket ? bucket.date_closed : account.date_closed) != null,
   };
 }
 
@@ -106,8 +112,8 @@ export async function saveKid(formData: FormData): Promise<Result & { id?: strin
   if (!name) return { error: "Enter a name." };
   if (!birthMonth) return { error: "Enter the month and year they were born." };
 
-  // The UTMA age lives on the UTMA's own panel (setKidUtmaAge), so saving a
-  // name or birth month never touches it.
+  // The UTMA age is saved with the UTMA (saveKidItem), so saving a name or birth
+  // month never touches it.
   const row = { name, birth_month: birthMonth };
   const { data, error } = id
     ? await supabase.from("kids").update(row).eq("id", id).eq("household_id", household.id).select("id").single()
@@ -133,111 +139,287 @@ export async function deleteKid(formData: FormData): Promise<Result> {
   return { error: null };
 }
 
-// The age a child's UTMA hands over at. Set by the state and the account, so
-// it's asked on the UTMA itself, beside the date it decides.
-export async function setKidUtmaAge(kidId: string, age: number): Promise<Result> {
-  const { supabase, household } = await getSessionContext();
-  if (!Number.isInteger(age) || age < 18 || age > 25) return { error: "The UTMA age must be 18 to 25." };
-  const { error } = await supabase
-    .from("kids")
-    .update({ utma_handover_age: age })
-    .eq("id", kidId)
-    .eq("household_id", household.id);
-  if (error) return saveFailed(error);
-  revalidateKids();
-  return { error: null };
-}
+// The details an edit can change. A change to one keeps a line in the item's
+// history; filling in a blank isn't worth recording.
+const DETAIL_FIELDS = [
+  { field: "institution", column: "institution", label: "Institution" },
+  { field: "accountNumber", column: "account_number", label: "Last 4" },
+  { field: "controlledBy", column: "controlled_by", label: "Owner" },
+  { field: "successorOwner", column: "successor_owner", label: "Successor" },
+] as const;
 
-const INLINE_COLUMNS: Record<string, string> = {
-  institution: "institution",
-  accountNumber: "account_number",
-  controlledBy: "controlled_by",
-  successorOwner: "successor_owner",
-  kidId: "kid_id",
-};
+const lastFour = (n: string | null) => n?.replace(/\s/g, "").slice(-4) ?? null;
 
-// One value edited right in its cell on an item's panel. Only that field is
-// written, like the Estate guide's fields.
-export async function saveKidItemField(accountId: string, bucketId: string | null, field: string, value: string): Promise<Result> {
+// Everything about one account, on one Save. The form sends only what changed, so
+// a value inherited from the parent account is never copied down onto a bucket.
+// All of it is checked first, then written in the one order that can't repeat a
+// money move on a retry: details, new child, the move, then the close.
+export async function saveKidItem(formData: FormData): Promise<Result & { moved?: boolean }> {
   const session = await getSessionContext();
   const { supabase, household } = session;
-  const column = INLINE_COLUMNS[field];
-  if (!column) return { error: "That can't be edited here." };
-  const item = await loadItem(session, accountId, bucketId);
-  if (!item) return { error: "Account not found." };
-
-  const v = value.trim() || null;
-  const patch: Record<string, unknown> = { [column]: v, updated_at: new Date().toISOString() };
-  if (field === "kidId") {
-    // A 529's child changes through Change beneficiary, which keeps a record.
-    if (item.type === "529" && item.kidId) return { error: "Use Change beneficiary for a 529." };
-    if (!bucketId && v) {
-      const { data: kid, error: kidError } = await supabase
-        .from("kids")
-        .select("name")
-        .eq("id", v)
-        .eq("household_id", household.id)
-        .maybeSingle();
-      if (kidError) return saveFailed(kidError);
-      patch.holder = kid?.name ?? null;
-    }
-  }
-
-  const { error } = bucketId
-    ? await supabase.from("buckets").update(patch).eq("id", bucketId).eq("account_id", accountId).eq("household_id", household.id)
-    : await supabase.from("accounts").update(patch).eq("id", accountId).eq("household_id", household.id);
-  if (error) return saveFailed(error);
-  revalidateKids();
-  return { error: null };
-}
-
-// The rare edits: its name and its type. Everything else saves in its own cell.
-export async function updateKidItem(formData: FormData): Promise<Result> {
-  const { supabase, household } = await getSessionContext();
   const accountId = text(formData, "accountId");
   const bucketId = orNull(formData, "bucketId");
-  const name = text(formData, "name");
-  if (!accountId || !name) return { error: "Enter a name." };
+  const item = await loadItem(session, accountId, bucketId);
+  if (!item) return { error: "Account not found." };
+  if (item.closed) return { error: "This one is closed. Reopen it first." };
+  const allowed = actionsOf(item);
+  const childName = item.kid?.name ?? "the child";
 
-  const patch: Record<string, unknown> = { name, updated_at: new Date().toISOString() };
-  const type = KID_ACCOUNT_TYPES.find((t) => t.type === text(formData, "type"));
-  if (type) {
+  const patch: Record<string, unknown> = {};
+  if (formData.has("name")) {
+    const name = text(formData, "name");
+    if (!name) return { error: "Enter a name." };
+    patch.name = name;
+  }
+
+  if (formData.has("type")) {
+    const type = KID_ACCOUNT_TYPES.find((t) => t.type === text(formData, "type"));
+    if (!type) return { error: "Pick an account type." };
+    const events = supabase.from("kids_account_events").select("id", { count: "exact", head: true }).eq("household_id", household.id).eq("account_id", accountId);
+    const [eventCount, monthCount] = await Promise.all([
+      bucketId ? events.eq("bucket_id", bucketId) : events.is("bucket_id", null),
+      bucketId
+        ? supabase.from("bucket_snapshots").select("month", { count: "exact", head: true }).eq("household_id", household.id).eq("bucket_id", bucketId)
+        : supabase.from("account_snapshots").select("month", { count: "exact", head: true }).eq("household_id", household.id).eq("account_id", accountId),
+    ]);
+    if (eventCount.error || monthCount.error) return saveFailed((eventCount.error ?? monthCount.error)!);
+    if (kidTypeLocked(item.type, (eventCount.count ?? 0) > 0, monthCount.count ?? 0)) {
+      return { error: "An account can't change type. If it was entered wrong, delete it and add it again." };
+    }
     patch.subtype = type.type;
     patch.tax_treatment = type.tax;
     patch.retirement_kind = type.retirementKind;
   }
 
-  const { error } = bucketId
-    ? await supabase.from("buckets").update(patch).eq("id", bucketId).eq("account_id", accountId).eq("household_id", household.id)
-    : await supabase.from("accounts").update(patch).eq("id", accountId).eq("household_id", household.id);
-  if (error) return error.code === "23505" ? { error: `You already have one named "${name}".` } : saveFailed(error);
+  if (formData.has("kidId")) {
+    // Who a funded account belongs to is a legal fact, or (a 529) a transfer that
+    // keeps a record. Only one with nobody set yet, or a bank account, moves here.
+    const bank = item.type === "Checking" || item.type === "Savings";
+    if (item.kidId && !bank) {
+      return { error: item.type === "529" ? "Use the transfer for a 529." : `This legally belongs to ${childName}, so it can't move to another child.` };
+    }
+    const kidId = orNull(formData, "kidId");
+    patch.kid_id = kidId;
+    if (!bucketId && kidId) {
+      const { data: kid, error: kidError } = await supabase.from("kids").select("name").eq("id", kidId).eq("household_id", household.id).maybeSingle();
+      if (kidError) return saveFailed(kidError);
+      patch.holder = kid?.name ?? null;
+    }
+  }
+
+  const details: string[] = [];
+  const oldDetail = { institution: item.institution, accountNumber: lastFour(item.accountNumber), controlledBy: item.controlledBy, successorOwner: item.successorOwner };
+  for (const { field, column, label } of DETAIL_FIELDS) {
+    if (!formData.has(field)) continue;
+    const v = orNull(formData, field);
+    patch[column] = v;
+    if (oldDetail[field] && oldDetail[field] !== v) details.push(`${label}: ${oldDetail[field]} to ${v ?? "not set"}`);
+  }
+
+  const utmaAge = formData.has("utmaAge") ? Number(text(formData, "utmaAge")) : null;
+  if (utmaAge != null && (!item.kidId || !Number.isInteger(utmaAge) || utmaAge < 18 || utmaAge > 25)) {
+    return { error: "The UTMA age must be 18 to 25." };
+  }
+
+  const toKid = text(formData, "toKidId");
+  const transferring = toKid !== "";
+  const part = transferring && text(formData, "howMuch") === "part";
+  const tracking = text(formData, "tracking");
+  const stopping = tracking === "closed";
+  const handingOver = tracking === "handed_over";
+  const date = text(formData, "date") || today();
+  const note = orNull(formData, "note");
+  const endNote = orNull(formData, "endNote");
+  const newKidName = text(formData, "newKidName");
+  const amountCents = part ? displayToCents(text(formData, "amount")) : 0;
+  // The whole account leaves, so there's nothing of it to keep tracking here.
+  const wholeGone = transferring && !part && stopping;
+
+  if ((transferring || stopping || handingOver) && date > today()) return { error: "Pick a date that isn't in the future." };
+  if (transferring) {
+    if (!allowed.changeBeneficiary) return { error: "Only a 529 can change beneficiary." };
+    if (toKid === item.kidId) return { error: `It's already for ${childName}.` };
+    if (toKid === "__new" && !newKidName) return { error: "Enter their name." };
+    // No longer tracked, so they don't need a strip of their own here.
+    if (toKid === "__new" && !wholeGone && !monthFirst(text(formData, "newKidBorn"))) return { error: "Enter the month and year they were born." };
+    if (part && amountCents <= 0) return { error: "Enter an amount." };
+    if (part && amountCents > item.balanceCents) return { error: "That's more than this 529 holds." };
+  }
+  if (stopping && !allowed.close) {
+    return { error: item.type === "UTMA" || item.type === "Trump Account" ? `This is ${childName}'s money, so it can only stop at $0.` : "This account can't be closed." };
+  }
+  if (handingOver && (!allowed.handOver || transferring)) return { error: "It can't be handed over yet." };
+  if (stopping && !wholeGone && item.balanceCents - amountCents > 0 && !endNote) {
+    return { error: part ? "Say where the rest went." : "Say where the money went." };
+  }
+
+  let toName = newKidName;
+  if (transferring && toKid !== "__new") {
+    const { data: kid, error } = await supabase.from("kids").select("name").eq("id", toKid).eq("household_id", household.id).maybeSingle();
+    if (error) return saveFailed(error);
+    if (!kid) return { error: "Pick who it's for now." };
+    toName = kid.name;
+  }
+
+  // Everything checks out, so now it's written.
+  if (Object.keys(patch).length > 0) {
+    patch.updated_at = new Date().toISOString();
+    const { error } = bucketId
+      ? await supabase.from("buckets").update(patch).eq("id", bucketId).eq("account_id", accountId).eq("household_id", household.id)
+      : await supabase.from("accounts").update(patch).eq("id", accountId).eq("household_id", household.id);
+    if (error) return error.code === "23505" ? { error: `You already have one named "${String(patch.name ?? item.name)}".` } : saveFailed(error);
+    if (details.length > 0) {
+      const { error: historyError } = await supabase.from("kids_account_events").insert(
+        details.map((detail) => ({ household_id: household.id, event: "details_changed", account_id: accountId, bucket_id: bucketId, detail, occurred_on: today() })),
+      );
+      if (historyError) console.error("[kids funding history]", historyError.message);
+    }
+  }
+  if (utmaAge != null) {
+    const { error } = await supabase.from("kids").update({ utma_handover_age: utmaAge }).eq("id", item.kidId!).eq("household_id", household.id);
+    if (error) return saveFailed(error);
+  }
+
+  let moved = false;
+  let warning: string | null = null;
+  if (transferring && !wholeGone) {
+    let toKidId = toKid;
+    // Someone not listed yet: a grandchild, a niece, a newborn.
+    if (toKid === "__new") {
+      const person = new FormData();
+      person.set("name", newKidName);
+      person.set("birthMonth", text(formData, "newKidBorn"));
+      const created = await saveKid(person);
+      if (created.error === `${newKidName} is already listed.`) return { error: `${newKidName} is already listed. Pick them from the list.` };
+      if (created.error || !created.id) return { error: created.error ?? "Couldn't add them." };
+      toKidId = created.id;
+    }
+
+    if (part) {
+      let target = text(formData, "to");
+      // They have no 529 yet, so this starts one, as Add account would.
+      if (!target) {
+        const preset = KID_ACCOUNT_TYPES.find((t) => t.type === "529")!;
+        const opened = new FormData();
+        opened.set("kidsAccount", "on");
+        opened.set("kind", preset.kind);
+        opened.set("subtype", preset.type);
+        opened.set("taxTreatment", preset.tax);
+        opened.set("retirementKind", "");
+        opened.set("holder", toName);
+        opened.set("kidId", toKidId);
+        opened.set("name", `529 ${toName}`);
+        opened.set("institution", text(formData, "newInstitution"));
+        opened.set("accountNumber", text(formData, "newLast4"));
+        opened.set("controlledBy", String(patch.controlled_by ?? item.controlledBy ?? ""));
+        opened.set("balance", "0");
+        const added = await addAccount(opened);
+        if (!added.id) return { error: added.error ?? `Couldn't start a 529 for ${toName}.` };
+        // The account is there even if its Budget item isn't, so the money still moves.
+        warning = added.error;
+        target = `${added.id}:`;
+      }
+      const transfer = new FormData();
+      transfer.set("fromAccountId", accountId);
+      transfer.set("fromBucketId", bucketId ?? "");
+      transfer.set("to", target);
+      transfer.set("amount", text(formData, "amount"));
+      transfer.set("date", date);
+      if (note) transfer.set("note", note);
+      const result = await moveBetween529s(transfer);
+      if (!result.moved) {
+        revalidateKids();
+        return { error: result.error ?? "Couldn't move the money." };
+      }
+      moved = true;
+    } else {
+      const { error } = await supabase.rpc("kids_change_beneficiary", {
+        p_account_id: accountId,
+        p_bucket_id: bucketId,
+        p_to_kid_id: toKidId,
+        p_on: date,
+        p_note: note,
+      });
+      if (error) return { error: error.code === "23505" ? "Another account already has that name. Rename this one first." : error.message };
+    }
+  }
+
+  if (stopping || handingOver) {
+    const { error } = await supabase.rpc("kids_end_item", {
+      p_account_id: accountId,
+      p_bucket_id: bucketId,
+      p_reason: tracking,
+      p_on: date,
+      p_note: wholeGone ? `Transferred to ${toName}${note ? `. ${note}` : ""}` : endNote,
+    });
+    if (error) {
+      revalidateKids();
+      return moved
+        ? { error: `The money moved to ${toName}, but this one couldn't stop tracking: ${error.message}`, moved: true }
+        : { error: error.message };
+    }
+    await captureSnapshots(supabase, household.id, { force: true });
+  }
+
   revalidateKids();
-  return { error: null };
+  return { error: warning, moved };
 }
 
-export async function endKidItem(formData: FormData): Promise<Result> {
+// The Budget items made for an account, split by whether they can go with it.
+// One with anything logged or set up against it stays: erasing it would take that
+// with it or leave it pointing at nothing. Its planned amounts go with it.
+async function budgetItemsOf({ supabase, household }: Session, accountId: string, bucketId: string | null) {
+  const linked = supabase.from("subcategories").select("id, name").eq("household_id", household.id);
+  const { data, error } = await (bucketId ? linked.eq("linked_bucket_id", bucketId) : linked.eq("linked_account_id", accountId).is("linked_bucket_id", null));
+  if (error) throw new Error(`Could not read the Budget items: ${error.message}`);
+  const erase: { id: string; name: string }[] = [];
+  const keep: { id: string; name: string }[] = [];
+  for (const sub of data ?? []) {
+    const uses = await Promise.all(
+      (["transactions", "subscriptions", "irregular_bills", "savings_goals", "debts"] as const).map((table) =>
+        supabase.from(table).select("subcategory_id", { count: "exact", head: true }).eq("household_id", household.id).eq("subcategory_id", sub.id),
+      ),
+    );
+    const failed = uses.find((u) => u.error);
+    if (failed?.error) throw new Error(`Could not read what uses the Budget item: ${failed.error.message}`);
+    (uses.some((u) => (u.count ?? 0) > 0) ? keep : erase).push(sub);
+  }
+  return { erase, keep };
+}
+
+// What Delete would do to the Budget, so its warning can say so before it happens.
+export async function kidItemBudgetItems(accountId: string, bucketId: string | null): Promise<Result & { erase: string[]; keep: string[] }> {
   const session = await getSessionContext();
+  const none = { erase: [], keep: [] };
+  if (!(await loadItem(session, accountId, bucketId))) return { error: "Account not found.", ...none };
+  try {
+    const { erase, keep } = await budgetItemsOf(session, accountId, bucketId);
+    return { error: null, erase: erase.map((s) => s.name), keep: keep.map((s) => s.name) };
+  } catch (e) {
+    return { ...saveFailed(e as Error), ...none };
+  }
+}
+
+// For a row entered by mistake: the account, its past months and the Budget item
+// made with it. The Budget item goes first, since once the account is gone nothing
+// links the two, and a failure there leaves everything as it was.
+export async function deleteKidItem(formData: FormData): Promise<Result> {
+  const session = await getSessionContext();
+  const { supabase, household } = session;
   const accountId = text(formData, "accountId");
   const bucketId = orNull(formData, "bucketId");
-  const reason = text(formData, "reason");
-  const item = await loadItem(session, accountId, bucketId);
-  if (!item) return { error: "Account not found." };
+  if (!(await loadItem(session, accountId, bucketId))) return { error: "Account not found." };
 
-  const allowed = actionsOf(item);
-  if (reason === "closed" && !allowed.close) {
-    return { error: item.type === "UTMA" ? `This UTMA is ${item.kid?.name ?? "the child"}'s money, so it can only close at $0.` : "This account can't be closed." };
+  const { erase } = await budgetItemsOf(session, accountId, bucketId);
+  if (erase.length > 0) {
+    const { error } = await supabase.from("subcategories").delete().eq("household_id", household.id).in("id", erase.map((s) => s.id));
+    if (error) return saveFailed(error);
   }
-  if (reason === "handed_over" && !allowed.handOver) return { error: "It can't be handed over yet." };
 
-  const { error } = await session.supabase.rpc("kids_end_item", {
-    p_account_id: accountId,
-    p_bucket_id: bucketId,
-    p_reason: reason,
-    p_on: text(formData, "date") || today(),
-    p_note: orNull(formData, "note"),
-  });
-  if (error) return { error: error.message };
-  await captureSnapshots(session.supabase, session.household.id, { force: true });
+  const target = new FormData();
+  target.set("id", bucketId ?? accountId);
+  await (bucketId ? deleteBucket(target) : deleteAccount(target));
+  if (await loadItem(session, accountId, bucketId)) return { error: "Couldn't delete the account. Please try again." };
   revalidateKids();
   return { error: null };
 }
@@ -254,38 +436,9 @@ export async function reopenKidItem(formData: FormData): Promise<Result> {
   return { error: null };
 }
 
-export async function changeKidBeneficiary(formData: FormData): Promise<Result> {
-  const session = await getSessionContext();
-  const accountId = text(formData, "accountId");
-  const bucketId = orNull(formData, "bucketId");
-  const item = await loadItem(session, accountId, bucketId);
-  if (!item) return { error: "Account not found." };
-  if (!actionsOf(item).changeBeneficiary) return { error: "Only a 529 can change beneficiary." };
-
-  let toKidId = text(formData, "toKidId");
-  // Someone not listed yet: a grandchild, a niece.
-  if (toKidId === "__new") {
-    const created = await saveKid(formData);
-    if (created.error || !created.id) return { error: created.error ?? "Couldn't add them." };
-    toKidId = created.id;
-  }
-  if (!toKidId) return { error: "Pick who it's for now." };
-
-  const { error } = await session.supabase.rpc("kids_change_beneficiary", {
-    p_account_id: accountId,
-    p_bucket_id: bucketId,
-    p_to_kid_id: toKidId,
-    p_on: text(formData, "date") || today(),
-    p_note: orNull(formData, "note"),
-  });
-  if (error) return { error: error.code === "23505" ? "Another account already has that name. Rename this one first." : error.message };
-  revalidateKids();
-  return { error: null };
-}
-
 // Part of one 529 into another. It goes through the same transfer every other
 // move uses, so it's listed in Transfer Activity and deleting it there undoes it.
-export async function moveBetween529s(formData: FormData): Promise<Result> {
+async function moveBetween529s(formData: FormData): Promise<Result & { moved?: boolean }> {
   const session = await getSessionContext();
   const fromAccountId = text(formData, "fromAccountId");
   const fromBucketId = orNull(formData, "fromBucketId");
@@ -311,7 +464,8 @@ export async function moveBetween529s(formData: FormData): Promise<Result> {
   transfer.set("memo", note ?? `${from.name} to ${to.name}`);
   transfer.set("cleared", "on");
   const result = await transferBetweenAccounts(transfer);
-  if (result.error) return { error: result.error };
+  // Only marking it cleared can fail after the money has moved.
+  if (result.error) return { error: result.error, moved: result.error.startsWith("Transfer saved") };
 
   const { supabase, household } = session;
   const { error } = await supabase.from("kids_account_events").insert([
@@ -321,5 +475,5 @@ export async function moveBetween529s(formData: FormData): Promise<Result> {
   revalidateKids();
   // The money has moved by here, so a failure says so rather than inviting a
   // second try that would move it twice.
-  return { error: error ? "Moved, but it couldn't be added to the history." : null };
+  return { error: error ? "Moved, but it couldn't be added to the history." : null, moved: true };
 }

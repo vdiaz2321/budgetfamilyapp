@@ -179,7 +179,7 @@ export type KidData = {
 
 export type KidEvent = {
   id: string;
-  event: "closed" | "handed_over" | "reopened" | "beneficiary_changed" | "moved_529";
+  event: "closed" | "handed_over" | "reopened" | "beneficiary_changed" | "moved_529" | "details_changed";
   accountId: string;
   bucketId: string | null;
   fromKidId: string | null;

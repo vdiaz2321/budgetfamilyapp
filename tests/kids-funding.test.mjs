@@ -1,7 +1,7 @@
 // The dates and refusals that decide what the Kids Funding popup offers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fullDate, handOverFrom, kidActionsFor, kidMoveBlock, kidTypeOf, kidTypeRank, monthAtAge, monthYear, trumpOpensOn, utmaAgeOptions } from "../src/lib/kids-funding.ts";
+import { fullDate, handOverFrom, kidActionsFor, kidDeleteWarning, kidMoveBlock, kidSaveLabel, kidTypeLocked, kidTypeOf, kidTypeRank, monthAtAge, monthYear, successorLabelFor, trumpOpensOn, utmaAgeOptions } from "../src/lib/kids-funding.ts";
 
 const base = { balanceCents: 1000, birthMonth: "2013-04-01", utmaAge: 21, today: "2026-11-03" };
 
@@ -57,6 +57,48 @@ test("a bank account can close or hand over any time", () => {
   assert.equal(a.close, true);
   assert.equal(a.handOver, true);
   assert.equal(a.handOverOpensOn, null);
+});
+
+test("an emptied Trump Account can close, and a funded one still can't", () => {
+  assert.equal(kidActionsFor({ ...base, type: "Trump Account", balanceCents: 0 }).close, true);
+  assert.equal(kidActionsFor({ ...base, type: "Trump Account" }).close, false);
+});
+
+test("the backup person's label follows the type, and a bank account has none", () => {
+  assert.equal(successorLabelFor("529"), "Successor owner");
+  assert.equal(successorLabelFor("UTMA"), "Successor custodian");
+  assert.equal(successorLabelFor("Trump Account"), "Successor");
+  assert.equal(successorLabelFor("Savings"), null);
+});
+
+test("a type stays open only until the item has a past", () => {
+  assert.equal(kidTypeLocked("529", false, 1), false);
+  assert.equal(kidTypeLocked("529", false, 2), true);
+  assert.equal(kidTypeLocked("529", true, 0), true);
+  assert.equal(kidTypeLocked(null, true, 12), false);
+  assert.equal(kidTypeLocked("Brokerage", true, 12), false);
+});
+
+const save = { dirty: true, transferring: false, toName: "", partCents: null, tracking: "keep", restCents: 353700, kidName: "Leo", money: (c) => `$${c / 100}` };
+
+test("Save says what it will do", () => {
+  assert.equal(kidSaveLabel({ ...save, dirty: false }), "No changes");
+  assert.equal(kidSaveLabel(save), "Save changes");
+  assert.equal(kidSaveLabel({ ...save, transferring: true, toName: "Mia" }), "Save and transfer to Mia");
+  assert.equal(kidSaveLabel({ ...save, transferring: true, toName: "Mia", partCents: 50000 }), "Save and transfer $500 to Mia");
+  assert.equal(kidSaveLabel({ ...save, transferring: true, toName: "Mia", partCents: 0 }), "Save and transfer part to Mia");
+  assert.equal(kidSaveLabel({ ...save, tracking: "closed" }), "Save and stop tracking $3537");
+  assert.equal(kidSaveLabel({ ...save, tracking: "closed", restCents: 0 }), "Save and stop tracking");
+  assert.equal(kidSaveLabel({ ...save, tracking: "handed_over" }), "Save and hand over $3537 to Leo");
+  assert.equal(kidSaveLabel({ ...save, transferring: true, toName: "Mia", tracking: "closed" }), "Transfer to Mia and stop tracking");
+  assert.equal(kidSaveLabel({ ...save, transferring: true, toName: "Mia", partCents: 50000, tracking: "closed" }), "Transfer $500 to Mia, stop tracking $3537");
+  assert.equal(kidSaveLabel({ ...save, transferring: true, toName: "Mia", partCents: 353700, restCents: 0, tracking: "closed" }), "Transfer $3537 to Mia and stop tracking");
+});
+
+test("Delete's warning says what happens to the Budget", () => {
+  assert.equal(kidDeleteWarning({ erase: [], keep: [] }), "Erase this account and all its past months?");
+  assert.equal(kidDeleteWarning({ erase: ["Leo 529"], keep: [] }), "Erase this account, all its past months and Budget item Leo 529?");
+  assert.equal(kidDeleteWarning({ erase: [], keep: ["Leo 529"] }), "Erase this account and all its past months? Budget item Leo 529 stays, since it has activity.");
 });
 
 const move = { fromKidId: "leo", fromKidName: "Leo", fromBirthMonth: "2013-04-01", toKidId: "ben", today: "2026-11-03" };

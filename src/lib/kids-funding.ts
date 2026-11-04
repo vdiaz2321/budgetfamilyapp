@@ -46,6 +46,59 @@ export function controllerLabelFor(type: string | null): string {
   return KID_ACCOUNT_TYPES.find((t) => t.type === type)?.controllerLabel ?? "Controlled by";
 }
 
+/** The backup for whoever runs it, for the types that have one. */
+export function successorLabelFor(type: string | null): string | null {
+  if (type === "529") return "Successor owner";
+  if (type === "UTMA") return "Successor custodian";
+  if (type === "Trump Account") return "Successor";
+  return null;
+}
+
+/**
+ * A real account can't turn into another type, so the type is only open to fixing
+ * a typo: until the item has a history or more than one month of balances.
+ */
+export function kidTypeLocked(type: string | null, hasEvents: boolean, monthsOfHistory: number): boolean {
+  if (!KID_ACCOUNT_TYPES.some((t) => t.type === type)) return false;
+  return hasEvents || monthsOfHistory > 1;
+}
+
+/** What Save will do, in words, so one button can do it all safely. */
+export function kidSaveLabel(input: {
+  dirty: boolean;
+  transferring: boolean;
+  toName: string;
+  /** Null for a whole account. */
+  partCents: number | null;
+  tracking: "keep" | "closed" | "handed_over";
+  restCents: number;
+  kidName: string;
+  money: (cents: number) => string;
+}): string {
+  const { dirty, transferring, toName, partCents, tracking, restCents, kidName, money } = input;
+  if (!dirty) return "No changes";
+  const to = toName ? ` to ${toName}` : "";
+  if (transferring) {
+    const stopping = tracking === "closed";
+    if (partCents == null) return stopping ? `Transfer${to} and stop tracking` : `Save and transfer${to}`;
+    const amount = partCents > 0 ? money(partCents) : "part";
+    if (!stopping) return `Save and transfer ${amount}${to}`;
+    return restCents > 0 ? `Transfer ${amount}${to}, stop tracking ${money(restCents)}` : `Transfer ${amount}${to} and stop tracking`;
+  }
+  if (tracking === "closed") return `Save and stop tracking${restCents !== 0 ? ` ${money(restCents)}` : ""}`;
+  if (tracking === "handed_over") return `Save and hand over${restCents !== 0 ? ` ${money(restCents)}` : ""} to ${kidName}`;
+  return "Save changes";
+}
+
+/** Delete's warning, naming what happens to the Budget items made with the account. */
+export function kidDeleteWarning(budget: { erase: string[]; keep: string[] }): string {
+  const named = (names: string[]) => `Budget ${names.length > 1 ? "items" : "item"} ${names.join(", ")}`;
+  const ask = budget.erase.length > 0
+    ? `Erase this account, all its past months and ${named(budget.erase)}?`
+    : "Erase this account and all its past months?";
+  return budget.keep.length > 0 ? `${ask} ${named(budget.keep)} stays, since it has activity.` : ask;
+}
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** "2031-04-01" → "Apr 2031". */
@@ -111,8 +164,9 @@ export function kidActionsFor(input: {
   return {
     changeBeneficiary: type === "529",
     moveTo529: type === "529" && balanceCents > 0,
-    // A UTMA is the child's money: it can only end once it's been spent on them.
-    close: type === "529" || bank || (type === "UTMA" && balanceCents === 0),
+    // A UTMA or Trump Account is the child's money: it can only end at $0, once
+    // it's been spent on them or rolled over.
+    close: type === "529" || bank || ((type === "UTMA" || type === "Trump Account") && balanceCents === 0),
     handOver: bank || opened,
     handOverOpensOn: dated && !opened ? legalDate : null,
   };

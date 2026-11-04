@@ -9,29 +9,24 @@ import {
   fullDate,
   handOverFrom,
   kidActionsFor,
+  kidDeleteWarning,
+  kidSaveLabel,
+  kidTypeLocked,
   kidTypeOf,
   kidTypeRank,
   monthAtAge,
   monthYear,
+  successorLabelFor,
   trumpOpensOn,
   utmaAgeOptions,
   type KidAccountType,
 } from "@/lib/kids-funding";
+import { displayToCents } from "@/lib/money";
 import { TAX_LABEL_SHORT, type TaxTreatment } from "@/lib/tax-treatment";
-import { addAccount, deleteAccount, deleteBucket } from "./actions";
-import {
-  changeKidBeneficiary,
-  deleteKid,
-  endKidItem,
-  moveBetween529s,
-  reopenKidItem,
-  saveKid,
-  saveKidItemField,
-  setKidUtmaAge,
-  updateKidItem,
-} from "./kids-actions";
+import { addAccount } from "./actions";
+import { deleteKid, deleteKidItem, kidItemBudgetItems, reopenKidItem, saveKid, saveKidItem } from "./kids-actions";
 import { monthAbbr, monthHeadTier, monthTier } from "./month-columns";
-import { LABEL_CLS, LabeledInput } from "./shared-ui";
+import { LABEL_CLS } from "./shared-ui";
 import type { AccountData, KidData, KidEvent, KidsFundingData } from "./types";
 
 // Kids Funding, organised the way the money actually works: by child. Who it's
@@ -116,16 +111,11 @@ const KID_ROW_GRID =
 
 // The pale sage of heading rows, mixed into the surface.
 const SAGE = "bg-[color-mix(in_srgb,var(--positive)_8%,var(--surface))]";
-const FIELD = "w-full rounded-md bg-surface px-2 py-1.5 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand max-sm:py-2.5";
-// The panel's buttons. The one whose form is open stays lit, since that form
-// has no title of its own.
-const actionClass = (active: boolean) =>
-  `shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 transition sm:text-[15px] ${
-    active ? "bg-sky-100 ring-sky-500 dark:bg-sky-900/50" : "bg-surface ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
-  }`;
-const dangerClass = (active: boolean) =>
-  `shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-negative shadow-sm ring-1 transition sm:text-[15px] ${
-    active ? "bg-negative/25 ring-negative" : "bg-negative/10 ring-negative/40 hover:bg-negative/20"
+// A clear edge, so a field reads as something to type in. A changed one turns
+// teal until it's saved, so a look at the form shows what Save will write.
+const fieldClass = (changed?: boolean) =>
+  `w-full rounded-md bg-surface px-2 py-1 text-sm text-foreground sm:h-8 placeholder:text-foreground/70 focus:outline-none focus:ring-2 focus:ring-brand max-sm:py-2.5 ${
+    changed ? "ring-2 ring-[var(--viz-bills)]" : "ring-1 ring-foreground/50"
   }`;
 
 function Chevron({ open }: { open: boolean }) {
@@ -141,7 +131,7 @@ function itemSummary(item: KidItem, kid: KidData | null, contributed: number | u
   const place = item.institution ? `${item.institution} · ` : "";
   const who = item.controlledBy ?? "You";
   const child = kid?.name ?? "the child";
-  if (item.type === "529") return { line: `${place}${item.controlledBy ? `${who} owns` : "You own"} · No handover` };
+  if (item.type === "529") return { line: `${place}${item.controlledBy ? `${who} owns` : "You own"}` };
   if (item.type === "UTMA") {
     const when = kid ? ` ${monthYear(monthAtAge(kid.birthMonth, kid.utmaHandoverAge))}` : "";
     return { line: `${place}${who}, custodian · To ${child}${when}` };
@@ -154,7 +144,6 @@ function itemSummary(item: KidItem, kid: KidData | null, contributed: number | u
       overLimit: (contributed ?? 0) > TRUMP_ANNUAL_LIMIT_CENTS,
     };
   }
-  if (item.type === "Checking" || item.type === "Savings") return { line: `${place}Bank's rules at 18` };
   return { line: place.replace(/ · $/, "") };
 }
 
@@ -168,6 +157,7 @@ function eventText(e: KidEvent, kidName: (id: string | null) => string | null, m
     case "reopened": return `Reopened${amount}`;
     case "beneficiary_changed": return `Transferred${from ? ` from ${from}` : ""}${to ? ` to ${to}` : ""}`;
     case "moved_529": return `Transferred ${(e.detail ?? "").toLowerCase().startsWith("from") ? "from" : "to"} ${(e.detail ?? "").replace(/^(to|from) /i, "")}${amount}`;
+    case "details_changed": return e.detail ?? "Details changed";
   }
 }
 
@@ -246,209 +236,124 @@ function ActionForm({
 }
 
 const W_NAME = "max-sm:w-full sm:w-44";
-const W_PICK = "max-sm:w-full sm:w-56";
-const W_NOTE = "max-sm:w-full sm:w-56";
-const W_DATE = "max-sm:w-[calc(50%-0.375rem)] sm:w-44";
-const W_AMOUNT = "max-sm:w-[calc(50%-0.375rem)] sm:w-32";
+// The account form's fields: two across on a phone. Once the popup has room they
+// sit on one line, each as wide as what it holds.
+const FORM_GRID = "grid grid-cols-2 gap-x-3 gap-y-2.5 @[860px]:flex @[860px]:flex-wrap @[860px]:items-end @[860px]:gap-x-2.5";
+const WIDE_ON_PHONE = "col-span-2";
 
-function Field({ label, width, children }: { label: string; width: string; children: React.ReactNode }) {
+function Field({ label, width, center = false, children }: { label: string; width: string; center?: boolean; children: React.ReactNode }) {
   return (
-    <label className={`block ${width}`}>
-      <span className={LABEL_CLS}>{label}</span>
+    <label className={`block min-w-0 ${width}`}>
+      <span className={`${LABEL_CLS}${center ? " text-center" : ""}`}>{label}</span>
       {children}
     </label>
   );
 }
 
-function Select({ label, width = "", children, ...props }: { label: string; width?: string } & React.SelectHTMLAttributes<HTMLSelectElement>) {
+type FieldLook = { label: string; width?: string; center?: boolean; changed?: boolean };
+
+function Select({ label, width = "", center, changed, children, ...props }: FieldLook & React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <Field label={label} width={width}>
-      <select {...props} className={FIELD}>{children}</select>
+    <Field label={label} width={width} center={center}>
+      <select {...props} className={fieldClass(changed)}>{children}</select>
     </Field>
   );
 }
 
-function TextField({ label, width, ...props }: { label: string; width: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+function TextField({ label, width = "", center, changed, className = "", ...props }: FieldLook & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
-    <Field label={label} width={width}>
-      <input autoComplete="off" {...props} className={FIELD} />
+    <Field label={label} width={width} center={center}>
+      <input autoComplete="off" {...props} className={`${fieldClass(changed)} ${className}`} />
     </Field>
   );
 }
 
-function DateField({ label = "Date", name = "date" }: { label?: string; name?: string }) {
-  return (
-    <TextField
-      label={label}
-      width={W_DATE}
-      name={name}
-      type="date"
-      required
-      defaultValue={localToday()}
-      onClick={(e) => {
-        // showPicker throws without browser support; the calendar icon still works then.
-        try {
-          e.currentTarget.showPicker?.();
-        } catch {
-          /* no-op */
-        }
-      }}
-    />
-  );
-}
-
-function ItemIds({ item }: { item: KidItem }) {
-  return (
-    <>
-      <input type="hidden" name="accountId" value={item.accountId} />
-      <input type="hidden" name="bucketId" value={item.bucketId ?? ""} />
-    </>
-  );
-}
+// A click anywhere in the box opens the calendar. showPicker throws without
+// browser support; the calendar icon still works then.
+const openPicker = (e: React.MouseEvent<HTMLInputElement>) => {
+  try {
+    e.currentTarget.showPicker?.();
+  } catch {
+    /* no-op */
+  }
+};
 
 // "Born" because it holds a month and a year.
 function ChildFields({ kid, nameField = "name", bornField = "birthMonth", onName }: { kid?: KidData | null; nameField?: string; bornField?: string; onName?: (name: string) => void }) {
   return (
     <>
       <TextField label="Name" width={W_NAME} name={nameField} defaultValue={kid?.name ?? ""} required onChange={(e) => onName?.(e.target.value)} />
-      <TextField label="Born" width={W_NAME} name={bornField} type="month" defaultValue={kid?.birthMonth.slice(0, 7) ?? ""} required />
+      <TextField label="Born" width={W_NAME} name={bornField} type="month" defaultValue={kid?.birthMonth.slice(0, 7) ?? ""} required onClick={openPicker} />
     </>
   );
 }
 
-// One way to give a 529 to someone else. The whole account changes its
-// beneficiary, so the account itself moves under them; part of it moves money
-// into a 529 they already have. Which of those it is decides which action runs.
-function TransferForm({ item, kids, others, money, onDone }: { item: KidItem; kids: KidData[]; others: KidItem[]; money: (c: number) => string; onDone: () => void }) {
-  const [to, setTo] = useState("");
-  const [howMuch, setHowMuch] = useState<"all" | "part">("all");
-  const [amount, setAmount] = useState("");
-  const [newName, setNewName] = useState("");
-  const targets = others.filter((o) => o.kidId === to);
-  const canPart = targets.length > 0 && item.balanceCents > 0;
-  // A child's own second 529 can only receive part: it's already theirs.
-  const sameChild = to !== "" && to === item.kidId;
-  const part = canPart && (howMuch === "part" || sameChild);
-  const toName = to === "__new" ? newName : kids.find((k) => k.id === to)?.name ?? "";
-  const label = !toName
-    ? "Transfer"
-    : part
-      ? `Transfer ${amount ? `$${amount}` : "part"} to ${toName}`
-      : `Transfer whole account to ${toName}`;
-  return (
-    <ActionForm
-      submit={label}
-      action={(fd) => (part ? moveBetween529s(fd) : changeKidBeneficiary(fd))}
-      onDone={onDone}
-      // A retry after a save that did land would move the money twice.
-      lostConnection={part ? "Connection lost. The transfer may have saved. Reload the page and check the balances before trying again." : undefined}
-    >
-      <ItemIds item={item} />
-      <input type="hidden" name="fromAccountId" value={item.accountId} />
-      <input type="hidden" name="fromBucketId" value={item.bucketId ?? ""} />
-      <Select label="To" width={W_PICK} name="toKidId" required value={to} onChange={(e) => setTo(e.target.value)}>
-        <option value="">Pick who</option>
-        {kids.filter((k) => k.id !== item.kidId || others.some((o) => o.kidId === k.id)).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
-        <option value="__new">+ Someone new</option>
-      </Select>
-      {to === "__new" ? <ChildFields onName={setNewName} /> : null}
-      {canPart && !sameChild ? (
-        <Select label="How much" width="max-sm:w-full sm:w-44" value={howMuch} onChange={(e) => setHowMuch(e.target.value as "all" | "part")}>
-          <option value="all">Whole account</option>
-          <option value="part">Part of it</option>
-        </Select>
-      ) : null}
-      {part ? (
-        <>
-          {targets.length > 1 ? (
-            <Select label="Into" width={W_PICK} name="to" required defaultValue="">
-              <option value="">Pick a 529</option>
-              {targets.map((o) => <option key={o.key} value={`${o.accountId}:${o.bucketId ?? ""}`}>{o.name} · {money(o.balanceCents)}</option>)}
-            </Select>
-          ) : (
-            <input type="hidden" name="to" value={`${targets[0].accountId}:${targets[0].bucketId ?? ""}`} />
-          )}
-          <TextField label="Amount" width={W_AMOUNT} name="amount" type="number" step="0.01" min="0.01" inputMode="decimal" placeholder={`${money(item.balanceCents)} max`} required value={amount} onChange={(e) => setAmount(e.target.value)} />
-        </>
-      ) : null}
-      <DateField />
-      <TextField label="Note" width={W_NOTE} name="note" placeholder="Optional" />
-    </ActionForm>
-  );
-}
-
-function EndItemForm({ item, kid, reason, money, onDone }: { item: KidItem; kid: KidData | null; reason: "closed" | "handed_over"; money: (c: number) => string; onDone: () => void }) {
-  const closing = reason === "closed";
-  const amount = item.balanceCents !== 0 ? money(item.balanceCents) : null;
-  const submit = closing
-    ? `Close account${amount ? ` · ${amount}` : ""}`
-    : `Hand over${amount ? ` ${amount}` : ""} to ${kid?.name ?? "the child"}`;
-  return (
-    <ActionForm submit={submit} danger={closing} action={endKidItem} onDone={onDone}>
-      <ItemIds item={item} />
-      <input type="hidden" name="reason" value={reason} />
-      <DateField />
-      <TextField label={closing ? "Where did the money go?" : "Note"} width="max-sm:w-full sm:w-64" name="note" placeholder="Optional" />
-    </ActionForm>
-  );
-}
-
-// Only the rare things: every other value saves right in its own cell.
-function EditItemForm({ item, onDone }: { item: KidItem; onDone: () => void }) {
+// For a row entered by mistake. Everything real ends through Tracking instead,
+// which keeps the row and its past months. The warning names the Budget item too,
+// so it has to ask the server before it can show.
+function DeleteItem({ item }: { item: KidItem }) {
   const router = useRouter();
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [checking, startCheck] = useTransition();
   const [deleting, startDelete] = useTransition();
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  return (
-    <ActionForm
-      submit="Save"
-      action={updateKidItem}
-      onDone={onDone}
-      extra={confirmDelete ? (
-        <>
-          <span className="text-xs sm:text-[15px]">Erases all its past months.</span>
-          <button
-            type="button"
-            disabled={deleting}
-            onClick={() => {
-              const fd = new FormData();
-              fd.set("id", item.bucketId ?? item.accountId);
-              startDelete(async () => {
-                setDeleteError(null);
-                try {
-                  await (item.bucketId ? deleteBucket(fd) : deleteAccount(fd));
-                  router.refresh();
-                  onDone();
-                } catch {
-                  // Uncaught here, a lost connection takes down the whole page.
-                  setDeleteError("Couldn't delete. Check your connection and try again.");
-                }
-              });
-            }}
-            className="rounded-md bg-negative px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 sm:text-[15px]"
-          >
-            {deleting ? "Deleting…" : "Yes, erase"}
-          </button>
-          <button type="button" onClick={() => setConfirmDelete(false)} className="rounded-md px-2 py-1.5 text-xs font-medium hover:bg-sky-50 sm:text-[15px] dark:hover:bg-sky-950/40">Keep</button>
-          {deleteError ? <span className="text-sm font-semibold text-negative">{deleteError}</span> : null}
-        </>
-      ) : (
-        <button type="button" onClick={() => setConfirmDelete(true)} className="rounded-md px-2 py-1.5 text-xs font-medium text-negative transition hover:bg-negative/10 sm:text-[15px]">
-          Delete (entered by mistake)
+  const [error, setError] = useState<string | null>(null);
+  if (warning == null) {
+    return (
+      <span className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={checking}
+          onClick={() => {
+            startCheck(async () => {
+              setError(null);
+              try {
+                const res = await kidItemBudgetItems(item.accountId, item.bucketId);
+                if (res.error) setError(res.error);
+                else setWarning(kidDeleteWarning(res));
+              } catch {
+                setError("Couldn't check that. Check your connection and try again.");
+              }
+            });
+          }}
+          className="rounded-full bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/40 transition hover:bg-negative/20 disabled:opacity-50 sm:text-[15px] max-sm:py-2.5"
+        >
+          Delete
         </button>
-      )}
-    >
-      <ItemIds item={item} />
-      <TextField label="Name" width="max-sm:w-full sm:w-64" name="name" defaultValue={item.name} required />
-      <Select label="Account type" width={W_NAME} name="type" defaultValue={item.type ?? ""}>
-        {KID_ACCOUNT_TYPES.some((t) => t.type === item.type) ? null : <option value={item.type ?? ""}>{item.type ?? "Not set"}</option>}
-        {KID_ACCOUNT_TYPES.map((t) => <option key={t.type} value={t.type}>{t.type}</option>)}
-      </Select>
-    </ActionForm>
+        {error ? <span className="text-sm font-semibold text-negative">{error}</span> : null}
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <span className="text-xs font-semibold text-negative sm:text-[15px]">{warning}</span>
+      <button
+        type="button"
+        disabled={deleting}
+        onClick={() => {
+          const fd = new FormData();
+          fd.set("accountId", item.accountId);
+          fd.set("bucketId", item.bucketId ?? "");
+          startDelete(async () => {
+            setError(null);
+            try {
+              const res = await deleteKidItem(fd);
+              if (res.error) setError(res.error);
+              else router.refresh();
+            } catch {
+              // Uncaught here, a lost connection takes down the whole page.
+              setError("Couldn't delete. Check your connection and try again.");
+            }
+          });
+        }}
+        className="rounded-md bg-negative px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 sm:text-[15px] max-sm:py-2.5 dark:text-background"
+      >
+        {deleting ? "Deleting…" : "Yes, erase"}
+      </button>
+      <button type="button" onClick={() => setWarning(null)} className="rounded-md px-2 py-1.5 text-xs font-medium hover:bg-sky-50 sm:text-[15px] max-sm:py-2.5 dark:hover:bg-sky-950/40">Keep</button>
+      {error ? <span className="text-sm font-semibold text-negative">{error}</span> : null}
+    </span>
   );
 }
-
-type PanelAction = "edit" | "transfer" | "close" | "handover" | null;
 
 function Detail({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -459,53 +364,375 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-// A value that edits in place: it reads as plain text until hovered or focused.
-// A hidden copy of the text sets the width, so the cell stays as wide as its
-// value instead of an input's default 20 characters.
-const INLINE_BOX = "relative inline-block min-w-[3rem] max-w-full align-top";
-const INLINE_SIZER = "invisible block whitespace-pre px-1.5";
-const INLINE_CONTROL =
-  "absolute inset-0 h-full w-full min-w-0 rounded bg-transparent px-1.5 text-center transition hover:bg-sky-50 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand dark:hover:bg-sky-950/40";
-
-function InlineText({ label, value, save, inputMode }: { label: string; value: string | null; save: (value: string) => void; inputMode?: "numeric" }) {
-  const [text, setText] = useState(value ?? "");
+// What can't be typed over: it follows from something else on the form.
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <span className={INLINE_BOX}>
-      <span aria-hidden className={INLINE_SIZER}>{text || "Not set"}</span>
-      <input
-        aria-label={label}
-        value={text}
-        inputMode={inputMode}
-        autoComplete="off"
-        placeholder="Not set"
-        onChange={(e) => setText(e.target.value)}
-        onFocus={(e) => e.currentTarget.select()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-        }}
-        onBlur={(e) => {
-          if (e.currentTarget.value.trim() !== (value ?? "")) save(e.currentTarget.value);
-        }}
-        className={`${INLINE_CONTROL} placeholder:text-foreground`}
-      />
+    <span className="text-xs font-medium sm:text-[15px]">
+      <span className="font-semibold">{label}:</span> {children}
     </span>
   );
 }
 
-function InlineSelect({ label, value, options, save }: { label: string; value: string; options: { value: string; label: string }[]; save: (value: string) => void }) {
-  const shown = options.find((o) => o.value === value)?.label ?? "";
+// One short line: "Label: a few words".
+function Footnote({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <span className={INLINE_BOX}>
-      <span aria-hidden className={INLINE_SIZER}>{shown}</span>
-      <select
-        aria-label={label}
-        value={value}
-        onChange={(e) => save(e.target.value)}
-        className={`${INLINE_CONTROL} cursor-pointer appearance-none [text-align-last:center]`}
+    <p className="text-xs font-medium sm:text-[15px]">
+      <span className="font-semibold">{label}:</span> {children}
+    </p>
+  );
+}
+
+// A step that opened because of a choice above, marked by its coloured left bar.
+function Strip({ title, bar, children }: { title: string; bar: string; children: React.ReactNode }) {
+  return (
+    <div className={`space-y-2 rounded-md border-l-[3px] ${SAGE} px-3 py-2 @[860px]:w-fit`} style={{ borderLeftColor: bar }}>
+      <p className="text-sm font-semibold">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+type Tracking = "keep" | "closed" | "handed_over";
+
+type EstateInfo = { beneficiary?: string | null; transfer?: string | null; contact?: string | null; notes?: string | null };
+
+// Everything about one account is here, on one Save: its details, who it's for,
+// and whether it's still tracked. Changing who it's for or stopping tracking opens
+// what that needs, so a transfer can also end the tracking in a single step.
+function KidItemForm({
+  item,
+  kid,
+  allItems,
+  data,
+  estate,
+  money,
+  hasEvents,
+  onSaved,
+}: {
+  item: KidItem;
+  kid: KidData | null;
+  allItems: KidItem[];
+  data: KidsFundingData;
+  estate: EstateInfo | null;
+  money: (c: number) => string;
+  hasEvents: boolean;
+  onSaved: () => void;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  // Same guard as ActionForm: taps in the same instant beat the disabled button.
+  const saving = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const initial = {
+    name: item.name,
+    type: item.type ?? "",
+    kidId: item.kidId ?? "",
+    institution: item.institution ?? "",
+    last4: item.last4 ?? "",
+    owner: item.controlledBy ?? "",
+    successor: item.successorOwner ?? "",
+    utmaAge: String(kid?.utmaHandoverAge ?? 21),
+  };
+  const [f, setF] = useState({
+    ...initial,
+    howMuch: "all" as "all" | "part",
+    into: "",
+    amount: "",
+    date: localToday(),
+    note: "",
+    newName: "",
+    newBorn: "",
+    newInstitution: item.institution ?? "",
+    newLast4: "",
+    tracking: "keep" as Tracking,
+    endNote: "",
+  });
+  const bind = (key: keyof typeof f) => ({
+    value: f[key],
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      setError(null);
+      setF((current) => ({ ...current, [key]: e.target.value }));
+    },
+  });
+  const edited = (key: keyof typeof initial) => f[key].trim() !== initial[key].trim();
+
+  const allowed = kidActionsFor({
+    type: item.type,
+    balanceCents: item.balanceCents,
+    birthMonth: kid?.birthMonth ?? null,
+    utmaAge: kid?.utmaHandoverAge ?? 21,
+    today: localToday(),
+  });
+  const typeLocked = kidTypeLocked(item.type, hasEvents, Object.keys(item.balancesByMonth).length);
+  // The type on screen decides the labels; a saved type decides what's allowed.
+  const shownType = f.type || null;
+  const preset = KID_ACCOUNT_TYPES.find((t) => t.type === shownType);
+  const tax = preset ? TAX_LABEL_SHORT[preset.tax] : item.taxTreatment ? TAX_LABEL_SHORT[item.taxTreatment as TaxTreatment] ?? item.taxTreatment : null;
+  const forLabel = shownType === "529" ? "Beneficiary" : "For";
+  const successorLabel = successorLabelFor(shownType);
+  const controllerNames = [...new Set([...data.controllers, ...(item.controlledBy ? [item.controlledBy] : [])])];
+  const linkedItem = data.linkedItems[item.bucketId ?? item.accountId] ?? null;
+  const handOverDate = handOverFrom(item.type, kid?.birthMonth ?? null, Number(f.utmaAge));
+
+  // A UTMA or Trump Account legally belongs to its child, so it never moves.
+  const childFixed = !!item.kidId && (item.type === "UTMA" || item.type === "Trump Account");
+  const canTransfer = allowed.changeBeneficiary && !!item.kidId;
+  const transferring = canTransfer && f.kidId !== item.kidId;
+  const isNew = f.kidId === "__new";
+  const toName = isNew ? f.newName.trim() : data.kids.find((k) => k.id === f.kidId)?.name ?? "";
+  const targets = transferring && !isNew ? allItems.filter((o) => o.type === "529" && !o.dateClosed && o.key !== item.key && o.kidId === f.kidId) : [];
+  const canPart = transferring && item.balanceCents > 0;
+  const part = canPart && f.howMuch === "part";
+  const partCents = part ? displayToCents(f.amount || "0") : null;
+  const stopping = f.tracking === "closed";
+  const handingOver = f.tracking === "handed_over";
+  const wholeGone = transferring && !part && stopping;
+  const restCents = item.balanceCents - (partCents ?? 0);
+  const trackingOptions: { value: Tracking; label: string }[] = [
+    { value: "keep", label: "Keep tracking" },
+    ...(allowed.close ? [{ value: "closed" as const, label: "Stop tracking (closed)" }] : []),
+    ...(allowed.handOver ? [{ value: "handed_over" as const, label: "Handed over" }] : []),
+  ];
+
+  // On a phone, a field left alone on its row takes the whole row.
+  const halfFields = 3 + (childFixed ? 0 : 1) + (successorLabel ? 1 : 0) + (item.type === "UTMA" && kid ? 1 : 0);
+  const lastOnItsOwn = halfFields % 2 === 1 ? WIDE_ON_PHONE : "";
+  const noteOnItsOwn = part && targets.length <= 1 ? WIDE_ON_PHONE : "";
+
+  const detailsEdited = (["name","institution", "last4", "owner", "successor", "utmaAge"] as const).some(edited) || (!typeLocked && edited("type")) || (!canTransfer && !childFixed && edited("kidId"));
+  const dirty = detailsEdited || transferring || f.tracking !== "keep";
+  const saveLabel = kidSaveLabel({ dirty, transferring, toName, partCents, tracking: f.tracking, restCents, kidName: kid?.name ?? "the child", money });
+
+  const save = () => {
+    const fd = new FormData();
+    fd.set("accountId", item.accountId);
+    fd.set("bucketId", item.bucketId ?? "");
+    if (edited("name")) fd.set("name", f.name);
+    if (!typeLocked && edited("type")) fd.set("type", f.type);
+    if (!canTransfer && !childFixed && edited("kidId")) fd.set("kidId", f.kidId);
+    if (edited("institution")) fd.set("institution", f.institution);
+    if (edited("last4")) fd.set("accountNumber", f.last4);
+    if (edited("owner")) fd.set("controlledBy", f.owner);
+    if (edited("successor")) fd.set("successorOwner", f.successor);
+    if (edited("utmaAge")) fd.set("utmaAge", f.utmaAge);
+    if (transferring || f.tracking !== "keep") fd.set("date", f.date);
+    if (transferring) {
+      fd.set("toKidId", f.kidId);
+      fd.set("howMuch", part ? "part" : "all");
+      fd.set("note", f.note);
+      fd.set("newKidName", f.newName);
+      fd.set("newKidBorn", f.newBorn);
+      if (part) {
+        const onlyTarget = targets.length === 1 ? `${targets[0].accountId}:${targets[0].bucketId ?? ""}` : "";
+        fd.set("to", f.into || onlyTarget);
+        fd.set("amount", f.amount);
+        fd.set("newInstitution", f.newInstitution);
+        fd.set("newLast4", f.newLast4);
+      }
+    }
+    if (f.tracking !== "keep") {
+      fd.set("tracking", f.tracking);
+      fd.set("endNote", f.endNote);
+    }
+    return saveKidItem(fd);
+  };
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (saving.current || !dirty) return;
+        saving.current = true;
+        start(async () => {
+          setError(null);
+          try {
+            const res = await save();
+            if (res.error) {
+              setError(res.error);
+              saving.current = false;
+              // The money has moved, so a second Save mustn't move it again.
+              if (res.moved) setF((current) => ({ ...current, kidId: item.kidId ?? "", howMuch: "all", amount: "", into: "" }));
+            } else {
+              router.refresh();
+              onSaved();
+            }
+          } catch {
+            // A lost connection rejects instead of returning an error. A retry
+            // after a move that did land would move the money twice.
+            setError(part ? "Connection lost. The transfer may have saved. Reload the page and check the balances before trying again." : "Couldn't save. Check your connection and try again.");
+            saving.current = part;
+          }
+        });
+      }}
+      className="space-y-3"
+    >
+      <div className={FORM_GRID}>
+        <TextField label="Name" center width="col-span-2 @[860px]:w-48" required changed={edited("name")} {...bind("name")} />
+        {typeLocked ? null : (
+          <Select label="Account type" center width="col-span-2 @[860px]:w-36" changed={edited("type")} {...bind("type")}>
+            {KID_ACCOUNT_TYPES.some((t) => t.type === item.type) ? null : <option value={item.type ?? ""}>{item.type ?? "Not set"}</option>}
+            {KID_ACCOUNT_TYPES.map((t) => <option key={t.type} value={t.type}>{t.type}</option>)}
+          </Select>
+        )}
+        <TextField label="Institution" center width="@[860px]:w-32" placeholder="Not set" changed={edited("institution")} {...bind("institution")} />
+        <TextField label="Last 4" center width="@[860px]:w-20" inputMode="numeric" placeholder="Not set" changed={edited("last4")} {...bind("last4")} />
+        {childFixed ? null : (
+          <Select label={forLabel} center width="@[860px]:w-32" changed={edited("kidId")} {...bind("kidId")}>
+            {item.kidId ? null : <option value="">Not set</option>}
+            {data.kids.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+            {canTransfer ? <option value="__new">+ Someone new</option> : null}
+          </Select>
+        )}
+        <TextField label={preset?.controllerLabel ?? controllerLabelFor(shownType)} center width={`${successorLabel ? "" : lastOnItsOwn} ${item.type === "Trump Account" ? "@[860px]:w-40" : "@[860px]:w-28"}`} list={`people-${item.key}`} placeholder="Not set" changed={edited("owner")} {...bind("owner")} />
+        <datalist id={`people-${item.key}`}>
+          {controllerNames.map((n) => <option key={n} value={n} />)}
+        </datalist>
+        {successorLabel ? <TextField label={successorLabel} center width={`${item.type === "UTMA" && kid ? "" : lastOnItsOwn} @[860px]:w-44`} placeholder="Not set" changed={edited("successor")} {...bind("successor")} /> : null}
+        {item.type === "UTMA" && kid ? (
+          <Select label="Hands over at" center width={`${lastOnItsOwn} @[860px]:w-28`} changed={edited("utmaAge")} {...bind("utmaAge")}>
+            {utmaAgeOptions(kid.utmaHandoverAge).map((n) => <option key={n} value={n}>{n}</option>)}
+          </Select>
+        ) : null}
+        {trackingOptions.length > 1 ? (
+          <Select label="Tracking" center width="col-span-2 @[860px]:w-48" changed={f.tracking !== "keep"} {...bind("tracking")}>
+            {trackingOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        ) : null}
+      </div>
+
+      {edited("institution") && item.type === "529" ? <Footnote label="Rollover">Once per 12 months, same child</Footnote> : null}
+
+      {transferring ? (
+        <Strip title={`Transfer${toName ? ` to ${toName}` : ""}`} bar="var(--viz-bills)">
+          <div className={FORM_GRID}>
+            {isNew ? (
+              <>
+                <TextField label="Their name" center width={`${wholeGone ? "col-span-2" : ""} @[860px]:w-44`} required {...bind("newName")} />
+                {wholeGone ? null : <TextField label="Born" center width="@[860px]:w-40" type="month" required onClick={openPicker} {...bind("newBorn")} />}
+              </>
+            ) : null}
+            {canPart ? (
+              <Select label="How much" center width="col-span-2 @[860px]:w-72" {...bind("howMuch")}>
+                <option value="all">{`Whole account becomes ${toName || "theirs"}${toName ? "'s" : ""}`}</option>
+                <option value="part">{targets.length > 0 ? `Part moves to ${toName}'s 529` : `Part starts a 529 for ${toName || "them"}`}</option>
+              </Select>
+            ) : null}
+            {part && targets.length > 1 ? (
+              <Select label="Into" center width="@[860px]:w-56" required {...bind("into")}>
+                <option value="">Pick a 529</option>
+                {targets.map((o) => <option key={o.key} value={`${o.accountId}:${o.bucketId ?? ""}`}>{o.name} · {money(o.balanceCents)}</option>)}
+              </Select>
+            ) : null}
+            {part ? <TextField label="Amount" center width="@[860px]:w-28" className="text-center" type="number" step="0.01" min="0.01" inputMode="decimal" placeholder={`${money(item.balanceCents)} max`} required {...bind("amount")} /> : null}
+            {part && targets.length === 0 ? (
+              <>
+                <TextField label="New 529 institution" center width="@[860px]:w-40" placeholder="Not set" {...bind("newInstitution")} />
+                <TextField label="New 529 last 4" center width="@[860px]:w-32" inputMode="numeric" placeholder="Not set" {...bind("newLast4")} />
+              </>
+            ) : null}
+            <TextField label="Date" center width="@[860px]:w-40" type="date" required onClick={openPicker} {...bind("date")} />
+            <TextField label="Note" center width={`${noteOnItsOwn} @[860px]:w-56`} placeholder="Optional" {...bind("note")} />
+          </div>
+          <div className="space-y-0.5">
+            {isNew ? <Footnote label="New person">{wholeGone ? "Not added, since this stops here" : "Gets their own strip here"}</Footnote> : null}
+            {!part && !wholeGone ? <Footnote label="Last 4">Update it if the plan gives a new number</Footnote> : null}
+            <Footnote label="Family only">Others owe tax and a penalty</Footnote>
+            <Footnote label="Younger generation">Possible gift tax</Footnote>
+          </div>
+        </Strip>
+      ) : null}
+
+      {(stopping || handingOver) && !wholeGone ? (
+        <Strip title={handingOver ? `Hand over to ${kid?.name ?? "the child"}` : "Stop tracking"} bar="var(--negative)">
+          <div className={FORM_GRID}>
+            {transferring ? null : <TextField label="Date" center width="@[860px]:w-40" type="date" required onClick={openPicker} {...bind("date")} />}
+            {handingOver ? (
+              <TextField label="Note" center width="col-span-2 @[860px]:w-64" placeholder="Optional" {...bind("endNote")} />
+            ) : (
+              <TextField label={part ? "Where did the rest go?" : "Where did the money go?"} center width="col-span-2 @[860px]:w-64" required={restCents > 0} placeholder={restCents > 0 ? "" : "Optional"} {...bind("endNote")} />
+            )}
+          </div>
+          {stopping ? <Footnote label="Here only">Also close it at the plan</Footnote> : null}
+        </Strip>
+      ) : null}
+
+      <div className="flex flex-wrap gap-x-6 gap-y-1">
+        {typeLocked ? <Fact label="Type">{item.type}</Fact> : null}
+        {childFixed ? <Fact label={forLabel}>{kid?.name ?? "Not set"}</Fact> : null}
+        {tax ? <Fact label="Tax">{tax}</Fact> : null}
+        {linkedItem ? <Fact label="Budget item">{linkedItem}</Fact> : null}
+        {handOverDate ? <Fact label="Hands over">{item.type === "UTMA" ? monthYear(handOverDate) : fullDate(handOverDate)}</Fact> : null}
+        {trackingOptions.length === 1 ? <Fact label="Tracking">{handOverDate ? `Until $0 or ${monthYear(handOverDate)}` : "Until $0"}</Fact> : null}
+        {estate?.beneficiary ? <Fact label="Estate beneficiary">{estate.beneficiary}</Fact> : null}
+        {estate?.contact ? <Fact label="Estate contact">{estate.contact}</Fact> : null}
+        {estate?.notes ? <Fact label="Estate notes">{estate.notes}</Fact> : null}
+      </div>
+
+      {error ? <p className="text-sm font-semibold text-negative">{error}</p> : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="submit"
+          disabled={pending || !dirty}
+          className={`rounded-md px-3 py-1.5 text-xs font-semibold transition hover:opacity-90 disabled:opacity-50 sm:text-[15px] max-sm:py-2.5 ${stopping && !wholeGone && restCents > 0 ? "bg-negative text-white dark:text-background" : "bg-brand text-white"}`}
+        >
+          {pending ? "Saving…" : saveLabel}
+        </button>
+        {dirty ? (
+          <button type="button" onClick={onSaved} className="rounded-md px-2 py-1.5 text-xs font-medium text-foreground hover:bg-sky-50 sm:text-[15px] max-sm:py-2.5 dark:hover:bg-sky-950/40">
+            Cancel
+          </button>
+        ) : null}
+        <DeleteItem item={item} />
+      </div>
+    </form>
+  );
+}
+
+// A closed row is the record of what it was, with the way back.
+function ClosedItem({ item, kid, data }: { item: KidItem; kid: KidData | null; data: KidsFundingData }) {
+  const router = useRouter();
+  const [reopening, startReopen] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const linkedItem = data.linkedItems[item.bucketId ?? item.accountId] ?? null;
+  const tax = item.taxTreatment ? TAX_LABEL_SHORT[item.taxTreatment as TaxTreatment] ?? item.taxTreatment : null;
+  const successorLabel = successorLabelFor(item.type);
+  return (
+    <>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 @[560px]:flex @[560px]:flex-wrap @[560px]:gap-x-6">
+        <Detail label={item.type === "529" ? "Beneficiary" : "For"}>{kid?.name ?? "Not set"}</Detail>
+        <Detail label="Type">{item.type ?? "Not set"}</Detail>
+        <Detail label="Institution">{item.institution ?? "Not set"}</Detail>
+        <Detail label="Last 4">{item.last4 ?? "Not set"}</Detail>
+        <Detail label={controllerLabelFor(item.type)}>{item.controlledBy ?? "Not set"}</Detail>
+        {successorLabel ? <Detail label={successorLabel}>{item.successorOwner ?? "Not set"}</Detail> : null}
+        {tax ? <Detail label="Tax">{tax}</Detail> : null}
+        {linkedItem ? <Detail label="Budget item">{linkedItem}</Detail> : null}
+      </dl>
+      {error ? <p className="text-sm font-semibold text-negative">{error}</p> : null}
+      <button
+        type="button"
+        disabled={reopening}
+        className="shrink-0 rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 sm:text-[15px] dark:hover:bg-sky-900/50"
+        onClick={() => {
+          const fd = new FormData();
+          fd.set("accountId", item.accountId);
+          fd.set("bucketId", item.bucketId ?? "");
+          startReopen(async () => {
+            setError(null);
+            try {
+              const res = await reopenKidItem(fd);
+              if (res.error) setError(res.error);
+              else router.refresh();
+            } catch {
+              setError("Couldn't reopen. Check your connection and try again.");
+            }
+          });
+        }}
       >
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    </span>
+        {reopening ? "Reopening…" : "Reopen"}
+      </button>
+    </>
   );
 }
 
@@ -522,136 +749,23 @@ function KidItemPanel({
   kid: KidData | null;
   allItems: KidItem[];
   data: KidsFundingData;
-  estate: { beneficiary?: string | null; transfer?: string | null; contact?: string | null; notes?: string | null } | null;
+  estate: EstateInfo | null;
   money: (c: number) => string;
 }) {
-  const router = useRouter();
-  const [action, setAction] = useState<PanelAction>(null);
-  const [reopening, startReopen] = useTransition();
-  const [, startSave] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const done = () => setAction(null);
-  const toggle = (next: PanelAction) => setAction((current) => (current === next ? null : next));
-  const allowed = kidActionsFor({
-    type: item.type,
-    balanceCents: item.balanceCents,
-    birthMonth: kid?.birthMonth ?? null,
-    utmaAge: kid?.utmaHandoverAge ?? 21,
-    today: localToday(),
-  });
+  // Cancel and a save both start the form over, and a saved value changes the
+  // key, so it always shows what the server now holds.
+  const [resets, setResets] = useState(0);
   const kidName = (id: string | null) => data.kids.find((k) => k.id === id)?.name ?? null;
   const events = data.events.filter((e) => e.accountId === item.accountId && e.bucketId === item.bucketId);
-  const linkedItem = data.linkedItems[item.bucketId ?? item.accountId] ?? null;
-  const handOverDate = handOverFrom(item.type, kid?.birthMonth ?? null, kid?.utmaHandoverAge ?? 21);
-  const closed = item.dateClosed != null;
-  const other529s = allItems.filter((o) => o.type === "529" && !o.dateClosed && o.key !== item.key);
-  const tax = item.taxTreatment ? TAX_LABEL_SHORT[item.taxTreatment as TaxTreatment] ?? item.taxTreatment : null;
-
-  const run = (write: () => Promise<{ error: string | null }>) =>
-    startSave(async () => {
-      setError(null);
-      try {
-        const res = await write();
-        if (res.error) setError(res.error);
-        else router.refresh();
-      } catch {
-        // A lost connection rejects instead of returning an error.
-        setError("Couldn't save. Check your connection and try again.");
-      }
-    });
-  const saveField = (field: string) => (value: string) =>
-    run(() => saveKidItemField(item.accountId, item.bucketId, field, value));
-  const notSet = { value: "", label: "Not set" };
-  // Keyed by the saved value, so a cell picks up what the server now holds.
-  const text = (field: string, label: string, value: string | null, inputMode?: "numeric") =>
-    closed ? (value ?? "Not set") : <InlineText key={value ?? ""} label={label} value={value} save={saveField(field)} inputMode={inputMode} />;
-  const forLabel = item.type === "529" ? "Beneficiary" : "For";
-  const controllerLabel = controllerLabelFor(item.type);
-  const controllerNames = [...new Set([...data.controllers, ...(item.controlledBy ? [item.controlledBy] : [])])];
+  const formKey = [resets, item.name, item.type, item.kidId, item.institution, item.last4, item.controlledBy, item.successorOwner, kid?.utmaHandoverAge].join("|");
 
   return (
     <div className="space-y-3 border-t border-line/60 bg-background/60 px-4 py-3">
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 @[560px]:flex @[560px]:flex-wrap @[560px]:gap-x-6">
-        <Detail label={forLabel}>
-          {closed || (item.type === "529" && item.kidId) ? (kid?.name ?? "Not set") : (
-            <InlineSelect
-              label={forLabel}
-              value={item.kidId ?? ""}
-              options={[notSet, ...data.kids.map((k) => ({ value: k.id, label: k.name }))]}
-              save={saveField("kidId")}
-            />
-          )}
-        </Detail>
-        <Detail label="Type">{item.type ?? "Not set"}</Detail>
-        <Detail label="Institution">{text("institution", "Institution", item.institution)}</Detail>
-        <Detail label="Last 4">{text("accountNumber", "Last 4", item.last4, "numeric")}</Detail>
-        <Detail label={controllerLabel}>
-          {closed ? (item.controlledBy ?? "Not set") : (
-            <InlineSelect
-              label={controllerLabel}
-              value={item.controlledBy ?? ""}
-              options={[notSet, ...controllerNames.map((n) => ({ value: n, label: n }))]}
-              save={saveField("controlledBy")}
-            />
-          )}
-        </Detail>
-        {item.type === "529" ? <Detail label="Successor owner">{text("successorOwner", "Successor owner", item.successorOwner)}</Detail> : null}
-        {item.type === "UTMA" && kid && !closed ? (
-          <Detail label="Hands over at">
-            <InlineSelect
-              label="Hands over at"
-              value={String(kid.utmaHandoverAge)}
-              options={utmaAgeOptions(kid.utmaHandoverAge).map((n) => ({ value: String(n), label: String(n) }))}
-              save={(age) => run(() => setKidUtmaAge(kid.id, Number(age)))}
-            />
-          </Detail>
-        ) : null}
-        {handOverDate ? <Detail label="Hands over">{item.type === "UTMA" ? monthYear(handOverDate) : fullDate(handOverDate)}</Detail> : null}
-        {tax ? <Detail label="Tax">{tax}</Detail> : null}
-        {linkedItem ? <Detail label="Budget item">{linkedItem}</Detail> : null}
-        {estate?.beneficiary ? <Detail label="Estate beneficiary">{estate.beneficiary}</Detail> : null}
-        {estate?.contact ? <Detail label="Estate contact">{estate.contact}</Detail> : null}
-        {estate?.notes ? <Detail label="Estate notes">{estate.notes}</Detail> : null}
-      </dl>
-      {error ? <p className="text-sm font-semibold text-negative">{error}</p> : null}
-      <div className="flex flex-wrap gap-2">
-        {closed ? (
-          <button
-            type="button"
-            disabled={reopening}
-            className={actionClass(false)}
-            onClick={() => {
-              const fd = new FormData();
-              fd.set("accountId", item.accountId);
-              fd.set("bucketId", item.bucketId ?? "");
-              startReopen(async () => {
-                setError(null);
-                try {
-                  const res = await reopenKidItem(fd);
-                  if (res.error) setError(res.error);
-                  else router.refresh();
-                } catch {
-                  setError("Couldn't reopen. Check your connection and try again.");
-                }
-              });
-            }}
-          >
-            {reopening ? "Reopening…" : "Reopen (entered by mistake)"}
-          </button>
-        ) : (
-          <>
-            <button type="button" aria-pressed={action === "edit"} className={actionClass(action === "edit")} onClick={() => toggle("edit")}>Edit details</button>
-            {allowed.changeBeneficiary ? <button type="button" aria-pressed={action === "transfer"} className={actionClass(action === "transfer")} onClick={() => toggle("transfer")}>Transfer</button> : null}
-            {allowed.handOver ? <button type="button" aria-pressed={action === "handover"} className={actionClass(action === "handover")} onClick={() => toggle("handover")}>Hand over</button> : null}
-            {allowed.close ? <button type="button" aria-pressed={action === "close"} className={dangerClass(action === "close")} onClick={() => toggle("close")}>Close account</button> : null}
-          </>
-        )}
-      </div>
-
-      {action === "transfer" ? <TransferForm item={item} kids={data.kids} others={other529s} money={money} onDone={done} /> : null}
-      {action === "close" ? <EndItemForm item={item} kid={kid} reason="closed" money={money} onDone={done} /> : null}
-      {action === "handover" ? <EndItemForm item={item} kid={kid} reason="handed_over" money={money} onDone={done} /> : null}
-      {action === "edit" ? <EditItemForm item={item} onDone={done} /> : null}
+      {item.dateClosed != null ? (
+        <ClosedItem item={item} kid={kid} data={data} />
+      ) : (
+        <KidItemForm key={formKey} item={item} kid={kid} allItems={allItems} data={data} estate={estate} money={money} hasEvents={events.length > 0} onSaved={() => setResets((n) => n + 1)} />
+      )}
 
       {events.length > 0 ? (
         <div>
@@ -683,7 +797,7 @@ function ItemRow({
   kid: KidData | null;
   allItems: KidItem[];
   data: KidsFundingData;
-  estate: { beneficiary?: string | null; transfer?: string | null; contact?: string | null; notes?: string | null } | null;
+  estate: EstateInfo | null;
   historyMonths: string[];
   money: (c: number) => string;
   renderCell: (item: KidItem, monthIndex: number) => React.ReactNode;
@@ -706,7 +820,7 @@ function ItemRow({
             </span>
             <span className="block text-xs font-medium sm:text-[15px]">
               {closed
-                ? `${item.closedReason === "handed_over" ? `Handed over to ${kid?.name ?? "the child"}` : "Closed"} ${fullDate(item.dateClosed!)}`
+                ? `${item.closedReason === "handed_over" ? `Handed over to ${kid?.name ?? "the child"}` : `${kid ? `${kid.name} · ` : ""}Closed`} ${fullDate(item.dateClosed!)}`
                 : summary.line}
             </span>
           </span>
@@ -739,20 +853,18 @@ function ChildGroup({
   items: KidItem[];
   allItems: KidItem[];
   data: KidsFundingData;
-  estateOf: (item: KidItem) => { beneficiary?: string | null; transfer?: string | null; contact?: string | null; notes?: string | null } | null;
+  estateOf: (item: KidItem) => EstateInfo | null;
   historyMonths: string[];
   isPastPeriod: boolean;
   money: (c: number) => string;
   renderCell: (item: KidItem, monthIndex: number) => React.ReactNode;
 }) {
+  const live = items.filter((i) => !i.dateClosed).sort(byType);
   const [open, setOpen] = useState(true);
-  const [closedOpen, setClosedOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const router = useRouter();
   const [removing, startRemove] = useTransition();
   const [removeError, setRemoveError] = useState<string | null>(null);
-  const live = items.filter((i) => !i.dateClosed).sort(byType);
-  const ended = items.filter((i) => i.dateClosed).sort(byType);
 
   // A column's total, or nothing if none of its items had a value that month.
   const totalFor = (month: string, column: number): number | null => {
@@ -775,7 +887,7 @@ function ChildGroup({
           </button>
           {kid ? (
             <button type="button" onClick={() => setEditing((v) => !v)} className="rounded px-1 text-xs font-medium underline sm:text-[15px]">
-              Edit
+              Edit {kid.name}
             </button>
           ) : null}
         </div>
@@ -831,22 +943,7 @@ function ChildGroup({
               <ItemRow key={item.key} item={item} kid={kid} allItems={allItems} data={data} estate={estateOf(item)} historyMonths={historyMonths} money={money} renderCell={renderCell} />
             ))}
           </ul>
-          {live.length === 0 && ended.length === 0 ? <p className="px-4 py-2 text-xs">Nothing yet. Use Add account above.</p> : null}
-          {ended.length > 0 ? (
-            <div className="border-t border-line/60">
-              <button type="button" onClick={() => setClosedOpen((v) => !v)} aria-expanded={closedOpen} className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold">
-                <Chevron open={closedOpen} />
-                Closed and handed over ({ended.length})
-              </button>
-              {closedOpen ? (
-                <ul className="divide-y divide-line/60">
-                  {ended.map((item) => (
-                    <ItemRow key={item.key} item={item} kid={kid} allItems={allItems} data={data} estate={estateOf(item)} historyMonths={historyMonths} money={money} renderCell={renderCell} />
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
+          {items.length === 0 ? <p className="px-4 py-2 text-xs">Nothing yet. Use Add account above.</p> : null}
         </>
       ) : null}
     </section>
@@ -865,15 +962,20 @@ export function KidsFundingBody({
 }: {
   accounts: AccountData[];
   data: KidsFundingData;
-  estate: Record<string, { beneficiary?: string | null; transfer?: string | null; contact?: string | null; notes?: string | null }>;
+  estate: Record<string, EstateInfo>;
   historyMonths: string[];
   isPastPeriod: boolean;
   money: (c: number) => string;
   renderCell: (item: KidItem, monthIndex: number) => React.ReactNode;
 }) {
   const [adding, setAdding] = useState(false);
+  const [closedOpen, setClosedOpen] = useState(false);
   const allItems = kidItemsOf(accounts);
-  const unassigned = allItems.filter((i) => !i.kidId || !data.kids.some((k) => k.id === i.kidId));
+  const unassigned = allItems.filter((i) => !i.dateClosed && (!i.kidId || !data.kids.some((k) => k.id === i.kidId)));
+  // Once an account ends it's no longer tracked, so it leaves its child's list,
+  // and a child left with nothing open leaves with it. One collapsed list at the
+  // bottom keeps them all for a Reopen.
+  const closed = allItems.filter((i) => i.dateClosed).sort(byType);
   const shared = {
     allItems,
     data,
@@ -893,10 +995,27 @@ export function KidsFundingBody({
           <span key={m} className={`text-center ${monthHeadTier(i)}`}>{monthAbbr(m)}</span>
         ))}
       </div>
-      {data.kids.map((kid) => (
-        <ChildGroup key={kid.id} kid={kid} items={allItems.filter((i) => i.kidId === kid.id)} {...shared} />
-      ))}
+      {data.kids.map((kid) => {
+        const items = allItems.filter((i) => i.kidId === kid.id);
+        if (items.length > 0 && items.every((i) => i.dateClosed)) return null;
+        return <ChildGroup key={kid.id} kid={kid} items={items} {...shared} />;
+      })}
       {unassigned.length > 0 ? <ChildGroup kid={null} items={unassigned} {...shared} /> : null}
+      {closed.length > 0 ? (
+        <div className="border-t border-line/60">
+          <button type="button" onClick={() => setClosedOpen((v) => !v)} aria-expanded={closedOpen} className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold sm:text-[15px]">
+            <Chevron open={closedOpen} />
+            Closed accounts ({closed.length})
+          </button>
+          {closedOpen ? (
+            <ul className="divide-y divide-line/60">
+              {closed.map((item) => (
+                <ItemRow key={item.key} item={item} kid={data.kids.find((k) => k.id === item.kidId) ?? null} allItems={allItems} data={data} estate={shared.estateOf(item)} historyMonths={historyMonths} money={money} renderCell={renderCell} />
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       <div className="border-t border-line/60 px-4 py-2">
         {adding ? (
           <ActionForm submit="Add" action={saveKid} onDone={() => setAdding(false)}>
@@ -999,19 +1118,20 @@ export function KidsAddForm({
       </Select>
       {isNew ? (
         <>
-          <TextField label="Name" width="" name="newKidName" required value={newName} onChange={(e) => setNewName(e.target.value)} />
-          <TextField label="Born" width="" name="newKidBorn" type="month" required />
+          <TextField label="Name" name="newKidName" required value={newName} onChange={(e) => setNewName(e.target.value)} />
+          <TextField label="Born" name="newKidBorn" type="month" required onClick={openPicker} />
+          <div className="sm:col-span-2"><Footnote label="New person">Gets their own strip here</Footnote></div>
         </>
       ) : null}
-      <LabeledInput label="Account name" name="name" required autoComplete="off" value={typedName ?? suggested} onChange={(e) => { setTypedName(e.target.value); setError(null); }} placeholder="e.g. Trump Account Leo" />
-      <LabeledInput label="Institution" name="institution" autoComplete="off" placeholder="e.g. Fidelity" />
-      <LabeledInput label="Last 4" name="accountNumber" autoComplete="off" inputMode="numeric" placeholder="e.g. 1028" />
-      <Select label={preset.controllerLabel} name="controlledBy" defaultValue="">
-        <option value="">Not set</option>
-        {data.controllers.map((n) => <option key={n} value={n}>{n}</option>)}
-      </Select>
-      <LabeledInput label="Current balance" name="balance" type="number" step="0.01" inputMode="decimal" placeholder="0.00" />
-      {type === "529" ? <LabeledInput label="Successor owner" name="successorOwner" autoComplete="off" /> : null}
+      <TextField label="Account name" name="name" required value={typedName ?? suggested} onChange={(e) => { setTypedName(e.target.value); setError(null); }} placeholder="e.g. Trump Account Leo" />
+      <TextField label="Institution" name="institution" placeholder="e.g. Fidelity" />
+      <TextField label="Last 4" name="accountNumber" inputMode="numeric" placeholder="e.g. 1028" />
+      <TextField label={preset.controllerLabel} name="controlledBy" list="kids-add-people" placeholder="Not set" />
+      <datalist id="kids-add-people">
+        {data.controllers.map((n) => <option key={n} value={n} />)}
+      </datalist>
+      <TextField label="Current balance" name="balance" type="number" step="0.01" inputMode="decimal" placeholder="0.00" />
+      {successorLabelFor(type) ? <TextField label={successorLabelFor(type)!} name="successorOwner" /> : null}
       {error ? <p className="text-sm font-semibold text-negative sm:col-span-2">{error}</p> : null}
       <div className="flex items-center gap-2 sm:col-span-2">
         <button type="submit" disabled={pending} className="rounded-md bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60">
