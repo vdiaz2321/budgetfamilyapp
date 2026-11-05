@@ -279,8 +279,11 @@ const ACCOUNT_SUBTYPES = [
   "TSP Traditional",
   "REIT",
   "529",
+  "Coverdell ESA",
   "UTMA",
+  "Custodial Roth IRA",
   "Trump Account",
+  "ABLE Account",
 ];
 
 /** A section whose Type field has a fixed vocabulary (Property). Unlike
@@ -1477,7 +1480,7 @@ function CreditCardListSection({
   // The grip sits inside the tile's button; a press on it must not open Pay.
   const grip = (id: string) => (
     <span className="hidden sm:flex" onClick={(e) => e.stopPropagation()}>
-      <GripHandle onMouseDown={() => startDrag(id)} size="sm" />
+      <GripHandle onGrab={() => startDrag(id)} size="sm" />
     </span>
   );
 
@@ -2423,7 +2426,7 @@ function AccountRow({
       className={`group/row ${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
       <div className={`grid ${ROW_GRID} items-center gap-1.5 px-4 py-1.5`}>
-        <GripHandle onMouseDown={onDragStart} />
+        <GripHandle onGrab={onDragStart} />
         {allowBuckets ? (
           <button
             type="button"
@@ -2702,7 +2705,7 @@ function BucketRow({
       <div
         className={`grid h-7 items-center gap-1.5 ${ROW_GRID}`}
       >
-      <GripHandle onMouseDown={onDragStart} size="sm" />
+      <GripHandle onGrab={onDragStart} size="sm" />
       {/* Empty cell under the account's expand chevron — the bucket grid is
           the account grid, so the money columns line up between the two. */}
       <span />
@@ -3334,6 +3337,7 @@ function AddAccountForm({
   estateNames: names = [],
   subtype = null,
   kidsFunding,
+  onBack,
 }: {
   section: Section;
   onDone: (newId?: string | null) => void;
@@ -3341,6 +3345,8 @@ function AddAccountForm({
   kidsFunding?: KidsFundingData;
   /** The Type to start on. */
   subtype?: string | null;
+  /** Back to the type chooser, for a form that draws its own link. */
+  onBack?: () => void;
 }) {
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -3360,7 +3366,7 @@ function AddAccountForm({
   const multiKind = kindKeys.length > 1;
 
   if (section.kidsGroup && kidsFunding) {
-    return <KidsAddForm data={kidsFunding} onDone={() => onDone()} />;
+    return <KidsAddForm data={kidsFunding} onBack={onBack} onDone={() => onDone()} />;
   }
 
   // Credit cards are created with their basics and rewards/benefits together,
@@ -3722,9 +3728,7 @@ function AddAccountModal({
             <h2 id="add-account-title" className="text-lg font-bold">
               {section ? `Add ${{ banking: "banking account", investments: "investment", property: "property", credit: "credit card details", loans: "debt", kids: "Kids Funding account" }[section.key] ?? "account"}` : "Add account"}
             </h2>
-            <p className="text-xs text-muted">
-              {section ? "Enter the details you want your family to be able to find later." : "Choose where this account belongs."}
-            </p>
+            {section ? null : <p className="text-xs text-muted">Choose where this account belongs.</p>}
           </div>
           <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-2xl leading-none text-muted hover:bg-brand-soft hover:text-foreground" aria-label="Close">×</button>
         </div>
@@ -3755,14 +3759,17 @@ function AddAccountModal({
           </div>
         ) : (
           <>
-            <div className="px-5 pt-4">
-              <button type="button" onClick={() => setSectionKey(null)} className="text-sm font-medium text-brand hover:text-brand-strong">← Choose another type</button>
-            </div>
+            {section.key === "kids" ? null : (
+              <div className="px-5 pt-4">
+                <button type="button" onClick={() => setSectionKey(null)} className="text-sm font-medium text-brand hover:text-brand-strong">← Choose another type</button>
+              </div>
+            )}
             <AddAccountForm
               section={section}
               estateNames={estateNames}
               subtype={preset?.section === section.key ? preset.subtype : null}
               kidsFunding={kidsFunding}
+              onBack={() => setSectionKey(null)}
               onDone={() => onClose()}
             />
             {section.key !== "credit" && section.key !== "loans" && section.key !== "kids" ? (

@@ -31,7 +31,6 @@ export type BucketData = {
   institution?: string | null;
   accountNumber?: string | null;
   controlledBy?: string | null;
-  successorOwner?: string | null;
   utmaState?: string | null;
   utmaHandoverAge?: number | null;
   dateClosed?: string | null;
@@ -134,7 +133,6 @@ export type AccountData = {
   /** Kids Funding: who it's for, and who runs it for them. */
   kidId?: string | null;
   controlledBy?: string | null;
-  successorOwner?: string | null;
   utmaState?: string | null;
   utmaHandoverAge?: number | null;
   closedReason?: string | null;

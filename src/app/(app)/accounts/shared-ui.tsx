@@ -546,21 +546,24 @@ function MatchStatement({ cardId, onDone }: { cardId: string; onDone: () => void
 }
 
 
-// Pointer-based row reordering shared by both drag contexts on this page
-// (accounts within a section, buckets within an account). Rows carry a
-// data-drop-key="<kind>:<id>"; grabbing a handle starts the drag, releasing
-// over another row of the same kind fires onReorder(fromId, toId). Same
-// approach as the Net Worth grid.
-export function GripHandle({ onMouseDown, size = "md" }: { onMouseDown: () => void; size?: "sm" | "md" }) {
+// Pointer-based row reordering shared by every drag context on this page
+// (accounts within a section, buckets within an account, the Month-end popup).
+// Rows carry a data-drop-key="<kind>:<id>" — or "<kind>:<scope>:<id>" when one
+// hook serves several lists; grabbing a handle starts the drag, releasing over
+// another row of the same kind and scope fires onReorder(fromId, toId, scope).
+// Pointer events, so a finger works as well as a mouse.
+export function GripHandle({ onGrab, size = "md", className = "" }: { onGrab: () => void; size?: "sm" | "md"; className?: string }) {
   const px = size === "sm" ? 11 : 13;
   return (
     <span
-      onMouseDown={(e) => {
-        e.preventDefault();
-        onMouseDown();
+      onPointerDown={(e) => {
+        if (e.button === 0) onGrab();
       }}
+      // Stops the drag selecting text, and a click folding the row it sits on.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={(e) => e.stopPropagation()}
       aria-label="Drag to reorder"
-      className="flex shrink-0 cursor-grab items-center rounded p-0.5 text-muted/60 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+      className={`flex shrink-0 cursor-grab touch-none select-none items-center rounded p-0.5 text-foreground transition hover:bg-sky-100 active:cursor-grabbing dark:hover:bg-sky-900/50 ${className}`}
     >
       <svg width={px} height={px} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
         <path d="M4 6h16M4 12h16M4 18h16" />
@@ -569,33 +572,72 @@ export function GripHandle({ onMouseDown, size = "md" }: { onMouseDown: () => vo
   );
 }
 
-export function usePointerReorder(kind: string, onReorder: (fromId: string, toId: string) => void) {
+function scrollableParent(el: Element | null): HTMLElement | null {
+  for (let n = el as HTMLElement | null; n; n = n.parentElement) {
+    const y = getComputedStyle(n).overflowY;
+    if ((y === "auto" || y === "scroll") && n.scrollHeight > n.clientHeight) return n;
+  }
+  return null;
+}
+
+export function usePointerReorder(kind: string, onReorder: (fromId: string, toId: string, scope?: string) => void) {
   const dragId = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
-  const keyUnder = (x: number, y: number) => {
-    const el = document.elementFromPoint(x, y) as HTMLElement | null;
-    const rowEl = el?.closest<HTMLElement>("[data-drop-key]");
-    const key = rowEl?.getAttribute("data-drop-key");
-    return key && key.startsWith(`${kind}:`) ? key.slice(kind.length + 1) : null;
-  };
-
-  const startDrag = (id: string) => {
+  const startDrag = (id: string, scope?: string) => {
+    const prefix = scope ? `${kind}:${scope}:` : `${kind}:`;
+    const keyUnder = (x: number, y: number) => {
+      const el = document.elementFromPoint(x, y);
+      const key = el?.closest(`[data-drop-key^="${prefix}"]`)?.getAttribute("data-drop-key");
+      return key ? key.slice(prefix.length) : null;
+    };
     dragId.current = id;
     document.body.style.cursor = "grabbing";
-    const onMove = (e: MouseEvent) => setDragOverId(keyUnder(e.clientX, e.clientY));
-    const onUp = (e: MouseEvent) => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+    let pointer: { x: number; y: number } | null = null;
+    let frame = 0;
+    // Near the top or bottom of a scrolling popup the list follows the pointer,
+    // since a finger has no wheel to reach a row that's off screen. The bottom
+    // zone is taller to clear a popup's pinned footer.
+    const autoScroll = () => {
+      if (pointer) {
+        const box = scrollableParent(document.elementFromPoint(pointer.x, pointer.y));
+        if (box) {
+          const r = box.getBoundingClientRect();
+          if (pointer.y < r.top + 64) box.scrollTop -= 8;
+          else if (pointer.y > r.bottom - 96) box.scrollTop += 8;
+        }
+      }
+      frame = requestAnimationFrame(autoScroll);
+    };
+    frame = requestAnimationFrame(autoScroll);
+    const onMove = (e: PointerEvent) => {
+      pointer = { x: e.clientX, y: e.clientY };
+      setDragOverId(keyUnder(e.clientX, e.clientY));
+    };
+    const finish = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", finish);
+      cancelAnimationFrame(frame);
       document.body.style.cursor = "";
       setDragOverId(null);
-      const from = dragId.current;
       dragId.current = null;
-      const to = keyUnder(e.clientX, e.clientY);
-      if (from && to && from !== to) onReorder(from, to);
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    const onUp = (e: PointerEvent) => {
+      const from = dragId.current;
+      const to = keyUnder(e.clientX, e.clientY);
+      finish();
+      // The click that ends a drag isn't a click on whatever it landed on.
+      if (pointer) {
+        const swallow = (c: MouseEvent) => c.stopPropagation();
+        window.addEventListener("click", swallow, { capture: true, once: true });
+        setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+      }
+      if (from && to && from !== to) onReorder(from, to, scope);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", finish);
   };
 
   return { dragOverId, startDrag };

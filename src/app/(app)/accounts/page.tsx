@@ -138,13 +138,13 @@ export default async function AccountsPage() {
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, kid_id, controlled_by, successor_owner, utma_state, utma_handover_age, closed_reason, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, payment_due_day, tax_treatment, retirement_kind, balance_updated_at")
+      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, kid_id, controlled_by, utma_state, utma_handover_age, closed_reason, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, payment_due_day, tax_treatment, retirement_kind, balance_updated_at")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, balance_cents, bank_group, subtype, tax_treatment, retirement_kind, holder, balance_updated_at, kid_id, institution, account_number, controlled_by, successor_owner, utma_state, utma_handover_age, date_closed, closed_reason")
+      .select("id, account_id, name, balance_cents, bank_group, subtype, tax_treatment, retirement_kind, holder, balance_updated_at, kid_id, institution, account_number, controlled_by, utma_state, utma_handover_age, date_closed, closed_reason")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -487,7 +487,6 @@ export default async function AccountsPage() {
     isKidsAccount: a.is_kids_account ?? false,
     kidId: (a.kid_id as string | null) ?? null,
     controlledBy: (a.controlled_by as string | null) ?? null,
-    successorOwner: (a.successor_owner as string | null) ?? null,
     utmaState: (a.utma_state as string | null) ?? null,
     utmaHandoverAge: (a.utma_handover_age as number | null) ?? null,
     closedReason: (a.closed_reason as string | null) ?? null,
@@ -548,7 +547,6 @@ export default async function AccountsPage() {
         institution: (b.institution as string | null) ?? null,
         accountNumber: (b.account_number as string | null) ?? null,
         controlledBy: (b.controlled_by as string | null) ?? null,
-        successorOwner: (b.successor_owner as string | null) ?? null,
         utmaState: (b.utma_state as string | null) ?? null,
         utmaHandoverAge: (b.utma_handover_age as number | null) ?? null,
         dateClosed: (b.date_closed as string | null) ?? null,

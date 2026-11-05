@@ -63,8 +63,11 @@ export const ACCOUNT_TYPE_DEFAULTS: Record<
   "TSP Traditional": { tax: "deferred", kind: "elective_deferral" },
   REIT: { tax: "taxable", kind: null },
   "529": { tax: "education", kind: null },
+  "Coverdell ESA": { tax: "education", kind: null },
   UTMA: { tax: "taxable", kind: null },
+  "Custodial Roth IRA": { tax: "free", kind: "roth_ira" },
   "Trump Account": { tax: "deferred", kind: "trump_account" },
+  "ABLE Account": { tax: "free", kind: null },
 };
 
 /**

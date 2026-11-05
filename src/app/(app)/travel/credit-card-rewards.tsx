@@ -1332,7 +1332,7 @@ function CreditCardSection({
                           isBankDragOver ? "bg-sky-100/40" : "hover:bg-sky-200 dark:hover:bg-sky-900"
                         }`}
                       >
-                        <GripHandle size="sm" onMouseDown={() => startBankDrag(group.bank)} />
+                        <GripHandle size="sm" onGrab={() => startBankDrag(group.bank)} />
                         <button
                           type="button"
                           onClick={() => toggleBank(group.bank)}
@@ -2319,7 +2319,7 @@ function CreditCardPanel({
       <div className="relative flex items-center xl:hidden">
         {!isArchived && onDragStart ? (
           <span className="flex-none pl-2 py-2">
-            <GripHandle onMouseDown={onDragStart} size="sm" />
+            <GripHandle onGrab={onDragStart} size="sm" />
           </span>
         ) : null}
       <button
@@ -2533,7 +2533,7 @@ function CreditCardPanel({
         <span className="flex min-w-0 items-center gap-2">
           {!isArchived && onDragStart ? (
             <span data-grip className="flex-none">
-              <GripHandle onMouseDown={onDragStart} size="sm" />
+              <GripHandle onGrab={onDragStart} size="sm" />
             </span>
           ) : (
             <span className="w-4 flex-none" />

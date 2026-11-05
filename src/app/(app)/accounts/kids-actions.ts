@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
-import { KID_ACCOUNT_TYPES, kidActionsFor, kidTypeLocked, kidTypeOf, parseUtma, utmaStateName } from "@/lib/kids-funding";
+import { hasHandOverAge, institutionLabelFor, isChildOwned, KID_ACCOUNT_TYPES, kidActionsFor, kidTypeLocked, kidTypeOf, monthAtAge, parseUtma, utmaStateName } from "@/lib/kids-funding";
 import { addAccount, deleteAccount, deleteBucket, transferBetweenAccounts } from "./actions";
 
 // The Kids Funding popup's own actions. Each one refuses what kids-funding.ts
@@ -45,18 +45,18 @@ function monthFirst(value: string): string | null {
 async function loadItem({ supabase, household }: Session, accountId: string, bucketId: string | null) {
   const { data: account, error } = await supabase
     .from("accounts")
-    .select("id, name, subtype, retirement_kind, kid_id, is_kids_account, current_balance_cents, institution, account_number, controlled_by, successor_owner, utma_state, utma_handover_age, date_closed")
+    .select("id, name, subtype, retirement_kind, kid_id, is_kids_account, current_balance_cents, institution, account_number, controlled_by, utma_state, utma_handover_age, date_closed")
     .eq("id", accountId)
     .eq("household_id", household.id)
     .maybeSingle();
   if (error) throw new Error(`Could not read the account: ${error.message}`);
   if (!account?.is_kids_account) return null;
 
-  let bucket: { name: string; subtype: string | null; retirement_kind: string | null; kid_id: string | null; balance_cents: number | null; institution: string | null; account_number: string | null; controlled_by: string | null; successor_owner: string | null; utma_state: string | null; utma_handover_age: number | null; date_closed: string | null } | null = null;
+  let bucket: { name: string; subtype: string | null; retirement_kind: string | null; kid_id: string | null; balance_cents: number | null; institution: string | null; account_number: string | null; controlled_by: string | null; utma_state: string | null; utma_handover_age: number | null; date_closed: string | null } | null = null;
   if (bucketId) {
     const { data, error: bucketError } = await supabase
       .from("buckets")
-      .select("name, subtype, retirement_kind, kid_id, balance_cents, institution, account_number, controlled_by, successor_owner, utma_state, utma_handover_age, date_closed")
+      .select("name, subtype, retirement_kind, kid_id, balance_cents, institution, account_number, controlled_by, utma_state, utma_handover_age, date_closed")
       .eq("id", bucketId)
       .eq("account_id", accountId)
       .eq("household_id", household.id)
@@ -89,7 +89,6 @@ async function loadItem({ supabase, household }: Session, accountId: string, buc
     institution: bucket ? bucket.institution ?? account.institution ?? account.name : account.institution,
     accountNumber: bucket ? bucket.account_number : account.account_number,
     controlledBy: bucket?.controlled_by ?? account.controlled_by ?? null,
-    successorOwner: bucket?.successor_owner ?? account.successor_owner ?? null,
     utmaState: bucket ? bucket.utma_state : account.utma_state,
     utmaAge: bucket ? bucket.utma_handover_age : account.utma_handover_age,
     closed: (bucket ? bucket.date_closed : account.date_closed) != null,
@@ -142,9 +141,8 @@ export async function deleteKid(formData: FormData): Promise<Result> {
 // The details an edit can change. A change to one keeps a line in the item's
 // history; filling in a blank isn't worth recording.
 const DETAIL_FIELDS = [
-  { field: "institution", column: "institution", label: "Institution" },
-  { field: "accountNumber", column: "account_number", label: "Last 4" },
-  { field: "successorOwner", column: "successor_owner", label: "Takes over" },
+  { field: "institution", column: "institution", label: null },
+  { field: "accountNumber", column: "account_number", label: "Account #" },
 ] as const;
 
 const lastFour = (n: string | null) => n?.replace(/\s/g, "").slice(-4) ?? null;
@@ -195,7 +193,7 @@ export async function saveKidItem(formData: FormData): Promise<Result & { moved?
     // keeps a record. Only one with nobody set yet, or a bank account, moves here.
     const bank = item.type === "Checking" || item.type === "Savings";
     if (item.kidId && !bank) {
-      return { error: item.type === "529" ? "Use the transfer for a 529." : `This legally belongs to ${childName}, so it can't move to another child.` };
+      return { error: isChildOwned(item.type) && item.type !== "ABLE Account" ? `This legally belongs to ${childName}, so it can't move to another child.` : "Use Transfer to another child for this." };
     }
     const kidId = orNull(formData, "kidId");
     patch.kid_id = kidId;
@@ -207,19 +205,22 @@ export async function saveKidItem(formData: FormData): Promise<Result & { moved?
   }
 
   const details: string[] = [];
-  const oldDetail = { institution: item.institution, accountNumber: lastFour(item.accountNumber), successorOwner: item.successorOwner };
+  const oldDetail = { institution: item.institution, accountNumber: lastFour(item.accountNumber) };
   for (const { field, column, label } of DETAIL_FIELDS) {
     if (!formData.has(field)) continue;
     const v = orNull(formData, field);
     patch[column] = v;
-    if (oldDetail[field] && oldDetail[field] !== v) details.push(`${label}: ${oldDetail[field]} to ${v ?? "not set"}`);
+    if (oldDetail[field] && oldDetail[field] !== v) details.push(`${label ?? institutionLabelFor(item.type)}: ${oldDetail[field]} to ${v ?? "not set"}`);
   }
 
-  // Only a UTMA has these, so an account retyped away from one drops them.
-  if ((patch.subtype ?? item.type) === "UTMA") {
-    const utma = parseUtma(text(formData, "utmaState"), text(formData, "utmaAge"));
+  // Only a UTMA has a state; a UTMA or custodial Roth IRA has an age. An account
+  // retyped away from them drops what it no longer has.
+  const typeNow = (patch.subtype as string | undefined) ?? item.type;
+  if (hasHandOverAge(typeNow)) {
+    const utma = parseUtma(typeNow === "UTMA" ? text(formData, "utmaState") : "", text(formData, "utmaAge"));
     if (utma.error) return { error: utma.error };
-    if (formData.has("utmaState")) {
+    if (typeNow !== "UTMA" && item.utmaState) patch.utma_state = null;
+    if (typeNow === "UTMA" && formData.has("utmaState")) {
       patch.utma_state = utma.state;
       if (item.utmaState && item.utmaState !== utma.state) details.push(`State: ${utmaStateName(item.utmaState)} to ${utmaStateName(utma.state) ?? "not set"}`);
     }
@@ -227,7 +228,7 @@ export async function saveKidItem(formData: FormData): Promise<Result & { moved?
       patch.utma_handover_age = utma.age;
       if (item.utmaAge != null && item.utmaAge !== utma.age) details.push(`Age to transfer: ${item.utmaAge} to ${utma.age ?? "not set"}`);
     }
-  } else if (item.type === "UTMA") {
+  } else if (hasHandOverAge(item.type)) {
     patch.utma_state = null;
     patch.utma_handover_age = null;
   }
@@ -248,16 +249,28 @@ export async function saveKidItem(formData: FormData): Promise<Result & { moved?
 
   if ((transferring || stopping || handingOver) && date > today()) return { error: "Pick a date that isn't in the future." };
   if (transferring) {
-    if (!allowed.changeBeneficiary) return { error: "Only a 529 can change beneficiary." };
+    if (!allowed.changeBeneficiary) return { error: "Only a 529, Coverdell ESA or ABLE account can change beneficiary." };
+    if (part && item.type !== "529") return { error: "Only a 529 can move part of its money. This changes beneficiary as a whole." };
     if (toKid === item.kidId) return { error: `It's already for ${childName}.` };
     if (toKid === "__new" && !newKidName) return { error: "Enter their name." };
     // No longer tracked, so they don't need a strip of their own here.
     if (toKid === "__new" && !wholeGone && !monthFirst(text(formData, "newKidBorn"))) return { error: "Enter the month and year they were born." };
+    // 530(d)(6): a Coverdell keeps its tax status only for a new beneficiary under 30.
+    if (item.type === "Coverdell ESA") {
+      let born = toKid === "__new" ? monthFirst(text(formData, "newKidBorn")) : null;
+      if (toKid !== "__new") {
+        const { data: to, error: toError } = await supabase.from("kids").select("birth_month").eq("id", toKid).eq("household_id", household.id).maybeSingle();
+        if (toError) return saveFailed(toError);
+        born = to?.birth_month ?? null;
+      }
+      if (!born) return { error: "Enter the month and year they were born. A Coverdell can only go to someone under 30." };
+      if (monthAtAge(born, 30) <= date) return { error: "A Coverdell can only go to someone under 30, or it's taxed." };
+    }
     if (part && amountCents <= 0) return { error: "Enter an amount." };
     if (part && amountCents > item.balanceCents) return { error: "That's more than this 529 holds." };
   }
   if (stopping && !allowed.close) {
-    return { error: item.type === "UTMA" || item.type === "Trump Account" ? `This is ${childName}'s money, so it can only stop at $0.` : "This account can't be closed." };
+    return { error: isChildOwned(item.type) ? `This is ${childName}'s money, so it can only stop at $0.` : "This account can't be closed." };
   }
   if (handingOver && (!allowed.handOver || transferring)) return { error: "It can't be transferred yet." };
   if (stopping && !wholeGone && item.balanceCents - amountCents > 0 && !endNote) {

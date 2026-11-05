@@ -5,7 +5,9 @@ import { useMemo, useState, useTransition } from "react";
 import { ModalShell } from "@/components/modal-shell";
 import { centsToGroupedDisplay, displayToCents } from "@/lib/money";
 import type { AccountData } from "./types";
+import { reorderAccounts, reorderBuckets } from "./actions";
 import { clearMonthEndCheck, saveMonthEndValue } from "./month-end-actions";
+import { GripHandle, usePointerReorder } from "./shared-ui";
 import { CloseChangesNotice, type CloseChangesData } from "./close-changes";
 
 // Month-end update: one list of every balance Victor checks against a
@@ -86,6 +88,10 @@ const SECTIONS: { label: string; match: (a: AccountData) => boolean }[] = [
   { label: "Kids Funding", match: (a) => a.isKidsAccount },
 ];
 
+const BUCKET_SCOPE = "buckets-of-";
+// A fingertip-sized grab area on the phone; the mouse needs no more than the icon.
+const GRIP_TARGET = "max-sm:-my-1 max-sm:p-2 sm:mt-0.5";
+
 const GRID =
   "grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)_2rem] items-center gap-x-2 sm:grid-cols-[minmax(0,1fr)_6.5rem_8rem_6.5rem_2rem]";
 
@@ -131,29 +137,78 @@ export function MonthEndUpdateModal({
   }, [checks, month]);
   const isDone = (key: string) => tickOverride[`${month}|${key}`] ?? serverTicks.has(key);
 
+  // Rows just dragged, shown at once while the save runs. A scope is a section
+  // label (its accounts) or BUCKET_SCOPE + an account id (that account's buckets).
+  const [order, setOrder] = useState<Record<string, string[]>>({});
+  const inOrder = <T,>(scope: string, list: T[], idOf: (t: T) => string): T[] => {
+    const o = order[scope];
+    return o ? [...list].sort((a, b) => o.indexOf(idOf(a)) - o.indexOf(idOf(b))) : list;
+  };
+
   const sections = SECTIONS.map((sec) => ({
     label: sec.label,
-    groups: accounts
-      .filter((a) => a.active && sec.match(a))
-      .map((a): Group => ({ account: a, items: itemsOf(a) })),
+    groups: inOrder(sec.label, accounts.filter((a) => a.active && sec.match(a)), (a) => a.id).map(
+      (a): Group => ({
+        account: a,
+        items: inOrder(BUCKET_SCOPE + a.id, itemsOf(a), (i) => i.bucketId ?? i.accountId),
+      }),
+    ),
   })).filter((s) => s.groups.length > 0);
+
+  // This is the same saved order the Accounts board uses. It's worked out on the
+  // full list — rows the filter hides, inactive accounts, closed buckets —
+  // so moving what's visible never reshuffles what isn't.
+  const reorder = (fromId: string, toId: string, scope?: string) => {
+    if (!scope) return;
+    const accountId = scope.startsWith(BUCKET_SCOPE) ? scope.slice(BUCKET_SCOPE.length) : null;
+    const section = SECTIONS.find((sec) => sec.label === scope);
+    const ids = accountId
+      ? inOrder(scope, accounts.find((a) => a.id === accountId)?.buckets ?? [], (b) => b.id).map((b) => b.id)
+      : inOrder(scope, accounts.filter((a) => section?.match(a)), (a) => a.id).map((a) => a.id);
+    const from = ids.indexOf(fromId);
+    const to = ids.indexOf(toId);
+    if (from === -1 || to === -1) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    setOrder((o) => ({ ...o, [scope]: ids }));
+    setError(null);
+    const fd = new FormData();
+    fd.set("orderedIds", JSON.stringify(ids));
+    startTransition(async () => {
+      const res = await (accountId ? reorderBuckets(fd) : reorderAccounts(fd));
+      if (res?.error) {
+        setError(res.error);
+        setOrder((o) => {
+          const rest = { ...o };
+          delete rest[scope];
+          return rest;
+        });
+      }
+    });
+  };
+  const { dragOverId, startDrag } = usePointerReorder("month-end", reorder);
+  const dropRing = (id: string) => (dragOverId === id ? "outline outline-2 -outline-offset-2 outline-brand" : "");
 
   const allItems = sections.flatMap((s) => s.groups.flatMap((g) => g.items));
   const doneCount = allItems.filter((i) => isDone(i.key)).length;
   // Folded bucketed accounts, per month. Every one starts folded (Victor,
   // 2026-10-31); after that only clicking the name changes it, so ticking the
-  // last bucket never folds rows out from under the cursor.
+  // last bucket never folds rows out from under the cursor. Showing only what's
+  // left keeps its own folds and starts open, since a folded account would hide
+  // the very rows being looked for; the normal view's folds wait for its return.
   const [collapsed, setCollapsed] = useState<Record<string, Set<string>>>({});
-  if (!collapsed[month]) {
+  const foldKey = hideDone ? `${month}|remaining` : month;
+  if (!collapsed[foldKey]) {
     const seed = new Set(
-      sections
-        .flatMap((s) => s.groups)
-        .filter((g) => g.account.buckets.length > 0)
-        .map((g) => g.account.id),
+      hideDone
+        ? []
+        : sections
+            .flatMap((s) => s.groups)
+            .filter((g) => g.account.buckets.length > 0)
+            .map((g) => g.account.id),
     );
-    setCollapsed((c) => ({ ...c, [month]: seed }));
+    setCollapsed((c) => ({ ...c, [foldKey]: seed }));
   }
-  const isCollapsed = (id: string) => collapsed[month]?.has(id) ?? false;
+  const isCollapsed = (id: string) => collapsed[foldKey]?.has(id) ?? false;
   // This month's moves per row, so a change nobody typed shows its cause.
   const movesOf = (i: Item) =>
     moves.filter(
@@ -163,10 +218,10 @@ export function MonthEndUpdateModal({
     );
   const toggleGroup = (id: string) =>
     setCollapsed((c) => {
-      const n = new Set(c[month]);
+      const n = new Set(c[foldKey]);
       if (n.has(id)) n.delete(id);
       else n.add(id);
-      return { ...c, [month]: n };
+      return { ...c, [foldKey]: n };
     });
 
   // The month's recorded value: the live balance for this month, the snapshot
@@ -178,6 +233,19 @@ export function MonthEndUpdateModal({
     if (t != null && t.trim() !== "") return displayToCents(t);
     return baseCents(i);
   };
+
+  const itemsWhere = (kids: boolean) =>
+    sections.filter((s) => (s.label === "Kids Funding") === kids).flatMap((s) => s.groups.flatMap((g) => g.items));
+  const totals = [
+    { label: "Total", note: "without Kids Funding", items: itemsWhere(false) },
+    { label: "Kids Funding", note: null, items: itemsWhere(true) },
+  ]
+    .filter((t) => t.items.length > 0)
+    .map((t) => ({
+      ...t,
+      prev: t.items.reduce((sum, i) => sum + (i.balancesByMonth[compareMonth] ?? 0), 0),
+      next: t.items.reduce((sum, i) => sum + (shownCents(i) ?? 0), 0),
+    }));
 
   const save = (i: Item, raw: string, tick = false) => {
     const rowKey = `${month}|${i.key}`;
@@ -261,9 +329,6 @@ export function MonthEndUpdateModal({
               {monthName(m, "long")}
             </button>
           ))}
-          <button type="button" aria-pressed={hideDone} onClick={() => setHideDone((h) => !h)} className={chip(hideDone)}>
-            {hideDone ? "Show all" : "Hide done"}
-          </button>
         </>
       }
     >
@@ -275,10 +340,16 @@ export function MonthEndUpdateModal({
         ) : null}
         {/* Progress */}
         <div className="mb-3">
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="font-semibold">
-              {doneCount} of {allItems.length} done
-            </span>
+          <div className="flex items-center justify-between gap-2 text-sm">
+            {hideDone || doneCount < allItems.length ? (
+              <button type="button" aria-pressed={hideDone} onClick={() => setHideDone((h) => !h)} className={chip(hideDone)}>
+                {doneCount} of {allItems.length} done · {hideDone ? "Show all" : `Show ${allItems.length - doneCount} left`}
+              </button>
+            ) : (
+              <span className="font-semibold">
+                {doneCount} of {allItems.length} done
+              </span>
+            )}
             <span className="text-xs font-medium">
               {monthName(compareMonth)} → {monthName(month)}
             </span>
@@ -307,6 +378,23 @@ export function MonthEndUpdateModal({
           <span>Done</span>
         </div>
 
+        {/* Every row counts even when the filter hides it, and it follows what's
+            being typed. Kids Funding gets its own line, the way it stays out of
+            Current Assets. */}
+        <div className="border-b border-line py-1">
+          {totals.map((t) => (
+            <div key={t.label} className={`${GRID} gap-y-1 px-2 py-1`}>
+              <div className="col-span-4 min-w-0 pl-2 sm:col-span-1">
+                <span className="text-sm font-bold">{t.label}</span> {t.note ? <span className="text-xs">{t.note}</span> : null}
+              </div>
+              <span className="text-center text-sm font-semibold tabular-nums">${money(t.prev)}</span>
+              <span className="text-center text-sm font-bold tabular-nums">${money(t.next)}</span>
+              <Change cents={t.next - t.prev} bold />
+              <span />
+            </div>
+          ))}
+        </div>
+
         {sections.map((sec) => {
           const groups = sec.groups
             .map((g) => ({ ...g, visible: hideDone ? g.items.filter((i) => !isDone(i.key)) : g.items }))
@@ -329,7 +417,7 @@ export function MonthEndUpdateModal({
                   const allDone = doneN === g.items.length;
                   const shut = bucketed && isCollapsed(g.account.id);
                   return (
-                    <li key={g.account.id} className="px-2 py-1">
+                    <li key={g.account.id} data-drop-key={`month-end:${sec.label}:${g.account.id}`} className={`px-2 py-1 ${dropRing(g.account.id)}`}>
                       {bucketed ? (
                         // The account's grand total, as the group's header. A click anywhere
                         // on the row folds its buckets; folded, it still says how many are
@@ -338,6 +426,8 @@ export function MonthEndUpdateModal({
                           onClick={() => toggleGroup(g.account.id)}
                           className={`${GRID} cursor-pointer gap-y-1 rounded-md bg-[#e8efe6] py-1.5 shadow-[inset_4px_0_0_var(--viz-savings)] transition hover:bg-sky-50 dark:bg-[#243029] dark:hover:bg-sky-950/40`}
                         >
+                          <div className="col-span-4 flex min-w-0 items-center gap-1 pl-2 sm:col-span-1">
+                          {sec.groups.length > 1 ? <GripHandle onGrab={() => startDrag(g.account.id, sec.label)} className={GRIP_TARGET} /> : null}
                           <button
                             type="button"
                             aria-expanded={!shut}
@@ -345,7 +435,7 @@ export function MonthEndUpdateModal({
                               e.stopPropagation();
                               toggleGroup(g.account.id);
                             }}
-                            className="col-span-4 flex min-h-8 min-w-0 items-center gap-1.5 rounded-md pl-2.5 text-left sm:col-span-1"
+                            className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md text-left"
                           >
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 transition-transform ${shut ? "-rotate-90" : ""}`}>
                               <path d="M6 9l6 6 6-6" />
@@ -357,6 +447,7 @@ export function MonthEndUpdateModal({
                               </span>
                             ) : null}
                           </button>
+                          </div>
                           <span className="text-center text-sm font-semibold tabular-nums">${money(prevTotal)}</span>
                           <span className="text-center text-sm font-bold tabular-nums">${money(newTotal)}</span>
                           <Change cents={newTotal - prevTotal} bold />
@@ -373,8 +464,18 @@ export function MonthEndUpdateModal({
                             const done = isDone(i.key);
                             const base = baseCents(i);
                             return (
-                              <div key={i.key} className={`${GRID} gap-y-1 py-2 ${bucketed || idx > 0 ? "border-t border-line/70" : ""}`}>
-                                <div className={`col-span-4 min-w-0 sm:col-span-1 ${bucketed ? "pl-7" : "pl-2.5"}`}>
+                              <div
+                                key={i.key}
+                                data-drop-key={i.bucketId ? `month-end:${BUCKET_SCOPE}${i.accountId}:${i.bucketId}` : undefined}
+                                className={`${GRID} gap-y-1 py-2 ${bucketed || idx > 0 ? "border-t border-line/70" : ""} ${i.bucketId ? dropRing(i.bucketId) : ""}`}
+                              >
+                                <div className={`col-span-4 flex min-w-0 items-start gap-1 sm:col-span-1 ${bucketed ? "pl-6" : "pl-2"}`}>
+                                  {bucketed ? (
+                                    g.items.length > 1 ? <GripHandle onGrab={() => startDrag(i.bucketId as string, BUCKET_SCOPE + i.accountId)} size="sm" className={GRIP_TARGET} /> : null
+                                  ) : sec.groups.length > 1 ? (
+                                    <GripHandle onGrab={() => startDrag(i.accountId, sec.label)} className={GRIP_TARGET} />
+                                  ) : null}
+                                  <div className="min-w-0 flex-1">
                                   <span className="block truncate text-sm font-semibold">{i.name}</span>
                                   {/* Banking accounts move all month as normal, so only the
                                       other sections explain a change with their moves. */}
@@ -389,6 +490,7 @@ export function MonthEndUpdateModal({
                                           · {monthName(m.date.slice(0, 7) + "-01")} {Number(m.date.slice(8, 10))}
                                         </span>
                                       ))}
+                                  </div>
                                 </div>
                                 <span className="text-center text-sm tabular-nums">{prev == null ? "—" : `$${money(prev)}`}</span>
                                 <input

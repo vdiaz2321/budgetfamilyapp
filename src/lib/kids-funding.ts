@@ -8,18 +8,38 @@
 // Sources: IRS Notice 2025-68 (Trump Accounts), Fidelity's 529 and UTMA pages,
 // Fla. Stat. 710.123 and 710.103 (UTMA). The Trump Account rules are still being
 // finalised.
+//
+// Added 2026-11-05, each rule checked against:
+//   Coverdell ESA  IRS Pub. 970 ch. 7; 26 U.S.C. 530(d)(6) and 529(e)(2)
+//   ABLE account   26 U.S.C. 529A; 26 CFR 1.529A-2 and 1.529A-3; IRS "ABLE
+//                  accounts" page; SSA POMS SI 01130.740
+//   Custodial Roth IRA  IRS Pub. 590-A; IRS 2026 limits (Notice 2025-67);
+//                  Fidelity "Roth IRA for Kids", Schwab Custodial IRA
+// No UGMA type: South Carolina, the last state on it, replaced it with the UTMA
+// in 2022 (S.C. Act 128), so an old UGMA account is entered as a UTMA.
 
-export type KidAccountType = "529" | "UTMA" | "Trump Account" | "Checking" | "Savings";
+export type KidAccountType =
+  | "529"
+  | "Coverdell ESA"
+  | "UTMA"
+  | "Custodial Roth IRA"
+  | "Trump Account"
+  | "ABLE Account"
+  | "Checking"
+  | "Savings";
 
 export const KID_ACCOUNT_TYPES: {
   type: KidAccountType;
   kind: "investment" | "checking" | "savings_bucket";
-  tax: "education" | "taxable" | "deferred";
-  retirementKind: "trump_account" | null;
+  tax: "education" | "taxable" | "deferred" | "free";
+  retirementKind: "trump_account" | "roth_ira" | null;
 }[] = [
   { type: "529", kind: "investment", tax: "education", retirementKind: null },
+  { type: "Coverdell ESA", kind: "investment", tax: "education", retirementKind: null },
   { type: "UTMA", kind: "investment", tax: "taxable", retirementKind: null },
+  { type: "Custodial Roth IRA", kind: "investment", tax: "free", retirementKind: "roth_ira" },
   { type: "Trump Account", kind: "investment", tax: "deferred", retirementKind: "trump_account" },
+  { type: "ABLE Account", kind: "investment", tax: "free", retirementKind: null },
   { type: "Checking", kind: "checking", tax: "taxable", retirementKind: null },
   { type: "Savings", kind: "savings_bucket", tax: "taxable", retirementKind: null },
 ];
@@ -27,6 +47,49 @@ export const KID_ACCOUNT_TYPES: {
 // Per child, per year, from everyone except the government and charities.
 // Indexed to inflation after 2027, so this needs revisiting then.
 export const TRUMP_ANNUAL_LIMIT_CENTS = 500000;
+
+/**
+ * Each type's yearly cap, for the "$x of $y this year" line. Dollar figures are
+ * for 2026 and need revisiting each year.
+ *   Coverdell: $2,000 per child across all their Coverdells (Pub. 970).
+ *   Custodial Roth: the 2026 IRA limit, $7,500, and never more than the child
+ *     earned that year (Pub. 590-A; Notice 2025-67).
+ *   ABLE: the gift-tax exclusion, $20,000 for 2026 (IRS ABLE page).
+ */
+export const KID_ANNUAL_LIMIT_CENTS: Partial<Record<KidAccountType, number>> = {
+  "Coverdell ESA": 200000,
+  "Custodial Roth IRA": 750000,
+  "Trump Account": TRUMP_ANNUAL_LIMIT_CENTS,
+  "ABLE Account": 2000000,
+};
+
+/** The child's own money by law: it can't go to another child, and it closes only at $0. */
+const CHILD_OWNED = new Set(["UTMA", "Custodial Roth IRA", "Trump Account", "ABLE Account"]);
+export function isChildOwned(type: string | null): boolean {
+  return CHILD_OWNED.has(type ?? "");
+}
+
+/**
+ * Types whose beneficiary can change, each to a narrower set of people:
+ * a 529 to a family member; a Coverdell to a family member under 30
+ * (530(d)(6)); an ABLE account to a sibling who is ABLE-eligible too
+ * (1.529A-2). Kept in step with public.kids_change_beneficiary.
+ */
+const BENEFICIARY_CHANGES = new Set(["529", "Coverdell ESA", "ABLE Account"]);
+
+/** The types that carry an age to transfer, set by state law or the custodial agreement. */
+export function hasHandOverAge(type: string | null): boolean {
+  return type === "UTMA" || type === "Custodial Roth IRA";
+}
+
+/**
+ * A Coverdell must be paid out within 30 days of its child turning 30, and
+ * takes no new money after 18 (Pub. 970). Null without a birth month.
+ */
+export function coverdellDates(birthMonth: string | null): { lastContribution: string; useBy: string } | null {
+  if (!birthMonth) return null;
+  return { lastContribution: monthAtAge(birthMonth, 18), useBy: monthAtAge(birthMonth, 30) };
+}
 
 const TYPE_ORDER: string[] = KID_ACCOUNT_TYPES.map((t) => t.type);
 
@@ -36,14 +99,15 @@ export function kidTypeRank(type: string | null): number {
   return at === -1 ? TYPE_ORDER.length : at;
 }
 
+/** Who holds it: an ABLE account sits with a state program, another investment at a brokerage, anything else at a bank. */
+export function institutionLabelFor(type: string | null): "Brokerage" | "Bank" | "Program" {
+  if (type === "ABLE Account") return "Program";
+  return KID_ACCOUNT_TYPES.find((t) => t.type === type)?.kind === "investment" ? "Brokerage" : "Bank";
+}
+
 export function kidTypeOf(subtype: string | null, retirementKind: string | null): string | null {
   if (retirementKind === "trump_account") return "Trump Account";
   return subtype?.trim() || null;
-}
-
-/** The backup for whoever runs it, for the types that have one. */
-export function successorLabelFor(type: string | null): string | null {
-  return type === "529" || type === "UTMA" || type === "Trump Account" ? "Takes over if you can't" : null;
 }
 
 /**
@@ -127,11 +191,32 @@ export const US_STATES: { code: string; name: string }[] = [
   ["WY", "Wyoming"],
 ].map(([code, name]) => ({ code, name }));
 
-// The age for money given directly, only for states whose law was read: Fla. Stat.
-// 710.123, Tex. Prop. Code 141.021, Cal. Prob. Code 3920.5, O.C.G.A. 44-5-130,
-// N.Y. EPTL 7-6.20, N.C.G.S. 33A-20, C.R.S. 11-50-121, T.C.A. 35-7-121. Published
-// state tables disagree, so any other state starts with no age, never a guess.
-const UTMA_GIFT_AGE: Record<string, number> = { CA: 18, CO: 21, FL: 21, GA: 21, NC: 21, NY: 21, TN: 21, TX: 21 };
+// The age a UTMA hands over for money given directly (a gift, or by will or
+// trust), from each state's termination section, read 2026-11-05. Where a state
+// lets the giver pick a later age (up to 21, 25 or, in Wyoming, 30), this is the
+// age when none was picked; the account's own age always wins.
+//   21: AL 35-5A-21 · AK 13.46.190 · AZ 14-7670 (2025's HB 2659 would make it
+//       25; not enacted as of this reading) · AR 9-26-220 · CO 11-50-121 ·
+//       CT 45a-559e · DE 12-4520 · FL 710.123 · GA 44-5-130 · HI 553A-20 ·
+//       ID 68-820 · IL 760 ILCS 20/21 · IN 30-2-8.5-35 · IA 565B.20 ·
+//       KS 38-1721 · MD Est. & Trusts 13-320 · MA 201A §20 · MN 527.40 ·
+//       MS 91-20-41 · MO 404.051 · MT 72-26-803 · NE 43-2721 · NH 463-A:20 ·
+//       NJ 46:38A-52 · NM 46-7-31 · NY EPTL 7-6.20 · NC 33A-20 · ND 47-24.1-20 ·
+//       OH 5814.09 · OR 126.872 · PA 20 Pa.C.S. 5320 · RI 18-7-21 ·
+//       SC 63-5-700 (UTMA since 2022) · TN 35-7-121 · TX Prop. 141.021 ·
+//       UT 75A-8-121 · VT 14-3230 (UTMA since 2015) · WA 11.114.200 ·
+//       WV 36-7-20 · WI 54.892 · WY 34-13-133
+//   18: CA Prob. 3920.5 · DC 21-320 · KY 385.202 · ME 33-1671 · MI 554.546 ·
+//       NV 167.095 · OK 58-1221 · SD 55-10A-22 · VA 64.2-1919
+//   22: LA R.S. 9:770 (Act 60 of 2023)
+const UTMA_GIFT_AGE: Record<string, number> = {
+  AL: 21, AK: 21, AZ: 21, AR: 21, CA: 18, CO: 21, CT: 21, DE: 21, DC: 18, FL: 21,
+  GA: 21, HI: 21, ID: 21, IL: 21, IN: 21, IA: 21, KS: 21, KY: 18, LA: 22, ME: 18,
+  MD: 21, MA: 21, MI: 18, MN: 21, MS: 21, MO: 21, MT: 21, NE: 21, NV: 18, NH: 21,
+  NJ: 21, NM: 21, NY: 21, NC: 21, ND: 21, OH: 21, OK: 18, OR: 21, PA: 21, RI: 21,
+  SC: 21, SD: 18, TN: 21, TX: 21, UT: 21, VT: 21, VA: 18, WA: 21, WV: 21, WI: 21,
+  WY: 21,
+};
 
 export function utmaGiftAge(state: string | null): number | null {
   return (state && UTMA_GIFT_AGE[state]) || null;
@@ -189,7 +274,7 @@ export function trumpOpensOn(birthMonth: string): string {
  */
 export function handOverFrom(type: string | null, birthMonth: string | null, utmaAge: number | null): string | null {
   if (!birthMonth) return null;
-  if (type === "UTMA") return utmaAge == null ? null : monthAtAge(birthMonth, utmaAge);
+  if (hasHandOverAge(type)) return utmaAge == null ? null : monthAtAge(birthMonth, utmaAge);
   if (type === "Trump Account") return trumpOpensOn(birthMonth);
   return null;
 }
@@ -213,14 +298,14 @@ export function kidActionsFor(input: {
   const { type, balanceCents, birthMonth, utmaAge, today } = input;
   const bank = type === "Checking" || type === "Savings";
   const legalDate = handOverFrom(type, birthMonth, utmaAge);
-  const dated = type === "UTMA" || type === "Trump Account";
+  const dated = hasHandOverAge(type) || type === "Trump Account";
   const opened = dated && legalDate != null && legalDate <= today;
   return {
-    changeBeneficiary: type === "529",
+    changeBeneficiary: BENEFICIARY_CHANGES.has(type ?? ""),
     moveTo529: type === "529" && balanceCents > 0,
-    // A UTMA or Trump Account is the child's money: it can only end at $0, once
-    // it's been spent on them or rolled over.
-    close: type === "529" || bank || ((type === "UTMA" || type === "Trump Account") && balanceCents === 0),
+    // The child's own money can only end at $0, once it's been spent on them or
+    // rolled over. A 529 or Coverdell stays the parent's to close.
+    close: type === "529" || type === "Coverdell ESA" || bank || (isChildOwned(type) && balanceCents === 0),
     handOver: bank || opened,
     handOverOpensOn: dated && !opened ? legalDate : null,
   };
@@ -229,8 +314,9 @@ export function kidActionsFor(input: {
 /**
  * Why money may not leave a kids' account this way, or null if it may.
  *
- * A UTMA and a Trump Account legally belong to their child, so neither can move
- * to another child's account. A Trump Account also can't be withdrawn at all
+ * The child's own money (UTMA, custodial Roth IRA, Trump Account, ABLE account)
+ * can't move to another child's account; an ABLE account passes only by a
+ * beneficiary change. A Trump Account also can't be withdrawn at all
  * until the year its child turns 18.
  */
 export function kidMoveBlock(input: {
@@ -251,8 +337,10 @@ export function kidMoveBlock(input: {
         : `A Trump Account can't be withdrawn or moved until the year its child turns 18.`;
     }
   }
-  if ((fromType === "UTMA" || fromType === "Trump Account") && toKidId && toKidId !== fromKidId) {
-    return `A ${fromType === "UTMA" ? "UTMA" : "Trump Account"} legally belongs to ${who}, so it can't move to another child.`;
+  if (isChildOwned(fromType) && toKidId && toKidId !== fromKidId) {
+    return fromType === "ABLE Account"
+      ? `${who}'s ABLE account can only pass to a sibling who qualifies, by changing its beneficiary.`
+      : `A ${fromType} legally belongs to ${who}, so it can't move to another child.`;
   }
   return null;
 }

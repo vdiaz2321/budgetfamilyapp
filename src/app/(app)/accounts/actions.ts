@@ -14,7 +14,7 @@ import { adjustDebtBalance } from "@/lib/debts";
 import { unwrap } from "@/lib/supabase-result";
 import { isRetirementKind } from "@/lib/retirement-kind";
 import { kidMoveBlockFor } from "@/lib/kids-funding-load";
-import { parseUtma } from "@/lib/kids-funding";
+import { hasHandOverAge, parseUtma } from "@/lib/kids-funding";
 import { deleteTransaction, updateTransactionAmount } from "@/app/(app)/budget/actions";
 
 // Every account type presented in the Accounts add flow. Rewards cards remain
@@ -265,6 +265,17 @@ export async function addAccount(formData: FormData) {
       return { error: `${holder ?? "This child"} already has a Trump Account. The IRS allows one per child.`, id: null };
     }
   }
+  // 26 U.S.C. 529A(b)(1)(B): one ABLE account per person.
+  if (kidId && subtype === "ABLE Account") {
+    const [{ count: accountCount, error: accountError }, { count: bucketCount, error: bucketError }] = await Promise.all([
+      supabase.from("accounts").select("id", { count: "exact", head: true }).eq("household_id", householdId).eq("kid_id", kidId).eq("subtype", "ABLE Account").is("date_closed", null),
+      supabase.from("buckets").select("id", { count: "exact", head: true }).eq("household_id", householdId).eq("kid_id", kidId).eq("subtype", "ABLE Account").is("date_closed", null),
+    ]);
+    if (accountError || bucketError) return { error: "Couldn't save that account — please try again.", id: null };
+    if ((accountCount ?? 0) + (bucketCount ?? 0) > 0) {
+      return { error: `${holder ?? "This child"} already has an ABLE account. The law allows one per person.`, id: null };
+    }
+  }
 
   const row: Record<string, unknown> = {
     household_id: householdId,
@@ -287,9 +298,9 @@ export async function addAccount(formData: FormData) {
   if (isKidsAccount) {
     row.kid_id = kidId;
     row.controlled_by = String(formData.get("controlledBy") ?? "").trim() || null;
-    row.successor_owner = String(formData.get("successorOwner") ?? "").trim() || null;
-    if (subtype === "UTMA") {
-      const utma = parseUtma(String(formData.get("utmaState") ?? ""), String(formData.get("utmaAge") ?? ""));
+    if (hasHandOverAge(subtype)) {
+      // A custodial Roth IRA has an age but no state: its custodial agreement sets it.
+      const utma = parseUtma(subtype === "UTMA" ? String(formData.get("utmaState") ?? "") : "", String(formData.get("utmaAge") ?? ""));
       if (utma.error) return { error: utma.error, id: null };
       row.utma_state = utma.state;
       row.utma_handover_age = utma.age;
