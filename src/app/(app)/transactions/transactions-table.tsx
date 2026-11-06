@@ -17,6 +17,7 @@ import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/
 import { usePrefetchTripTagging } from "../budget/trip-tagging-cache";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
+import { CardPaymentsDetail } from "@/components/card-payments-ledger";
 import { splitTotalCents } from "@/lib/split-parts";
 import type { TravelCells } from "./travel-cells";
 
@@ -128,9 +129,13 @@ export function TransactionsTable({
     setModal(target);
   };
   const [transferEdit, setTransferEdit] = useState<TxData | null>(null);
+  // A card payment opens the same popup as Accounts' Credit Card Payments
+  // table — it moves both the bank and the card, which the normal edit
+  // modal can't do.
+  const [cardPaymentEdit, setCardPaymentEdit] = useState<TxData | null>(null);
   useScrollLock(!!modal || !!transferEdit);
   const [importOpen, setImportOpen] = useState(false);
-  // Move Money — the same popup as Accounts. On a phone it's in the ⋯ menu.
+  // Move Money — the same popup as Accounts. On a phone it's in the More sheet.
   const [moveOpen, setMoveOpen] = useState(false);
   useRegisterMobilePageActions([{ label: "Move Money", onSelect: () => setMoveOpen(true) }]);
   const [query, setQuery] = useState("");
@@ -722,7 +727,8 @@ export function TransactionsTable({
                     onSelect={() => toggleSelected(t.id)}
                     onEdit={() => {
                       if (t.isTransfer || t.isInvestmentTransfer) setTransferEdit(t);
-                      else if (!t.isCardPayment && !t.isInvestmentTransfer) openModal(t);
+                      else if (t.isCardPayment) setCardPaymentEdit(t);
+                      else openModal(t);
                     }}
                   />
                 ))}
@@ -754,7 +760,8 @@ export function TransactionsTable({
                 onTap={() => {
                   if (selectMode) toggleSelected(t.id);
                   else if (t.isTransfer || t.isInvestmentTransfer) setTransferEdit(t);
-                  else if (!t.isCardPayment && !t.isInvestmentTransfer) openModal(t);
+                  else if (t.isCardPayment) setCardPaymentEdit(t);
+                  else openModal(t);
                 }}
               />
             ))}
@@ -779,6 +786,31 @@ export function TransactionsTable({
             />
           </div>
         </div>
+      ) : null}
+
+      {cardPaymentEdit ? (
+        <CardPaymentsDetail
+          cardName={cardPaymentEdit.payee ?? "Card payment"}
+          year={cardPaymentEdit.date.slice(0, 4)}
+          payments={[{
+            id: cardPaymentEdit.id,
+            date: cardPaymentEdit.date,
+            amountCents: cardPaymentEdit.amountCents,
+            cardId: cardPaymentEdit.toAccountId ?? "",
+            reimbursedCents: cardPaymentEdit.reimbursedCents ?? 0,
+            // Same one-minute grace as Accounts: the save that logged it isn't an edit.
+            editedAt: cardPaymentEdit.updatedAt && cardPaymentEdit.createdAt
+              && new Date(cardPaymentEdit.updatedAt).getTime() - new Date(cardPaymentEdit.createdAt).getTime() > 60_000
+              ? cardPaymentEdit.updatedAt
+              : null,
+            createdAt: cardPaymentEdit.createdAt ?? cardPaymentEdit.date,
+            fromAccountId: cardPaymentEdit.accountId,
+            memo: cardPaymentEdit.memo,
+          }]}
+          accountNames={Object.fromEntries(accountName)}
+          currency={currency}
+          onClose={() => setCardPaymentEdit(null)}
+        />
       ) : null}
 
       {transferEdit ? (
@@ -905,6 +937,8 @@ function TxLine({
   const [amountValue, setAmountValue] = useState(shownAmount);
   const [amountPending, startAmountSave] = useTransition();
   const isIncome = tx.kind === "income";
+  // Card payments can't use the inline amount edit; the row still opens
+  // their own payment popup.
   const canEdit = !tx.isCardPayment;
   const splitTotal = splitTotalCents(tx);
 
@@ -942,12 +976,12 @@ function TxLine({
   // that do something else (cleared, amount, delete) stop the click first.
   return (
     <li
-      onClick={selectMode ? onSelect : canEdit ? onEdit : undefined}
-      className={`group grid ${GRID} ${selectMode || canEdit ? "cursor-pointer" : "cursor-default"} select-none items-center px-4 py-2 hover:bg-brand-soft/25 lg:py-2.5 ${
+      onClick={selectMode ? onSelect : onEdit}
+      className={`group grid ${GRID} cursor-pointer select-none items-center px-4 py-2 hover:bg-brand-soft/25 lg:py-2.5 ${
         tx.cleared && !selected ? "opacity-60" : ""
       } ${selected ? "bg-brand-soft/40" : ""}`}
     >
-      <button type="button" disabled={!canEdit} onClick={onEdit} className="text-left text-sm tabular-nums disabled:cursor-default lg:text-[1.125rem]">
+      <button type="button" onClick={onEdit} className="text-left text-sm tabular-nums disabled:cursor-default lg:text-[1.125rem]">
         {tx.date.slice(5, 7)}/{tx.date.slice(8, 10)}/{tx.date.slice(2, 4)}
       </button>
       <span onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} className="flex justify-center">
@@ -1037,7 +1071,7 @@ function TxLine({
           "—"
         )}
       </span>
-      <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
+      <button type="button" onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
         {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
         <span className="truncate text-sm lg:text-[1.125rem]">{tx.subName}</span>
         {/* One purchase split over items shows as one row per item; this
@@ -1048,7 +1082,7 @@ function TxLine({
           </span>
         ) : null}
       </button>
-      <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default lg:text-[1.125rem]">
+      <button type="button" onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default lg:text-[1.125rem]">
         {tx.payee ?? "—"}
       </button>
       <span className="truncate text-xs text-muted lg:text-sm">{accountName}</span>
@@ -1124,7 +1158,6 @@ function TxCard({
   onSelect: () => void;
   onTap: () => void;
 }) {
-  const canEdit = !tx.isCardPayment;
   const isIncome = tx.kind === "income";
   const dateStr = `${tx.date.slice(5, 7)}/${tx.date.slice(8, 10)}`;
 
@@ -1145,7 +1178,7 @@ function TxCard({
 
   // Gated on selectMode only: the left swipe deletes and the right swipe
   // toggles Cleared, and both are available for these rows on desktop.
-  // Tapping to EDIT is still blocked below via `canEdit`.
+  // Tapping opens the row: card payments get their own payment popup.
   const onTouchStart = (e: React.TouchEvent) => {
     if (selectMode) return;
     startX.current = e.touches[0].clientX;
@@ -1232,7 +1265,6 @@ function TxCard({
         ) : null}
         <button
           type="button"
-          disabled={!canEdit && !selectMode}
           onClick={onTap}
           className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition active:bg-brand-soft/25 disabled:cursor-default ${
             tx.cleared ? "opacity-60" : ""

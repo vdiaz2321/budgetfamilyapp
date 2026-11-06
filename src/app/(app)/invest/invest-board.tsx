@@ -555,7 +555,7 @@ export function InvestBoard({
       {/* Header: title + Move Money + hero stats + tabs */}
       <header className="space-y-4">
         {/* Title and its one action share a row. Below md the action lives in
-            the ⋯ menu instead (registered above) — title and button don't fit
+            the More sheet instead (registered above) — title and button don't fit
             one line on a phone, and a button row of its own pushed the numbers
             down. */}
         <div className="flex flex-wrap items-center gap-4">

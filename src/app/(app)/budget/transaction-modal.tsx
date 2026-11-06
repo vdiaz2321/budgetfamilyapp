@@ -679,6 +679,22 @@ function TransactionModalForm({
   const missingPayee = errorFields.has("payee");
   const missingDate = errorFields.has("date");
 
+  // What the edit form held when it opened, so Clear can tell whether
+  // anything else changed. Splits and room shares live in state, not inputs.
+  const formSnapshot = (fd: FormData) =>
+    JSON.stringify([
+      [...fd.entries()].filter(([k, v]) => k !== "cleared" && typeof v === "string"),
+      splits,
+      roomSplitOn,
+      roomShares,
+    ]);
+  const openedSnapshot = useRef<string | null>(null);
+  useEffect(() => {
+    if (formRef.current) openedSnapshot.current = formSnapshot(new FormData(formRef.current));
+    // Taken once, when the form first renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function handleFormAction(fd: FormData) {
     const problems = validate(fd);
     setErrors(problems.messages);
@@ -709,19 +725,19 @@ function TransactionModalForm({
         if (editTx && (splits.length > 1 || isSplitEdit || roomParts)) {
           fd.set("splits", JSON.stringify(roomParts ?? splits.map((sp) => ({ subcategoryId: sp.subId, amountCents: sp.amountCents }))));
           note(await replaceWithSplit(fd));
+        } else if (fd.get("cleared") && formSnapshot(fd) === openedSnapshot.current) {
+          // Clear / Unclear with nothing else touched: just flip the tick.
+          // Running the whole save for it re-did every balance step one by
+          // one and was slow from Germany.
+          const cfd = new FormData();
+          cfd.set("id", editTx!.id);
+          cfd.set("cleared", fd.get("cleared") === "on" ? "true" : "false");
+          await toggleCleared(cfd);
         } else {
           fd.set("subcategoryId", splits[0].subId);
           fd.set("amount", (splits[0].amountCents / 100).toFixed(2));
+          // Carries the Clear / Unclear pick too, in the same call.
           note(await updateTransaction(fd));
-          // The edit's Clear / Unclear: the update leaves Cleared alone, so
-          // set it after. (A split's parts are rewritten with it instead.)
-          const clearedPick = fd.get("cleared");
-          if (clearedPick) {
-            const cfd = new FormData();
-            cfd.set("id", editTx!.id);
-            cfd.set("cleared", clearedPick === "on" ? "true" : "false");
-            await toggleCleared(cfd);
-          }
         }
         if (warnings.length) return setSavedWarning(warnings.join(" "));
         onClose();

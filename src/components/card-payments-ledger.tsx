@@ -18,7 +18,7 @@ const PAYMENT_GRID =
 // was logged — a fix the same day isn't worth flagging, and "edited Oct 7"
 // beside an Oct 7 payment read as a second date (Victor, 2026-11-01). Days
 // are the browser's own.
-function laterEdit(p: CardPayment): string | null {
+export function laterEdit(p: CardPayment): string | null {
   if (!p.editedAt) return null;
   const day = (iso: string) => new Date(iso).toLocaleDateString("en-CA");
   return day(p.editedAt) === day(p.createdAt) ? null : p.editedAt;
@@ -456,8 +456,9 @@ export function CardPaymentsLedger({
   );
 }
 
-/** Every payment made to one card, newest first — date editable, removable. */
-function CardPaymentsDetail({
+/** Every payment made to one card, newest first — date editable, removable.
+ *  Also opened from a card-payment row on Transactions, with that one payment. */
+export function CardPaymentsDetail({
   cardName,
   year,
   payments,

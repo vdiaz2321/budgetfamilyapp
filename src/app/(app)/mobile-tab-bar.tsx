@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { NavPending } from "./nav-pending";
+import { MobilePageActionItems, MobileSettingsItems } from "./mobile-header-menu";
 
 const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
   {
@@ -31,8 +32,8 @@ const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
 
 // Everything the five-slot bar can't fit. Without this these routes were
 // simply unreachable on a phone — the tab bar is the only navigation there,
-// since the sidebar is desktop-only and the header's 3-dot menu is account
-// settings, not navigation.
+// since the sidebar is desktop-only. The sheet also carries the page's own
+// actions and the account settings (theme, account, household, sign out).
 // `phoneHidden`: pages that don't render on a phone (below sm) — the link is
 // left out there too, so it can't lead to a page that only says "use a tablet".
 const MORE_LINKS: { href: string; label: string; icon: React.ReactNode; phoneHidden?: boolean }[] = [
@@ -103,7 +104,7 @@ function Icon({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
+export function MobileTabBar({ badges, userEmail }: { badges?: Record<string, number>; userEmail: string }) {
   const pathname = usePathname();
   const [hidden, setHidden] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -233,8 +234,9 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
         {moreOpen ? (
           <div
             role="menu"
-            className="absolute bottom-full right-1 z-50 mb-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-sidebar shadow-xl"
+            className="absolute bottom-full right-1 z-50 mb-2 max-h-[calc(100dvh-5.5rem-env(safe-area-inset-top))] w-64 overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-sidebar shadow-xl"
           >
+            <MobilePageActionItems onClose={() => setMoreOpen(false)} />
             {MORE_LINKS.map((link) => {
               const active = pathname === link.href || pathname.startsWith(`${link.href}/`);
               const badge = badges?.[link.href];
@@ -258,6 +260,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
                 </Link>
               );
             })}
+            <MobileSettingsItems userEmail={userEmail} onClose={() => setMoreOpen(false)} />
           </div>
         ) : null}
       </div>

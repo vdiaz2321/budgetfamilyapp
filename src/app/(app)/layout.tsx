@@ -1,7 +1,6 @@
 import { Sidebar } from "./sidebar";
 import { SessionInit } from "./session-init";
 import { MobileTabBar } from "./mobile-tab-bar";
-import { MobileHeaderMenu } from "./mobile-header-menu";
 import type { SidebarGroup } from "./sidebar-accounts";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 import { getSessionContext } from "@/lib/auth-context";
@@ -193,19 +192,16 @@ export default async function AppLayout({
         badges={badges}
       />
 
-      {/* Mobile menu — floats above content so it does not reserve a banner
-          row or push every page downward. */}
+      {/* Phone settings live in the tab bar's More sheet — no floating
+          header button over the page. */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="pointer-events-none fixed right-4 top-3 z-[60] md:hidden">
-          <MobileHeaderMenu userEmail={user.email ?? ""} />
-        </header>
 
         <main className="min-w-0 flex-1 px-4 py-6 pb-20 md:px-8 md:py-8 md:pb-8">
           <SessionInit userId={user.id} />
           {children}
         </main>
 
-        <MobileTabBar badges={badges} />
+        <MobileTabBar badges={badges} userEmail={user.email ?? ""} />
       </div>
     </div>
   );

@@ -835,7 +835,7 @@ export function AccountsBoard({
              the only brand-coloured controls.
           3. The period filter — a round pill group pushed to the right,
              so it never reads as more buttons.
-          Below md the tools and actions move into the ⋯ menu (registered
+          Below md the tools and actions move into the More sheet (registered
           above) and only the filter stays in the header. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 className="text-xl font-bold">Accounts</h1>
@@ -1272,6 +1272,28 @@ function monthEarlier(iso: string, day: number): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+/** The card's due date after the next one (Nov 15 → Dec 15). */
+function dueAfter(dueDay: number, dueIso: string, todayIso: string): { iso: string; daysLeft: number } {
+  const [y, m, d] = dueIso.split("-").map(Number);
+  const dayAfter = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  const later = nextDueDate(dueDay, dayAfter);
+  const today = Date.parse(`${todayIso}T00:00:00Z`);
+  return { iso: later.iso, daysLeft: Math.round((Date.parse(`${later.iso}T00:00:00Z`) - today) / 86_400_000) };
+}
+
+/**
+ * A payment made on or after the last due date counts as this cycle's
+ * payment, even when a balance is left — the app has no statement balance,
+ * and what's left is usually new charges due next month (Victor, 2026-11-06).
+ * Returns the next due date to show instead, or null when not paid this cycle.
+ */
+function paidThroughCycle(dueDay: number | null | undefined, todayIso: string | null, lastPaid: string | null) {
+  if (!dueDay || !todayIso || !lastPaid) return null;
+  const nextDue = nextDueDate(dueDay, todayIso);
+  if (lastPaid < monthEarlier(nextDue.iso, dueDay)) return null;
+  return dueAfter(dueDay, nextDue.iso, todayIso);
+}
+
 function CardTile({
   card,
   currency,
@@ -1320,6 +1342,14 @@ function CardTile({
     };
   } else if (!card.paymentDueDay) {
     strip = { text: "No due day set", className: "bg-sky-50 text-foreground dark:bg-sky-950/40" };
+  } else if (lastPaid && paidThroughCycle(card.paymentDueDay, todayIso, lastPaid)) {
+    // Paid since the last due date: this cycle is done, even with a balance
+    // left. Never red — the next due date is a month out.
+    const next = paidThroughCycle(card.paymentDueDay, todayIso, lastPaid)!;
+    strip = {
+      text: `Paid ${formatDueDate(lastPaid)} · Next due ${formatDueDate(next.iso)}`,
+      className: "bg-emerald-50 text-positive dark:bg-emerald-950/30",
+    };
   } else if (due) {
     const soon = due.daysLeft <= DUE_SOON_DAYS;
     const when = due.daysLeft === 0 ? "today" : due.daysLeft === 1 ? "tomorrow" : `in ${due.daysLeft} days`;
@@ -1678,6 +1708,7 @@ function CreditCardListSection({
           cards={localCards.filter((a) => !a.dateClosed)}
           todayIso={todayIso}
           currency={currency}
+          lastPaidOf={(card) => latestPaymentOf(card)?.date ?? null}
           onPick={(card) => {
             setPickingCard(false);
             setPayCardFor(card);
@@ -1714,12 +1745,14 @@ function PickCardModal({
   cards,
   todayIso,
   currency,
+  lastPaidOf,
   onPick,
   onClose,
 }: {
   cards: AccountData[];
   todayIso: string | null;
   currency: string;
+  lastPaidOf: (card: AccountData) => string | null;
   onPick: (card: AccountData) => void;
   onClose: () => void;
 }) {
@@ -1775,6 +1808,15 @@ function PickCardModal({
                   {/* The next due date when the card has a due day; red with
                       the days left inside DUE_SOON_DAYS, as on the card tile. */}
                   {(() => {
+                    const lastPaid = lastPaidOf(a);
+                    const paidNext = paidThroughCycle(a.paymentDueDay, todayIso, lastPaid);
+                    if (paidNext && lastPaid) {
+                      return (
+                        <span className="block text-xs font-semibold text-positive">
+                          Paid {formatDueDate(lastPaid)} · Next due {formatDueDate(paidNext.iso)}
+                        </span>
+                      );
+                    }
                     const d = todayIso && a.paymentDueDay ? nextDueDate(a.paymentDueDay, todayIso) : null;
                     if (!d) return null;
                     const soon = d.daysLeft <= DUE_SOON_DAYS;

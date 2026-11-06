@@ -2,10 +2,10 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
-// Page-level actions shown at the top of the mobile ⋯ menu (MobileHeaderMenu).
+// Page-level actions shown at the top of the mobile tab bar's More sheet (MobilePageActionItems).
 // A page registers them while it's mounted, so on a phone its buttons don't
 // need a header row of their own above the content. Desktop keeps the buttons
-// in the page header; the ⋯ menu is md:hidden.
+// in the page header; the More sheet is md:hidden.
 
 export type MobilePageAction = { label: string; onSelect: () => void };
 

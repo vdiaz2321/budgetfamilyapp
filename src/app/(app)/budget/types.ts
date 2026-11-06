@@ -257,6 +257,11 @@ export type TxData = {
   // Every part of a split purchase shares this id (null on a plain one), and
   // each part carries the whole split so the modal can open it as one.
   splitGroupId?: string | null;
+  // Card payments only — what the Accounts payment popup needs when it is
+  // opened from the Transactions row.
+  reimbursedCents?: number;
+  createdAt?: string;
+  updatedAt?: string;
   splitParts?: { subId: string; amountCents: number; travelCategory?: string | null; bookingRef?: string | null }[];
 };
 

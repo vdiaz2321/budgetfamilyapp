@@ -32,6 +32,9 @@ type TransactionQueryRow = {
   cleared: boolean | null;
   is_withdrawal: boolean | null;
   split_group_id: string | null;
+  reimbursed_cents: number | null;
+  created_at: string;
+  updated_at: string;
 };
 
 // A `YYYY-MM-DD` that is also a real day — "2026-13-45" and "2026-02-30" are
@@ -71,7 +74,7 @@ export default async function TransactionsPage({
     let query = supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, source_bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, source_bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id, reimbursed_cents, created_at, updated_at",
       )
       .eq("household_id", household.id);
     if (hasRange) {
@@ -171,6 +174,9 @@ export default async function TransactionsPage({
       cleared: t.cleared ?? false,
       isWithdrawal: t.is_withdrawal ?? false,
       splitGroupId: (t as { split_group_id?: string | null }).split_group_id ?? null,
+      reimbursedCents: t.reimbursed_cents ?? 0,
+      createdAt: t.created_at,
+      updatedAt: t.updated_at,
     };
   });
   attachSplitParts(transactions);

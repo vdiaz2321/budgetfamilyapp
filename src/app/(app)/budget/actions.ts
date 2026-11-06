@@ -2454,9 +2454,13 @@ export async function updateTransaction(formData: FormData) {
       "transactions",
     ) ?? {},
   );
+  // The modal's Clear / Unclear rides along with the save ("on" / "off"),
+  // so it costs no second server call. Absent = leave Cleared as it is.
+  const clearedPick = formData.get("cleared");
   unwrap(await supabase
     .from("transactions")
     .update({
+      ...(clearedPick === "on" || clearedPick === "off" ? { cleared: clearedPick === "on" } : {}),
       occurred_on: occurredOn,
       amount_cents: amountCents,
       category_id: sub.category_id,

@@ -513,6 +513,30 @@ function CreditCardSection({
   const travelOpen = groupOpen.travel !== false || focusedCategory === "travel" || (annivOn && travelCards.length > 0);
   const hotelOpen = groupOpen.hotel !== false || focusedCategory === "hotel" || (annivOn && hotelCards.length > 0);
   const otherOpen = groupOpen.other !== false || focusedCategory === "other" || (annivOn && otherCards.length > 0);
+  // Switching a filter on opens every group that still has a card in it, so
+  // the click lands on the matching cards instead of folded headers. Only on
+  // the change itself — a group can still be folded by hand afterwards.
+  const filterKey = [
+    showOnlyFeeCards, showOnlyOwedCards, showOnlyPtsCards, showOnlyTravelRedeem, showOnlyHotelRedeem,
+    showOnlyUnvalued, showOnlyExpiring, annivOn, holderFilter, bankFilter, openedFrom, openedTo,
+  ].join("|");
+  const anyFilterOn = showOnlyFeeCards || showOnlyOwedCards || showOnlyPtsCards || showOnlyTravelRedeem
+    || showOnlyHotelRedeem || showOnlyUnvalued || showOnlyExpiring || annivOn
+    || Boolean(holderFilter || bankFilter || openedFrom || openedTo);
+  const lastFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (lastFilterKey.current === filterKey) return;
+    lastFilterKey.current = filterKey;
+    if (!anyFilterOn) return;
+    setGroupOpen((state) => ({
+      ...state,
+      ...(travelCards.length > 0 && categoryFilter !== "hotel" ? { travel: true } : {}),
+      ...(hotelCards.length > 0 && categoryFilter !== "travel" ? { hotel: true } : {}),
+      ...(otherCards.length > 0 ? { other: true } : {}),
+    }));
+    // Keyed on the filter values only; the card lists follow from them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey]);
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   // The group's share of the stat tiles above: points held, what they are
@@ -881,7 +905,15 @@ function CreditCardSection({
                 <button
                   key={o.label}
                   type="button"
-                  onClick={() => setCategoryFilter(o.cat)}
+                  onClick={() => {
+                    setCategoryFilter(o.cat);
+                    // Show the cards the chip names: its group, or both for All.
+                    setGroupOpen((state) => ({
+                      ...state,
+                      ...(o.cat !== "hotel" ? { travel: true } : {}),
+                      ...(o.cat !== "travel" ? { hotel: true } : {}),
+                    }));
+                  }}
                   aria-pressed={active}
                   className={`rounded-md px-2.5 py-1 font-semibold text-foreground transition max-sm:min-h-9 ${
                     active ? "bg-surface shadow-sm" : "hover:bg-sky-200 dark:hover:bg-sky-800/60"
