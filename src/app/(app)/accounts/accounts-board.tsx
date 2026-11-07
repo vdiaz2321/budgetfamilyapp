@@ -10,7 +10,6 @@ import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments
 import { ModalShell } from "@/components/modal-shell";
 import { BalanceTransferModal } from "@/components/balance-transfer-modal";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
 import { FreeNightCapField, GripHandle, LabeledInput, PayCardModal, usePointerReorder, type LastCardPayment } from "./shared-ui";
 import {
   addAccount,
@@ -804,14 +803,6 @@ export function AccountsBoard({
     ),
   );
 
-  useRegisterMobilePageActions([
-    { label: "Month-end update", onSelect: () => setMonthEndOpen(true) },
-    { label: estateToFill > 0 ? `Estate guide (${estateToFill} to fill in)` : "Estate guide", onSelect: () => setEstateOpen(true) },
-    { label: "Add account", onSelect: () => setAddOpen(true) },
-    { label: "Move Money", onSelect: () => setTransferOpen(true) },
-    { label: "Transfer Activity", onSelect: () => setActivityOpen(true) },
-  ]);
-
   return (
     <SubtypeOptionsContext.Provider value={knownSubtypes}>
     <PropertyLinkContext.Provider
@@ -835,15 +826,16 @@ export function AccountsBoard({
              the only brand-coloured controls.
           3. The period filter — a round pill group pushed to the right,
              so it never reads as more buttons.
-          Below md the tools and actions move into the More sheet (registered
-          above) and only the filter stays in the header. */}
+          Below md each group takes a full row under the title, buttons
+          sharing the width — tucked in the More sheet they were never found
+          (Victor, 2026-11-07). */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 className="text-xl font-bold">Accounts</h1>
-        <div className="hidden items-center gap-1 rounded-lg bg-surface p-0.5 shadow-sm ring-1 ring-inset ring-line md:inline-flex">
+        <div className="flex w-full items-center gap-1 rounded-lg bg-surface p-0.5 shadow-sm ring-1 ring-inset ring-line md:inline-flex md:w-auto">
           <button
             type="button"
             onClick={() => setMonthEndOpen(true)}
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+            className="inline-flex min-h-7 flex-1 items-center justify-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-semibold leading-tight text-foreground transition hover:bg-sky-50 md:h-7 md:flex-none md:shrink-0 md:whitespace-nowrap md:px-2.5 md:py-0 dark:hover:bg-sky-950/40"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <rect x="3" y="4" width="18" height="17" rx="2" />
@@ -855,7 +847,7 @@ export function AccountsBoard({
           <button
             type="button"
             onClick={() => setEstateOpen(true)}
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+            className="inline-flex min-h-7 flex-1 items-center justify-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-semibold leading-tight text-foreground transition hover:bg-sky-50 md:h-7 md:flex-none md:shrink-0 md:whitespace-nowrap md:px-2.5 md:py-0 dark:hover:bg-sky-950/40"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M4 19.5V5a2 2 0 0 1 2-2h14v16H6.5a2.5 2.5 0 0 0 0 5H20" />
@@ -872,7 +864,7 @@ export function AccountsBoard({
           <button
             type="button"
             onClick={() => setActivityOpen(true)}
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+            className="inline-flex min-h-7 flex-1 items-center justify-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-semibold leading-tight text-foreground transition hover:bg-sky-50 md:h-7 md:flex-none md:shrink-0 md:whitespace-nowrap md:px-2.5 md:py-0 dark:hover:bg-sky-950/40"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
@@ -880,7 +872,7 @@ export function AccountsBoard({
             Transfer Activity
           </button>
         </div>
-        <div className="hidden items-center gap-2 md:flex">
+        <div className="flex w-full items-center gap-2 md:w-auto">
           {/* Every move between your own accounts — bank transfer, invest,
               withdraw — in one popup that works out which from From / To.
               Three buttons read as the same thing (Victor, 2026-10-27).
@@ -889,7 +881,7 @@ export function AccountsBoard({
           <button
             type="button"
             onClick={() => setTransferOpen(true)}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-surface px-3 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
+            className="inline-flex h-8 flex-1 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-surface px-3 md:flex-none text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
@@ -899,7 +891,7 @@ export function AccountsBoard({
           <button
             type="button"
             onClick={() => setAddOpen(true)}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-brand px-3 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
+            className="inline-flex h-8 flex-1 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-brand px-3 md:flex-none text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
